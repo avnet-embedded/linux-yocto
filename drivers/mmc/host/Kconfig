@@ -315,7 +315,7 @@ config MMC_SDHCI_ESDHC_MCF
 
 config MMC_SDHCI_ESDHC_IMX
 	tristate "SDHCI support for the Freescale eSDHC/uSDHC i.MX controller"
-	depends on ARCH_MXC || ARCH_S32 || COMPILE_TEST
+	depends on ARCH_MXC || ARCH_S32 || COMPILE_TEST || SOC_S32V234
 	depends on MMC_SDHCI_PLTFM
 	depends on OF
 	select MMC_SDHCI_IO_ACCESSORS
