@@ -19,6 +19,10 @@ config IMX8M_PM_DOMAINS
 	depends on PM
 	select PM_GENERIC_DOMAINS
 
+config IMX8M_BUSFREQ
+	bool "i.MX8M busfreq"
+	depends on SOC_IMX8M
+
 config SOC_IMX9
 	tristate "i.MX9 SoC family support"
 	depends on ARCH_MXC || COMPILE_TEST
