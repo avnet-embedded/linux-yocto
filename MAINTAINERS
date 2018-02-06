@@ -28198,6 +28198,13 @@ S:	Maintained
 F:	Documentation/devicetree/bindings/media/xilinx/xlnx,v-demosaic.yaml
 F:	drivers/media/platform/xilinx/xilinx-demosaic.c
 
+XILINX VIDEO MIXER DRIVER
+M:	Rajesh Gugulothu <rajesh.gugulothu@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/display/xlnx/xlnx,mixer.yaml
+F:	drivers/gpu/drm/xlnx/xlnx_mixer.c
+
 XILINX EVENT MANAGEMENT DRIVER
 M:	Michal Simek <michal.simek@amd.com>
 S:	Maintained
