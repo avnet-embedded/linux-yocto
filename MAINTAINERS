@@ -28190,6 +28190,13 @@ S:	Maintained
 F:	Documentation/devicetree/bindings/net/xlnx,axi-ethernet.yaml
 F:	drivers/net/ethernet/xilinx/xilinx_axienet*
 
+XLNX BRIDGE VTC DRIVER
+M:	Rajesh Gugulothu <rajesh.gugulothu@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/display/xlnx/xlnx,bridge-v-tc.yaml
+F:	drivers/gpu/drm/xlnx/xlnx_vtc.c
+
 XILINX CAN DRIVER
 M:	Appana Durga Kedareswara rao <appana.durga.rao@xilinx.com>
 L:	linux-can@vger.kernel.org
