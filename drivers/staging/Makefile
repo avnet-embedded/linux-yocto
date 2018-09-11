@@ -15,3 +15,4 @@ obj-$(CONFIG_BCM2835_VCHIQ)	+= vc04_services/
 obj-$(CONFIG_XIL_AXIS_FIFO)	+= axis-fifo/
 obj-$(CONFIG_GPIB)	 	+= gpib/
 obj-$(CONFIG_XILINX_FCLK)	+= fclk/
+obj-$(CONFIG_XROE_FRAMER)	+= xroeframer/
