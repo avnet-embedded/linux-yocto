@@ -28323,6 +28323,13 @@ S:	Maintained
 F:	drivers/pwm/pwm-xilinx.c
 F:	include/clocksource/timer-xilinx.h
 
+XILINX SCENECHANGE DRIVER
+M:	Asif Ikbal <asif.ikbal@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,v-scd.yaml
+F:	drivers/media/platform/xilinx/xilinx-scenechange.c
+
 XILINX SOUND DRIVERS
 M:	Vincenzo Frascino <vincenzo.frascino@arm.com>
 S:	Maintained
