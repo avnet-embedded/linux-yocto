@@ -17,6 +17,8 @@ obj-$(CONFIG_VIDEO_IMX_MEDIA) += imx6-media.o
 obj-$(CONFIG_VIDEO_IMX_MEDIA) += imx6-media-csi.o
 obj-$(CONFIG_VIDEO_IMX_MEDIA) += imx6-mipi-csi2.o
 
+obj-$(CONFIG_GMSL_MAX9286)       += gmsl-max9286.o
+
 obj-$(CONFIG_IMX8_CAPTURE_DRIVER) += imx8-capture.o
 obj-$(CONFIG_IMX8_ISI_CORE) += imx8-capture.o
 obj-$(CONFIG_IMX8_ISI_CAPTURE)           += imx8-isi-capture.o
