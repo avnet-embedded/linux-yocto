@@ -1,3 +1,4 @@
 obj-$(CONFIG_MXC_MIPI_CSI2) += mipi/
 obj-$(CONFIG_MXC_GPU_VIV) += gpu-viv/
 obj-$(CONFIG_MXC_MLB) += mlb/
+obj-$(CONFIG_MXC_SIM) += sim/
