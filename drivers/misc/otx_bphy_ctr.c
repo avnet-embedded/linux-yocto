@@ -209,8 +209,7 @@ static void cleanup_el3_irqs(struct task_struct *task)
 	for (i = 0; i < bphy_max_irq; i++) {
 		if (irq_installed[i] &&
 		    irq_installed_tasks[i] &&
-		    ((irq_installed_tasks[i] == task) ||
-			(irq_installed_tasks[i] == task->group_leader))) {
+		    (irq_installed_tasks[i] == task)) {
 			pr_alert("Exiting, removing handler for BPHY IRQ %d\n",
 				 i);
 			__remove_el3_inthandler(i);
