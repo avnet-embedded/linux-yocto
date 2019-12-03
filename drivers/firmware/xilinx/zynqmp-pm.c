@@ -35,6 +35,8 @@
 /* BOOT_PIN_CTRL_MASK- out_val[11:8], out_en[3:0] */
 #define CRL_APB_BOOTPIN_CTRL_MASK	0xF0FU
 
+static unsigned long register_address;
+
 int zynqmp_pm_register_sgi(u32 sgi_num, u32 reset)
 {
 	int ret;
@@ -733,6 +735,27 @@ int zynqmp_pm_init_finalize(void)
 {
 	return zynqmp_pm_invoke_fn(PM_PM_INIT_FINALIZE, NULL, 0);
 }
+
+/**
+ * zynqmp_pm_config_reg_access - PM Config API for Config register access
+ * @register_access_id:	ID of the requested REGISTER_ACCESS
+ * @address:		Address of the register to be accessed
+ * @mask:		Mask to be written to the register
+ * @value:		Value to be written to the register
+ * @out:		Returned output value
+ *
+ * This function calls REGISTER_ACCESS to configure CSU/PMU registers.
+ *
+ * Return:	Returns status, either success or error+reason
+ */
+int zynqmp_pm_config_reg_access(u32 register_access_id, u32 address,
+				u32 mask, u32 value, u32 *out)
+{
+	return zynqmp_pm_invoke_fn(PM_REGISTER_ACCESS, out, 4,
+				   register_access_id,
+				   address, mask, value);
+}
+EXPORT_SYMBOL_GPL(zynqmp_pm_config_reg_access);
 
 /**
  * zynqmp_pm_set_suspend_mode()	- Set system suspend mode
@@ -1535,9 +1558,157 @@ static const struct attribute *zynqmp_firmware_attrs[] = {
 	NULL,
 };
 
-int zynqmp_firmware_pm_sysfs_entry(struct platform_device *pdev)
+/**
+ * config_reg_store - Write config_reg sysfs attribute
+ * @kobj:	Kobject structure
+ * @attr:	Kobject attribute structure
+ * @buf:	User entered health_status attribute string
+ * @count:	Buffer size
+ *
+ * User-space interface for setting the config register.
+ *
+ * To write any CSU/PMU register
+ * echo <address> <mask> <values> > /sys/firmware/zynqmp/config_reg
+ * Usage:
+ * echo 0x345AB234 0xFFFFFFFF 0x1234ABCD > /sys/firmware/zynqmp/config_reg
+ *
+ * To Read any CSU/PMU register, write address to the variable like below
+ * echo <address> > /sys/firmware/zynqmp/config_reg
+ *
+ * Return:	count argument if request succeeds, the corresponding error
+ *		code otherwise
+ */
+static ssize_t config_reg_store(struct kobject *kobj,
+				struct kobj_attribute *attr,
+				const char *buf, size_t count)
+{
+	char *kern_buff, *inbuf, *tok;
+	unsigned long address, value, mask;
+	int ret;
+
+	kern_buff = kzalloc(count + 1, GFP_KERNEL);
+	if (!kern_buff)
+		return -ENOMEM;
+
+	ret = strscpy(kern_buff, buf, count + 1);
+	if (ret < 0) {
+		ret = -EFAULT;
+		goto err;
+	}
+
+	inbuf = kern_buff;
+
+	/* Read the addess */
+	tok = strsep(&inbuf, " ");
+	if (!tok) {
+		ret = -EFAULT;
+		goto err;
+	}
+	ret = kstrtol(tok, 16, &address);
+	if (ret) {
+		ret = -EFAULT;
+		goto err;
+	}
+	/* Read the write value */
+	tok = strsep(&inbuf, " ");
+	/*
+	 * If parameter provided is only address, then its a read operation.
+	 * Store the address in a global variable and retrieve whenever
+	 * required.
+	 */
+	if (!tok) {
+		register_address = address;
+		goto err;
+	}
+	register_address = address;
+
+	ret = kstrtol(tok, 16, &mask);
+	if (ret) {
+		ret = -EFAULT;
+		goto err;
+	}
+	tok = strsep(&inbuf, " ");
+	if (!tok) {
+		ret = -EFAULT;
+		goto err;
+	}
+	ret = kstrtol(tok, 16, &value);
+	if (ret) {
+		ret = -EFAULT;
+		goto err;
+	}
+	ret = zynqmp_pm_config_reg_access(CONFIG_REG_WRITE, address,
+					  mask, value, NULL);
+	if (ret)
+		pr_err("unable to write value to %lx\n", value);
+err:
+	kfree(kern_buff);
+	if (ret)
+		return ret;
+	return count;
+}
+
+/**
+ * config_reg_show - Read config_reg sysfs attribute
+ * @kobj:	Kobject structure
+ * @attr:	Kobject attribute structure
+ * @buf:	User entered health_status attribute string
+ *
+ * User-space interface for getting the config register.
+ *
+ * To Read any CSU/PMU register, write address to the variable like below
+ * echo <address> > /sys/firmware/zynqmp/config_reg
+ *
+ * Then Read the address using below command
+ * cat /sys/firmware/zynqmp/config_reg
+ *
+ * Return: number of chars written to buf.
+ */
+static ssize_t config_reg_show(struct kobject *kobj,
+			       struct kobj_attribute *attr,
+			       char *buf)
 {
 	int ret;
+	u32 ret_payload[PAYLOAD_ARG_CNT];
+
+	ret = zynqmp_pm_config_reg_access(CONFIG_REG_READ, register_address,
+					  0, 0, ret_payload);
+	if (ret)
+		return ret;
+
+	return sprintf(buf, "0x%x\n", ret_payload[1]);
+}
+
+static struct kobj_attribute zynqmp_attr_config_reg =
+					__ATTR_RW(config_reg);
+
+static struct attribute *attrs[] = {
+	&zynqmp_attr_config_reg.attr,
+	NULL,
+};
+
+static const struct attribute_group attr_group = {
+	.attrs = attrs,
+	NULL,
+};
+
+int zynqmp_firmware_pm_sysfs_entry(struct platform_device *pdev)
+{
+	struct kobject *zynqmp_kobj;
+	int ret;
+
+	zynqmp_kobj = kobject_create_and_add("zynqmp", firmware_kobj);
+	if (!zynqmp_kobj) {
+		pr_err("zynqmp: Firmware kobj add failed.\n");
+		return -ENOMEM;
+	}
+
+	ret = sysfs_create_group(zynqmp_kobj, &attr_group);
+	if (ret) {
+		pr_err("%s() sysfs creation fail with error %d\n",
+		       __func__, ret);
+		return ret;
+	}
 
 	ret = sysfs_create_files(&pdev->dev.kobj, zynqmp_firmware_attrs);
 	if (ret) {

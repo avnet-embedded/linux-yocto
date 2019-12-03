@@ -190,6 +190,8 @@ enum pm_api_id {
 	PM_CLOCK_GETPARENT = 44,
 	PM_FPGA_READ = 46,
 	PM_SECURE_AES = 47,
+	/* PM_REGISTER_ACCESS API */
+	PM_REGISTER_ACCESS = 52,
 	PM_EFUSE_ACCESS = 53,
 	PM_FEATURE_CHECK = 63,
 };
@@ -509,6 +511,11 @@ enum ospi_mux_select_type {
 	PM_OSPI_MUX_SEL_LINEAR = 1,
 };
 
+enum pm_register_access_id {
+	CONFIG_REG_WRITE = 0,
+	CONFIG_REG_READ = 1,
+};
+
 enum pm_feature_config_id {
 	PM_FEATURE_INVALID = 0,
 	PM_FEATURE_OVERTEMP_STATUS = 1,
@@ -617,6 +624,8 @@ int zynqmp_pm_set_requirement(const u32 node, const u32 capabilities,
 int zynqmp_pm_aes_engine(const u64 address, u32 *out);
 int zynqmp_pm_efuse_access(const u64 address, u32 *out);
 int zynqmp_pm_sha_hash(const u64 address, const u32 size, const u32 flags);
+int zynqmp_pm_config_reg_access(u32 register_access_id, u32 address, u32 mask,
+				u32 value, u32 *out);
 int zynqmp_pm_write_ggs(u32 index, u32 value);
 int zynqmp_pm_read_ggs(u32 index, u32 *value);
 int zynqmp_pm_write_pggs(u32 index, u32 value);
@@ -884,6 +893,13 @@ static inline int zynqmp_pm_pinctrl_get_config(const u32 pin, const u32 param,
 
 static inline int zynqmp_pm_pinctrl_set_config(const u32 pin, const u32 param,
 					       u32 value)
+{
+	return -ENODEV;
+}
+
+static inline int zynqmp_pm_config_reg_access(u32 register_access_id,
+					      u32 address, u32 mask, u32 value,
+					      u32 *out)
 {
 	return -ENODEV;
 }
