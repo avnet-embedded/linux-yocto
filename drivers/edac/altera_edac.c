@@ -278,6 +278,22 @@ release:
 	return ret;
 }
 
+static bool s10_is_ecc_enable(void)
+{
+	struct arm_smccc_res result;
+
+	arm_smccc_smc(INTEL_SIP_SMC_REG_READ, S10_ECCCTRL1_OFST, 0, 0, 0,
+		      0, 0, 0, &result);
+
+	if (A10_ECCCTRL1_ECC_EN & result.a1 == A10_ECCCTRL1_ECC_EN)
+		return true;
+	else {
+		edac_printk(KERN_ERR, EDAC_MC,
+			    "No ECC/ECC disabled [0x%08X]\n", result.a1);
+		return false;
+	}
+}
+
 static int altr_sdram_probe(struct platform_device *pdev)
 {
 	struct edac_mc_layer layers[2];
@@ -289,6 +305,10 @@ static int altr_sdram_probe(struct platform_device *pdev)
 	u32 read_reg;
 	int irq, irq2, res = 0;
 	unsigned long mem_size, irqflags = 0;
+
+	if (of_machine_is_compatible("altr,socfpga-stratix10"))
+		if (!s10_is_ecc_enable())
+			return -ENODEV;
 
 	/* Grab the register range from the sdr controller in device tree */
 	mc_vbase = syscon_regmap_lookup_by_phandle(pdev->dev.of_node,
