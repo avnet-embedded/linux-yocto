@@ -3,3 +3,4 @@
 
 obj-$(CONFIG_ZYNQMP_FIRMWARE) += zynqmp-core.o zynqmp-crypto.o zynqmp-fpga.o zynqmp-nvm.o zynqmp-pdi.o zynqmp-pm.o zynqmp-sem.o zynqmp-ufs.o
 obj-$(CONFIG_ZYNQMP_FIRMWARE_DEBUG) += zynqmp-debug.o
+obj-$(CONFIG_ZYNQMP_FIRMWARE_SECURE) += zynqmp-secure.o

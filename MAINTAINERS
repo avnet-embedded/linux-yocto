@@ -28287,6 +28287,11 @@ T:	git https://github.com/Xilinx/linux-xlnx.git
 F:	Documentation/devicetree/bindings/phy/xlnx,zynqmp-psgtr.yaml
 F:	drivers/phy/xilinx/phy-zynqmp.c
 
+XILINX ZYNQMP SECURE FW LOAD
+M:	Harsh Jain <h.jain@amd.com>
+S:	Supported
+F:	drivers/firmware/xilinx/zynqmp-secure.c
+
 XILINX ZYNQMP SHA3 DRIVER
 M:	Harsha <harsha.harsha@amd.com>
 S:	Maintained
