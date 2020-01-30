@@ -9,9 +9,15 @@
 #define __FIRMWARE_ZYNQMP_SECURE_H__
 
 #if IS_REACHABLE(CONFIG_ZYNQMP_FIRMWARE)
+int zynqmp_pm_secure_load(const u64 src_addr, u64 key_addr, u64 *dst);
 int zynqmp_pm_sha_hash(const u64 address, const u32 size, const u32 flags);
 int zynqmp_pm_aes_engine(const u64 address, u32 *out);
 #else
+static inline int zynqmp_pm_secure_load(const u64 src_addr, u64 key_addr, u64 *dst)
+{
+	return -ENODEV;
+}
+
 static inline int zynqmp_pm_sha_hash(const u64 address, const u32 size,
 				     const u32 flags)
 {
