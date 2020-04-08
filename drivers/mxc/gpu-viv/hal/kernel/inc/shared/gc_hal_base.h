@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2019 Vivante Corporation
+*    Copyright (c) 2014 - 2020 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -53,87 +53,53 @@
 *****************************************************************************/
 
 
-#ifndef _GC_HAL_TA_HARDWARE_H_
-#define _GC_HAL_TA_HARDWARE_H_
-#include "shared/gc_hal_types.h"
-#include "gc_hal_security_interface.h"
+#ifndef __gc_hal_base_shared_h_
+#define __gc_hal_base_shared_h_
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef struct _gcsMMU_TABLE_ARRAY_ENTRY
+#define gcdEXTERNAL_MEMORY_NAME_MAX 32
+#define gcdEXTERNAL_MEMORY_DATA_MAX 8
+
+typedef struct _gcsEXTERNAL_MEMORY_INFO
 {
-    gctUINT32                   low;
-    gctUINT32                   high;
-}
-gcsMMU_TABLE_ARRAY_ENTRY;
+    /* Name of allocator used to attach this memory. */
+    gctCHAR                allocatorName[gcdEXTERNAL_MEMORY_NAME_MAX];
 
-typedef struct _gcsHARDWARE_PAGETABLE_ARRAY
+    /* User defined data which will be passed to allocator. */
+    gctUINT32              userData[gcdEXTERNAL_MEMORY_DATA_MAX];
+}
+gcsEXTERNAL_MEMORY_INFO;
+
+#define gcdBINARY_TRACE_MESSAGE_SIZE 240
+
+typedef struct _gcsBINARY_TRACE_MESSAGE * gcsBINARY_TRACE_MESSAGE_PTR;
+typedef struct _gcsBINARY_TRACE_MESSAGE
 {
-    /* Number of entries in page table array. */
-    gctUINT                     num;
-
-    /* Size in bytes of array. */
-    gctSIZE_T                   size;
-
-    /* Physical address of array. */
-    gctPHYS_ADDR_T              address;
-
-    /* Memory descriptor. */
-    gctPOINTER                  physical;
-
-    /* Logical address of array. */
-    gctPOINTER                  logical;
+    gctUINT32   signature;
+    gctUINT32   pid;
+    gctUINT32   tid;
+    gctUINT32   line;
+    gctUINT32   numArguments;
+    gctUINT8    payload;
 }
-gcsHARDWARE_PAGETABLE_ARRAY;
+gcsBINARY_TRACE_MESSAGE;
 
-typedef struct _gcsHARWARE_FUNCTION
+/* gcsOBJECT object defintinon. */
+typedef struct _gcsOBJECT
 {
-    /* Entry of the function. */
-    gctUINT32                   address;
-
-    /* CPU address of the function. */
-    gctUINT8_PTR                logical;
-
-    /* Bytes of the function. */
-    gctUINT32                   bytes;
-
-    /* Hardware address of END in this function. */
-    gctUINT32                   endAddress;
-
-    /* Logical of END in this function. */
-    gctUINT8_PTR                endLogical;
+    /* Type of an object. */
+    gceOBJECT_TYPE              type;
 }
-gcsHARDWARE_FUNCTION;
-
-typedef struct _gcTA_HARDWARE
-{
-    gctaOS                      os;
-    gcTA                        ta;
-
-    gctUINT32                   chipModel;
-    gctUINT32                   chipRevision;
-    gctUINT32                   productID;
-    gctUINT32                   ecoID;
-    gctUINT32                   customerID;
-
-    gctPOINTER                  featureDatabase;
-
-    gcsHARDWARE_PAGETABLE_ARRAY pagetableArray;
-
-    /* Function used by gctaHARDWARE. */
-    gctPHYS_ADDR                functionPhysical;
-    gctPOINTER                  functionLogical;
-    gctUINT32                   functionAddress;
-    gctSIZE_T                   functionBytes;
-
-    gcsHARDWARE_FUNCTION        functions[1];
-}
-gcsTA_HARDWARE;
+gcsOBJECT;
 
 #ifdef __cplusplus
 }
 #endif
-#endif
+
+#endif /* __gc_hal_base_shared_h_ */
+
+
 
