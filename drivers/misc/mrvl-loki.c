@@ -18,6 +18,8 @@
 #include <linux/platform_device.h>
 #include <linux/pci.h>
 
+#include "mrvl-loki.h"
+
 #define PCI_DEVICE_ID_BPHY	0xA089
 
 #define PSM_GPINT0_SUM_W1C	0x0ULL
@@ -31,8 +33,6 @@
 #define CPRI_MAX_MHAB		3
 #define CONNIP_MAX_INST		5
 #define CPRI_INT_MASK		0x1F
-
-typedef int (*connip_irq_cb_t)(uint32_t instance, uint32_t pss_int);
 
 struct mrvl_loki {
 	struct pci_dev *pdev;
@@ -60,6 +60,12 @@ int mrvl_loki_register_irq_cb(connip_irq_cb_t func)
 	return 0;
 }
 EXPORT_SYMBOL(mrvl_loki_register_irq_cb);
+
+void mrvl_loki_unregister_irq_cb(void)
+{
+	g_ml->irq_cb = NULL;
+}
+EXPORT_SYMBOL(mrvl_loki_unregister_irq_cb);
 
 static irqreturn_t mrvl_loki_handler(int irq, void *dev)
 {
