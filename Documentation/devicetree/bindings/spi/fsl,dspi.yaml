@@ -23,6 +23,7 @@ properties:
           - fsl,ls2080a-dspi
           - fsl,ls2085a-dspi
           - fsl,lx2160a-dspi
+          - nxp,s32cc-dspi
       - items:
           - enum:
               - fsl,ls1012a-dspi
@@ -72,6 +73,11 @@ properties:
   bus-num:
     $ref: /schemas/types.yaml#/definitions/uint32
     description: SoC-specific identifier for the SPI controller.
+
+  spi-slave:
+    description:
+      spi slave mode support. In slave mode, add this attribute without
+      value. In master mode, remove it.
 
 required:
   - compatible
