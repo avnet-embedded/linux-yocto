@@ -28333,6 +28333,15 @@ S:	Maintained
 F:	Documentation/devicetree/bindings/media/xilinx/xlnx,v-multi-scaler.yaml
 F:	drivers/media/platform/xilinx/xilinx-multi-scaler.c
 
+XILINX HDMI21RXSS DRIVER
+M:	Rajesh Gugulothu <rajesh.gugulothu@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,v-hdmi-rxss1.yaml
+F:	drivers/media/platform/xilinx/xilinx-hdmirxss.c
+F:	drivers/media/platform/xilinx/xilinx-hdmirx-hw.h
+
 XILINX AXI4S BROADCASTER DRIVER
 M:	Kunal Rane <kunal.rane@amd.com>
 L:	git@amd.com
