@@ -286,6 +286,7 @@ static bool pci_endpoint_test_bar(struct pci_endpoint_test *test,
 	void *write_buf __free(kfree) = NULL;
 	void *read_buf __free(kfree) = NULL;
 	struct pci_dev *pdev = test->pdev;
+	struct device *dev = &pdev->dev;
 
 	bar_size = pci_resource_len(pdev, barno);
 	if (!bar_size)
@@ -294,6 +295,7 @@ static bool pci_endpoint_test_bar(struct pci_endpoint_test *test,
 	if (!test->bar[barno])
 		return false;
 
+	dev_info(dev, "Testing BAR%d, size %d bytes\n", barno, bar_size);
 	if (barno == test->test_reg_bar)
 		bar_size = 0x4;
 
@@ -312,16 +314,24 @@ static bool pci_endpoint_test_bar(struct pci_endpoint_test *test,
 		return false;
 
 	iters = bar_size / buf_size;
-	for (j = 0; j < iters; j++)
+	for (j = 0; j < iters; j++) {
 		if (pci_endpoint_test_bar_memcmp(test, barno, buf_size * j,
-						 write_buf, read_buf, buf_size))
+						 write_buf, read_buf, buf_size)) {
+			dev_warn(dev, "BAR%d test failed at index %d\n",
+				 barno, j);
 			return false;
+		}
+	}
 
 	remain = bar_size % buf_size;
-	if (remain)
+	if (remain) {
 		if (pci_endpoint_test_bar_memcmp(test, barno, buf_size * iters,
-						 write_buf, read_buf, remain))
+						 write_buf, read_buf, remain)) {
+			dev_warn(dev, "BAR%d test failed at index %d\n",
+				 barno, iters);
 			return false;
+		}
+	}
 
 	return true;
 }
