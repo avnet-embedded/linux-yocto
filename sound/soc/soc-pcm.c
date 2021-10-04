@@ -1659,7 +1659,13 @@ int dpcm_be_dai_startup(struct snd_soc_pcm_runtime *fe, int stream)
 		if (be->dpcm[stream].users++ != 0)
 			continue;
 
-		if ((be->dpcm[stream].state != SND_SOC_DPCM_STATE_NEW) &&
+		/*
+		 * Filter for systems with 'component_chaining' enabled.
+		 * This helps to avoid unnecessary re-configuration of an
+		 * already active BE on such systems.
+		 */
+		if (fe->card->component_chaining &&
+		    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_NEW) &&
 		    (be->dpcm[stream].state != SND_SOC_DPCM_STATE_CLOSE))
 			continue;
 
