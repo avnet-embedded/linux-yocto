@@ -277,6 +277,17 @@ config SPI_CADENCE_XSPI
 	  device with a Cadence XSPI controller and want to access the
 	  Flash as an MTD device.
 
+config SPI_CADENCE_MRVL_XSPI
+	tristate "Marvell mods for XSPI controller"
+	depends on SPI_CADENCE_XSPI
+
+	help
+	  Enable support for Marvell XSPI modifications
+
+	  During implementation of Cadence XSPI core Marvell
+	  has added some additional features. Enable that
+	  option if you want to enable these features.
+
 config SPI_CH341
 	tristate "CH341 USB2SPI adapter"
 	depends on SPI_MASTER && USB

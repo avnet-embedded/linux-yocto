@@ -290,6 +290,12 @@
 #define CDNS_XSPI_POLL_TIMEOUT_US	1000
 #define CDNS_XSPI_POLL_DELAY_US	10
 
+#if IS_ENABLED(CONFIG_SPI_CADENCE_MRVL_XSPI)
+/* MSI-X clear interrupt register */
+#define CDNS_XSPI_SPIX_INTR_AUX				0x2000
+#define CDNS_MSIX_CLEAR_IRQ					0x01
+#endif
+
 enum cdns_xspi_stig_instr_type {
 	CDNS_XSPI_STIG_INSTR_TYPE_0,
 	CDNS_XSPI_STIG_INSTR_TYPE_1,
@@ -575,6 +581,9 @@ static int cdns_xspi_controller_init(struct cdns_xspi_dev *cdns_xspi)
 			hw_magic_num, CDNS_XSPI_MAGIC_NUM_VALUE);
 		return -EIO;
 	}
+
+	writel(FIELD_PREP(CDNS_XSPI_CTRL_WORK_MODE, CDNS_XSPI_WORK_MODE_STIG),
+	       cdns_xspi->iobase + CDNS_XSPI_CTRL_CONFIG_REG);
 
 	ctrl_features = readl(cdns_xspi->iobase + CDNS_XSPI_CTRL_FEATURES_REG);
 	cdns_xspi->hw_num_banks = FIELD_GET(CDNS_XSPI_NUM_BANKS, ctrl_features);
@@ -907,6 +916,10 @@ static irqreturn_t cdns_xspi_irq_handler(int this_irq, void *dev)
 
 	irq_status = readl(cdns_xspi->iobase + CDNS_XSPI_INTR_STATUS_REG);
 	writel(irq_status, cdns_xspi->iobase + CDNS_XSPI_INTR_STATUS_REG);
+
+#if IS_ENABLED(CONFIG_SPI_CADENCE_MRVL_XSPI)
+	writel(CDNS_MSIX_CLEAR_IRQ, cdns_xspi->auxbase + CDNS_XSPI_SPIX_INTR_AUX);
+#endif
 
 	if (irq_status &
 	    (CDNS_XSPI_SDMA_ERROR | CDNS_XSPI_SDMA_TRIGGER |
