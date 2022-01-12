@@ -124,6 +124,16 @@
 #define SD_OTAPDLYSEL	0xFF180318
 
 /**
+ * XPM_VERSAL_EVENT_ERROR_MASK_AIE_CR: Error event mask for ME Correctable Error.
+ */
+#define XPM_VERSAL_EVENT_ERROR_MASK_AIE_CR	BIT(16)
+
+/**
+ * XPM_VERSAL_EVENT_ERROR_MASK_AIE_NCR: Error event mask for ME Non-Correctable Error.
+ */
+#define XPM_VERSAL_EVENT_ERROR_MASK_AIE_NCR	BIT(17)
+
+/**
  * XPM_EVENT_ERROR_MASK_DDRMC_CR: Error event mask for DDRMC MC Correctable ECC Error.
  */
 #define XPM_EVENT_ERROR_MASK_DDRMC_CR		BIT(18)
@@ -146,6 +156,37 @@ enum pm_module_id {
 	XPM_MODULE_ID = 0x2,
 	XSEM_MODULE_ID = 0x3,
 	TF_A_MODULE_ID = 0xa,
+};
+
+/* AIE Operation */
+enum pm_aie_operations {
+	XILINX_AIE_OPS_MIN = 0U,
+	XILINX_AIE_OPS_COL_RST = 1U,
+	XILINX_AIE_OPS_SHIM_RST = 2U,
+	XILINX_AIE_OPS_UC_ZEROIZATION = 3U,
+	XILINX_AIE_OPS_ENB_COL_CLK_BUFF = 4U,
+	XILINX_AIE_OPS_HANDSHAKE = 5U,
+	XILINX_AIE_OPS_CLR_HW_ERR_STS = 6U,
+	XILINX_AIE_OPS_START_NUM_COL = 7U,
+	XILINX_AIE_OPS_ZEROISATION = 8U,
+	XILINX_AIE_OPS_AXIMM_ISOLATION = 9U,
+	XILINX_AIE_OPS_NMU_CONFIG = 10U,
+	XILINX_AIE_OPS_DIS_MEM_PRIV = 11U,
+	XILINX_AIE_OPS_DIS_MEM_INTERLEAVE = 12U,
+	XILINX_AIE_OPS_ENB_UC_DMA_PAUSE = 13U,
+	XILINX_AIE_OPS_ENB_NOC_DMA_PAUSE = 14U,
+	XILINX_AIE_OPS_SET_ECC_SCRUB_PERIOD = 15U,
+	XILINX_AIE_OPS_DIS_COL_CLK_BUFF = 16U,
+	XILINX_AIE_OPS_HW_ERR_INT = 17U,
+	XILINX_AIE_OPS_HW_ERR_MASK = 18U,
+	XILINX_AIE_OPS_ENB_MEM_PRIV = 19U,
+	XILINX_AIE_OPS_CTRL_PKT_TLAST_ERR = 20U,
+	XILINX_AIE_OPS_ENB_AXI_MM_ERR_EVENT = 32U,     /* Backward compatibility for AIE1/AIE2 */
+	XILINX_AIE_OPS_SET_L2_CTRL_NPI_INTR = 64U,     /* Backward compatibility for AIE1/AIE2 */
+	XILINX_AIE_OPS_PROG_MEM_ZEROIZATION = 128U,    /* Backward compatibility for AIE1/AIE2 */
+	XILINX_AIE_OPS_DATA_MEM_ZEROIZATION = 256U,    /* Backward compatibility for AIE1/AIE2 */
+	XILINX_AIE_OPS_MEM_TILE_ZEROIZATION = 512U,    /* Backward compatibility for AIE1/AIE2 */
+	XILINX_AIE_OPS_MAX = 1023U,                    /* Backward compatibility for AIE1/AIE2 */
 };
 
 enum pm_api_cb_id {
@@ -246,8 +287,12 @@ enum pm_ioctl_id {
 	/* Dynamic SD/GEM configuration */
 	IOCTL_SET_SD_CONFIG = 30,
 	IOCTL_SET_GEM_CONFIG = 31,
+	/* AIE/AIEML Operations */
+	IOCTL_AIE_OPS = 33,
 	/* IOCTL to get default/current QoS */
 	IOCTL_GET_QOS = 34,
+	/* AIE2PS Operations */
+	IOCTL_AIE2PS_OPS = 39,
 };
 
 enum pm_query_id {
@@ -670,7 +715,9 @@ int zynqmp_pm_set_sd_config(u32 node, enum pm_sd_config_type config, u32 value);
 int zynqmp_pm_set_gem_config(u32 node, enum pm_gem_config_type config,
 			     u32 value);
 int zynqmp_pm_get_last_reset_reason(u32 *reset_reason);
+int zynqmp_pm_aie_operation(u32 node, u16 start_col, u16 num_col, u32 operation);
 int zynqmp_pm_get_qos(u32 node, u32 *const def_qos, u32 *const qos);
+int versal2_pm_aie2ps_operation(u32 node, u32 size, u32 addr_high, u32 addr_low);
 int zynqmp_pm_clear_tfa_state(void);
 #else
 static inline int zynqmp_pm_get_api_version(u32 *version)
@@ -1015,6 +1062,18 @@ static inline int zynqmp_pm_set_gem_config(u32 node,
 }
 
 static inline int zynqmp_pm_get_last_reset_reason(u32 *reset_reason)
+{
+	return -ENODEV;
+}
+
+static inline int zynqmp_pm_aie_operation(u32 node, u16 start_col,
+					  u16 num_col, u32 operation)
+{
+	return -ENODEV;
+}
+
+static inline int versal2_pm_aie2ps_operation(u32 node, u32 size, u32 addr_high,
+					      u32 addr_low)
 {
 	return -ENODEV;
 }
