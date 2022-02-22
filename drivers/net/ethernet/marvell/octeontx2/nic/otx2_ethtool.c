@@ -381,6 +381,7 @@ static void otx2_get_ringparam(struct net_device *netdev,
 	ring->tx_max_pending = Q_COUNT(Q_SIZE_MAX);
 	ring->tx_pending = qs->sqe_cnt ? qs->sqe_cnt : Q_COUNT(Q_SIZE_4K);
 	kernel_ring->rx_buf_len = pfvf->hw.rbuf_len;
+	kernel_ring->cqe_size = pfvf->hw.xqe_size;
 }
 
 static int otx2_set_ringparam(struct net_device *netdev,
@@ -391,6 +392,7 @@ static int otx2_set_ringparam(struct net_device *netdev,
 	struct otx2_nic *pfvf = netdev_priv(netdev);
 	u32 rx_buf_len = kernel_ring->rx_buf_len;
 	u32 old_rx_buf_len = pfvf->hw.rbuf_len;
+	u32 xqe_size = kernel_ring->cqe_size;
 	bool if_up = netif_running(netdev);
 	struct otx2_qset *qs = &pfvf->qset;
 	u32 rx_count, tx_count;
@@ -404,6 +406,12 @@ static int otx2_set_ringparam(struct net_device *netdev,
 	if (rx_buf_len && (rx_buf_len < 1536 || rx_buf_len > 32768)) {
 		netdev_err(netdev,
 			   "Receive buffer range is 1536 - 32768");
+		return -EINVAL;
+	}
+
+	if (xqe_size != 128 && xqe_size != 512) {
+		netdev_err(netdev,
+			   "Completion event size must be 128 or 512");
 		return -EINVAL;
 	}
 
@@ -425,7 +433,7 @@ static int otx2_set_ringparam(struct net_device *netdev,
 	tx_count = Q_COUNT(Q_SIZE(tx_count, 3));
 
 	if (tx_count == qs->sqe_cnt && rx_count == qs->rqe_cnt &&
-	    rx_buf_len == old_rx_buf_len)
+	    rx_buf_len == old_rx_buf_len && xqe_size == pfvf->hw.xqe_size)
 		return 0;
 
 	if (if_up)
@@ -436,6 +444,7 @@ static int otx2_set_ringparam(struct net_device *netdev,
 	qs->rqe_cnt = rx_count;
 
 	pfvf->hw.rbuf_len = rx_buf_len;
+	pfvf->hw.xqe_size = xqe_size;
 
 	if (if_up)
 		return netdev->netdev_ops->ndo_open(netdev);
@@ -1237,7 +1246,8 @@ end:
 static const struct ethtool_ops otx2_ethtool_ops = {
 	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
 				     ETHTOOL_COALESCE_MAX_FRAMES,
-	.supported_ring_params  = ETHTOOL_RING_USE_RX_BUF_LEN,
+	.supported_ring_params  = ETHTOOL_RING_USE_RX_BUF_LEN |
+				  ETHTOOL_RING_USE_CQE_SIZE,
 	.get_link		= otx2_get_link,
 	.get_drvinfo		= otx2_get_drvinfo,
 	.get_strings		= otx2_get_strings,
@@ -1357,7 +1367,8 @@ static int otx2vf_get_link_ksettings(struct net_device *netdev,
 static const struct ethtool_ops otx2vf_ethtool_ops = {
 	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
 				     ETHTOOL_COALESCE_MAX_FRAMES,
-	.supported_ring_params  = ETHTOOL_RING_USE_RX_BUF_LEN,
+	.supported_ring_params  = ETHTOOL_RING_USE_RX_BUF_LEN |
+				  ETHTOOL_RING_USE_CQE_SIZE,
 	.get_link		= otx2_get_link,
 	.get_drvinfo		= otx2vf_get_drvinfo,
 	.get_strings		= otx2vf_get_strings,
