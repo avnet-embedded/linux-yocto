@@ -23,3 +23,22 @@
 	/* Connected to KSZ9031 MDIO_A */
 	phy-handle = <&mdio_a_phy1>;
 };
+
+&gmac0_mdio {
+	/* AQR107 */
+	gmac_mdio_a_phy3: ethernet-phy@3 {
+		compatible = "ethernet-phy-ieee802.3-c45";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		/*
+		 * Warning: from board rev D it is subject
+		 * for eth fixup: addr changed to 0x8
+		 */
+		reg = <3>;
+	};
+};
+
+&pfe_netif1 {
+	phy-mode = "sgmii";
+	phy-handle = <&gmac_mdio_a_phy3>;
+};
