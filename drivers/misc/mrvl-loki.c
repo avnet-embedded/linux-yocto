@@ -31,8 +31,8 @@
 #define CPRI_IP_AXI_INT(a)		(0x108ULL | a << 10)
 
 #define CPRI_MAX_MHAB		3
-#define CONNIP_MAX_INST		5
-#define CPRI_INT_MASK		0x1F
+#define CONNIP_MAX_INST		6
+#define CPRI_INT_MASK		0x3F
 
 struct mrvl_loki {
 	struct pci_dev *pdev;
