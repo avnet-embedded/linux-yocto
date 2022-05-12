@@ -15,10 +15,6 @@
 				 "arm,vexpress,v2p-aarch64", "arm,vexpress";
 };
 
-&usdhc0 {
-	no-1-8-v;
-};
-
 &gmac0 {
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl0_gmac0_rgmii_a &pinctrl0_gmac0_mdio_a>;
