@@ -28197,6 +28197,12 @@ S:	Maintained
 F:	Documentation/devicetree/bindings/display/xlnx/xlnx,bridge-v-tc.yaml
 F:	drivers/gpu/drm/xlnx/xlnx_vtc.c
 
+XILINX MEDIA HDCP DRIVER
+M:	Lakshmi Prasanna Eachuri <lakshmi.prasanna.eachuri@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+S:	Maintained
+F:	drivers/media/platform/xilinx/xilinx-hdcp*
+
 XILINX CAN DRIVER
 M:	Appana Durga Kedareswara rao <appana.durga.rao@xilinx.com>
 L:	linux-can@vger.kernel.org
