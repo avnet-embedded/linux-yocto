@@ -54,7 +54,6 @@
 #include <linux/uaccess.h>
 #include <linux/siphash.h>
 #include <linux/uio.h>
-#include <linux/locallock.h>
 #include <crypto/chacha20.h>
 #include <crypto/blake2s.h>
 #include <asm/processor.h>
@@ -236,7 +235,6 @@ struct crng {
 static DEFINE_PER_CPU(struct crng, crngs) = {
 	.generation = ULONG_MAX
 };
-DEFINE_LOCAL_IRQ_LOCK(crngs_lock);
 
 /* Used by crng_reseed() and crng_make_state() to extract a new seed from the input pool. */
 static void extract_entropy(void *buf, size_t len);
@@ -365,7 +363,7 @@ static void crng_make_state(u32 chacha_state[CHACHA20_BLOCK_SIZE / sizeof(u32)],
 	if (unlikely(crng_has_old_seed()))
 		crng_reseed();
 
-	local_lock_irqsave(crngs_lock, flags);
+	local_irq_save(flags);
 	crng = raw_cpu_ptr(&crngs);
 
 	/*
@@ -390,7 +388,7 @@ static void crng_make_state(u32 chacha_state[CHACHA20_BLOCK_SIZE / sizeof(u32)],
 	 * should wind up here immediately.
 	 */
 	crng_fast_key_erasure(crng->key, chacha_state, random_data, random_data_len);
-	local_unlock_irqrestore(crngs_lock, flags);
+	local_irq_restore(flags);
 }
 
 static void _get_random_bytes(void *buf, size_t len)
@@ -515,7 +513,6 @@ struct batch_ ##type {								\
 static DEFINE_PER_CPU(struct batch_ ##type, batched_entropy_ ##type) = {	\
 	.position = UINT_MAX							\
 };										\
-static DEFINE_LOCAL_IRQ_LOCK(batched_entropy_lock_ ##type);			\
 										\
 type get_random_ ##type(void)							\
 {										\
@@ -531,7 +528,7 @@ type get_random_ ##type(void)							\
 		return ret;							\
 	}									\
 										\
-	local_lock_irqsave(batched_entropy_lock_ ##type, flags);		\
+	local_irq_save(flags);		\
 	batch = raw_cpu_ptr(&batched_entropy_##type);				\
 										\
 	next_gen = READ_ONCE(base_crng.generation);				\
@@ -545,7 +542,7 @@ type get_random_ ##type(void)							\
 	ret = batch->entropy[batch->position];					\
 	batch->entropy[batch->position] = 0;					\
 	++batch->position;							\
-	local_unlock_irqrestore(batched_entropy_lock_ ##type, flags);		\
+	local_irq_restore(flags);		\
 	return ret;								\
 }										\
 EXPORT_SYMBOL(get_random_ ##type);
