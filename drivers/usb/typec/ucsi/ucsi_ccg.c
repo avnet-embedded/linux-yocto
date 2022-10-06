@@ -1417,6 +1417,7 @@ static int ucsi_ccg_probe(struct i2c_client *client)
 	struct device *dev = &client->dev;
 	struct ucsi_ccg *uc;
 	const char *fw_name;
+	const char *of_fw_build;
 	int status;
 
 	uc = devm_kzalloc(dev, sizeof(*uc), GFP_KERNEL);
@@ -1440,6 +1441,17 @@ static int ucsi_ccg_probe(struct i2c_client *client)
 			uc->fw_build = CCG_FW_BUILD_NVIDIA;
 		if (!uc->fw_build)
 			dev_err(uc->dev, "failed to get FW build information\n");
+	}
+
+	status = device_property_read_string(dev, "cypress,firmware-build",
+					  &of_fw_build);
+	if (!status) {
+		if (!strcmp(of_fw_build, "nvidia,jetson-agx-xavier"))
+			uc->fw_build = CCG_FW_BUILD_NVIDIA_TEGRA;
+		else if (!strcmp(of_fw_build, "nvidia,gpu"))
+			uc->fw_build = CCG_FW_BUILD_NVIDIA;
+	} else {
+		dev_err(uc->dev, "failed to get FW build information\n");
 	}
 
 	/* reset ccg device and initialize ucsi */
