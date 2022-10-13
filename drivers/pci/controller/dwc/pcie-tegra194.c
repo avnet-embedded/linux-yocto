@@ -1709,11 +1709,15 @@ fail_pm_get_sync:
 
 static void pex_ep_event_pex_rst_assert(struct tegra_pcie_dw *pcie)
 {
+	struct dw_pcie *pci = &pcie->pci;
+	struct dw_pcie_ep *ep = &pci->ep;
 	u32 val;
 	int ret;
 
 	if (pcie->ep_state == EP_STATE_DISABLED)
 		return;
+
+	dw_pcie_ep_deinit_notify(ep);
 
 	/* Disable LTSSM */
 	val = appl_readl(pcie, APPL_CTRL);
