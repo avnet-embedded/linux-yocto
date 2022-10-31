@@ -27,6 +27,7 @@
 #include "coresight-priv.h"
 #include "coresight-syscfg.h"
 #include "coresight-trace-id.h"
+#include "coresight-tmc.h"
 
 /*
  * Mutex used to lock all sysfs enable and disable actions and loading and

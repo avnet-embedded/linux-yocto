@@ -41,7 +41,11 @@ extern const struct device_type coresight_dev_type[];
 #define CORESIGHT_CLAIM_SELF_HOSTED	2
 #define CORESIGHT_CLAIM_INVALID		3
 
-#define TIMEOUT_US		100
+/*
+ * Timeout is in ms to accommodate longer time taken
+ * by ETR hardware on OcteonTX2 implementation.
+ */
+#define TIMEOUT_US		5000
 #define BMVAL(val, lsb, msb)	((val & GENMASK(msb, lsb)) >> lsb)
 
 #define ETM_MODE_EXCL_KERN	BIT(30)
