@@ -6972,6 +6972,7 @@ static int stmmac_hw_init(struct stmmac_priv *priv)
 	if (priv->plat->pmt) {
 		dev_info(priv->device, "Wake-Up On Lan supported\n");
 		device_set_wakeup_capable(priv->device, 1);
+		device_set_wakeup_enable(priv->device, 1);
 	}
 
 	if (priv->dma_cap.tsoen)

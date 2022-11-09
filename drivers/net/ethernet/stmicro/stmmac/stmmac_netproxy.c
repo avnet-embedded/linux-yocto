@@ -203,19 +203,6 @@ static int stmmac_netprox_resume(struct stmmac_priv *priv,
 }
 
 /**
- * stmmac_netproxy_wakeup_enable - stmmac network proxy wakeup enable function
- * @ndev: net device structure
- * @enable: 1: enable; 0: disable
- * Description: Enable/disable Network Proxy to wake up system
- */
-static void stmmac_netproxy_wakeup_enable(struct net_device *ndev, bool enable)
-{
-	struct stmmac_priv *priv = netdev_priv(ndev);
-
-	device_set_wakeup_enable(priv->device, enable);
-}
-
-/**
  * stmmac_netproxy_register - register to network proxy framework
  * @ndev: net device structure
  * Description: register to network proxy framework after stmmac_open() success
@@ -234,7 +221,6 @@ int stmmac_netproxy_register(struct net_device *ndev)
 	INIT_WORK(&priv->netprox_task, netprox_resume_task);
 
 	np_netdev.netdev = ndev;
-	np_netdev.proxy_wakeup_enable = &stmmac_netproxy_wakeup_enable;
 
 	/* TODO: check registration is success */
 	netprox_register_netdev(&np_netdev, NULL, 0);
