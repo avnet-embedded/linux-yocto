@@ -254,7 +254,7 @@ config STMMAC_PCI
 	  If unsure, say N.
 
 config STMMAC_NETWORK_PROXY
-	bool "STMMAC Network Proxy support"
+	tristate "STMMAC Network Proxy support"
 	depends on STMMAC_ETH && STMMAC_PCI && NETWORK_PROXY
 	help
 	  This selects the Network Proxy support for the stmmac driver.
