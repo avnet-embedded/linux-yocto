@@ -5,11 +5,16 @@
  * Copyright (C) 2018 Marvell International Ltd.
  */
 
+#include <linux/acpi.h>
 #include <linux/of.h>
 #include <linux/delay.h>
 #include <linux/module.h>
 #include <linux/pci.h>
+#include <linux/property.h>
 #include <linux/spi/spi.h>
+#ifdef CONFIG_ACPI
+#include <linux/spi/spi-mem.h>
+#endif
 
 #include "spi-octeontx2.h"
 
@@ -33,6 +38,7 @@ static void octeontx2_spi_wait_ready(struct octeontx2_spi *p)
 	union mpix_sts mpi_sts;
 	unsigned int loops = 0;
 
+	mpi_sts.u64 = 0; /* Prevents infinite loop */
 	do {
 		if (loops++)
 			__delay(500);
@@ -230,6 +236,78 @@ err:
 	return status;
 }
 
+#ifdef CONFIG_ACPI
+static int octeontx2_spi_exec_op(struct spi_mem *mem,
+				 const struct spi_mem_op *op)
+{
+	return -EOPNOTSUPP;
+}
+
+static bool octeontx2_spi_supports_op(struct spi_mem *mem,
+				      const struct spi_mem_op *op)
+{
+	struct spi_device *spi = mem->spi;
+	const union acpi_object *obj;
+	struct acpi_device *adev;
+
+	adev = ACPI_COMPANION(&spi->dev);
+
+	if (!acpi_dev_get_property(adev, "spi-tx-bus-width", ACPI_TYPE_INTEGER,
+				   &obj)) {
+		switch (obj->integer.value) {
+		case 1:
+			break;
+		case 2:
+			spi->mode |= SPI_TX_DUAL;
+			break;
+		case 4:
+			spi->mode |= SPI_TX_QUAD;
+			break;
+		case 8:
+			spi->mode |= SPI_TX_OCTAL;
+			break;
+		default:
+			dev_warn(&spi->dev,
+				 "spi-tx-bus-width %lld not supported\n",
+				 obj->integer.value);
+			break;
+		}
+	}
+
+	if (!acpi_dev_get_property(adev, "spi-rx-bus-width", ACPI_TYPE_INTEGER,
+				   &obj)) {
+		switch (obj->integer.value) {
+		case 1:
+			break;
+		case 2:
+			spi->mode |= SPI_RX_DUAL;
+			break;
+		case 4:
+			spi->mode |= SPI_RX_QUAD;
+			break;
+		case 8:
+			spi->mode |= SPI_RX_OCTAL;
+			break;
+		default:
+			dev_warn(&spi->dev,
+				 "spi-rx-bus-width %lld not supported\n",
+				 obj->integer.value);
+			break;
+		}
+	}
+
+	if (!spi_mem_default_supports_op(mem, op))
+		return false;
+
+	return true;
+}
+
+static const struct spi_controller_mem_ops octeontx2_spi_mem_ops = {
+	.supports_op = octeontx2_spi_supports_op,
+	.exec_op = octeontx2_spi_exec_op
+};
+#endif
+
 static int octeontx2_spi_probe(struct pci_dev *pdev,
 			       const struct pci_device_id *ent)
 {
@@ -238,6 +316,7 @@ static int octeontx2_spi_probe(struct pci_dev *pdev,
 	struct octeontx2_spi *p;
 	union mpix_sts mpi_sts;
 	int ret = -ENOENT;
+	bool has_acpi;
 
 	/* may need to hunt for devtree entry */
 	if (!pdev->dev.of_node) {
@@ -250,6 +329,8 @@ static int octeontx2_spi_probe(struct pci_dev *pdev,
 		pdev->dev.of_node = np;
 		of_node_put(np);
 	}
+
+	has_acpi = has_acpi_companion(dev);
 
 	host = spi_alloc_host(dev, sizeof(struct octeontx2_spi));
 	if (!host)
@@ -281,21 +362,27 @@ static int octeontx2_spi_probe(struct pci_dev *pdev,
 	mpi_sts.u64 = readq(p->register_base + OCTEONTX2_SPI_STS(p));
 	p->rcvd_present = mpi_sts.u64 & 0x4 ? true : false;
 
-	/* FIXME: need a proper clocksource object for SCLK */
-	p->clk = devm_clk_get(dev, NULL);
-	if (IS_ERR(p->clk)) {
-		p->clk = devm_clk_get(dev, "sclk");
-		p->sys_freq = 0;
-	} else {
-		ret = clk_prepare_enable(p->clk);
-		if (!ret)
-			p->sys_freq = clk_get_rate(p->clk);
-	}
+	if (!has_acpi) {
+		/* FIXME: need a proper clocksource object for SCLK */
+		p->clk = devm_clk_get(dev, NULL);
+		if (IS_ERR(p->clk)) {
+			p->clk = devm_clk_get(dev, "sclk");
+			p->sys_freq = 0;
+		} else {
+			ret = clk_prepare_enable(p->clk);
+			if (!ret)
+				p->sys_freq = clk_get_rate(p->clk);
+		}
 
-	if (!p->sys_freq)
-		p->sys_freq = SYS_FREQ_DEFAULT;
-	if (tbi_clk_en)
-		p->sys_freq = TBI_FREQ;
+		if (!p->sys_freq)
+			p->sys_freq = SYS_FREQ_DEFAULT;
+		if (tbi_clk_en)
+			p->sys_freq = TBI_FREQ;
+	} else {
+		device_property_read_u32(dev, "sclk", &p->sys_freq);
+		if (!p->sys_freq)
+			p->sys_freq = TBI_FREQ;
+	}
 	dev_info(dev, "Reference clock is %u\n", p->sys_freq);
 
 	host->num_chipselect = 4;
@@ -307,6 +394,10 @@ static int octeontx2_spi_probe(struct pci_dev *pdev,
 	host->bits_per_word_mask = SPI_BPW_MASK(8);
 	host->max_speed_hz = OCTEONTX2_SPI_MAX_CLOCK_HZ;
 	host->dev.of_node = pdev->dev.of_node;
+	host->dev.fwnode = pdev->dev.fwnode;
+	#ifdef CONFIG_ACPI
+		host->mem_ops = &octeontx2_spi_mem_ops;
+	#endif
 
 	pci_set_drvdata(pdev, host);
 
@@ -317,7 +408,8 @@ static int octeontx2_spi_probe(struct pci_dev *pdev,
 	return 0;
 
 error_disable:
-	clk_disable_unprepare(p->clk);
+	if (!has_acpi)
+		clk_disable_unprepare(p->clk);
 error_put:
 	spi_controller_put(host);
 error:
@@ -329,12 +421,16 @@ static void octeontx2_spi_remove(struct pci_dev *pdev)
 	struct spi_controller *host = pci_get_drvdata(pdev);
 	struct octeontx2_spi *p;
 
+	bool has_acpi = has_acpi_companion(&pdev->dev);
+
 	p = spi_controller_get_devdata(host);
 
-	clk_disable_unprepare(p->clk);
 	/* Put everything in a known state. */
-	if (p)
+	if (p) {
+		if (!has_acpi)
+			clk_disable_unprepare(p->clk);
 		writeq(0, p->register_base + OCTEONTX2_SPI_CFG(p));
+	}
 
 	pci_disable_device(pdev);
 	spi_controller_put(host);
