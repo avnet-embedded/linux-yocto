@@ -15,7 +15,7 @@ jobs:
         uses: wei/git-sync@v3.0.0
         with:
           source_repo: "https://git.yoctoproject.org/linux-yocto.git"
-          destination_repo: "linux-yocto"
+          destination_repo: "avnet-embedded/linux-yocto"
           source_branch: "refs/remotes/source/*"
           destination_branch: "refs/heads/*"
           destination_ssh_private_key:  ${{ secrets.SSH_PRIVATE_KEY_TARGET }}          
