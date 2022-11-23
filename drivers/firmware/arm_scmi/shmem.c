@@ -143,13 +143,20 @@ static void __iomem *shmem_setup_iomap(struct scmi_chan_info *cinfo,
 {
 	struct device_node *shmem __free(device_node);
 	const char *desc = tx ? "Tx" : "Rx";
-	int ret, idx = tx ? 0 : 1;
 	struct device *cdev = cinfo->dev;
 	struct resource lres = {};
 	resource_size_t size;
 	void __iomem *addr;
+	int ret, shmem_idx;
+	const char *ch_name = tx ? "tx" : "rx";
 
-	shmem = of_parse_phandle(cdev->of_node, "shmem", idx);
+	shmem_idx = of_property_match_string(cdev->of_node,
+					     "mbox-names",
+					     ch_name);
+	if (shmem_idx < 0)
+		return IOMEM_ERR_PTR(-ENXIO);
+
+	shmem = of_parse_phandle(cdev->of_node, "shmem", shmem_idx);
 	if (!shmem)
 		return IOMEM_ERR_PTR(-ENODEV);
 
