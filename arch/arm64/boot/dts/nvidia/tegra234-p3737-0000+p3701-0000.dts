@@ -444,4 +444,23 @@
 			};
 		};
 	};
+
+	bpmp {
+		i2c {
+			thermal-sensor@4c {
+				vcc-supply = <&{/regulator-vdd-1v8-ao}>;
+				status = "okay";
+			};
+		};
+	};
+
+	thermal-zones {
+		tboard-thermal {
+			status = "okay";
+		};
+
+		tdiode-thermal {
+			status = "okay";
+		};
+	};
 };
