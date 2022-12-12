@@ -3009,10 +3009,6 @@ static int lpuart_probe(struct platform_device *pdev)
 	pm_runtime_set_active(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
 
-	ret = uart_add_one_port(&lpuart_reg, &sport->port);
-	if (ret)
-		goto failed_attach_port;
-
 	ret = lpuart_hw_reset(sport);
 	if (ret)
 		goto failed_reset;
