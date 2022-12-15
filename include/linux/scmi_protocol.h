@@ -769,6 +769,29 @@ enum scmi_pinctrl_conf_type {
 	SCMI_PIN_OEM_END = 255,
 };
 
+#define SCMI_PINCTRL_MULTI_BIT_CFGS					 \
+	(BIT(PIN_CONFIG_SLEW_RATE) | BIT(PIN_CONFIG_SKEW_DELAY) |	 \
+	 BIT(PIN_CONFIG_POWER_SOURCE) | BIT(PIN_CONFIG_MODE_LOW_POWER) | \
+	 BIT(PIN_CONFIG_INPUT_SCHMITT) | BIT(PIN_CONFIG_INPUT_DEBOUNCE) |\
+	 BIT(PIN_CONFIG_DRIVE_STRENGTH_UA)|				 \
+	 BIT(PIN_CONFIG_DRIVE_STRENGTH))
+
+struct scmi_pinctrl_pin_range {
+	u16 start;
+	u16 no_pins;
+};
+
+struct scmi_pinctrl_pin_function {
+	u16 pin;
+	u16 function;
+};
+
+struct scmi_pinctrl_pinconf {
+	u32 mask;
+	u32 boolean_values;
+	u32 *multi_bit_values;
+};
+
 /**
  * struct scmi_pinctrl_proto_ops - represents the various operations provided
  * by SCMI Pinctrl Protocol
@@ -785,6 +808,12 @@ enum scmi_pinctrl_conf_type {
  * @settings_conf: sets the configuration parameter for pin or group
  * @pin_request: aquire pin before selecting mux setting
  * @pin_free: frees pin, acquired by request_pin call
+ * @describe: return the pin ranges available
+ * @pinmux_get: return the current mux for the pin
+ * @pinmux_set: set the function for a pin
+ * @pinconf_get: return the pinconfig of a pin. Caller must call kfree on pcf.
+ * @pinconf_set: set the pinconfig for a pin.
+ * @get_no_ranges: get the number of pinctrl ranges.
  */
 struct scmi_pinctrl_proto_ops {
 	int (*count_get)(const struct scmi_protocol_handle *ph,
@@ -818,7 +847,26 @@ struct scmi_pinctrl_proto_ops {
 			     u32 *config_value);
 	int (*pin_request)(const struct scmi_protocol_handle *ph, u32 pin);
 	int (*pin_free)(const struct scmi_protocol_handle *ph, u32 pin);
+	int (*describe)(const struct scmi_protocol_handle *ph,
+			struct scmi_pinctrl_pin_range *ranges);
+	int (*pinmux_get)(const struct scmi_protocol_handle *ph, u16 pin,
+			  u16 *func);
+	int (*pinmux_set)(const struct scmi_protocol_handle *ph, u16 no_pins,
+			  const struct scmi_pinctrl_pin_function *pf);
+	int (*pinconf_get)(const struct scmi_protocol_handle *ph, u16 pin,
+			   struct scmi_pinctrl_pinconf *pcf);
+	int (*pinconf_set)(const struct scmi_protocol_handle *ph, u16 pin,
+			   struct scmi_pinctrl_pinconf *pcf, bool override);
+	u16 (*get_no_ranges)(const struct scmi_protocol_handle *ph);
 };
+
+int scmi_pinctrl_create_pcf(unsigned long *configs,
+			    unsigned int num_configs,
+			    struct scmi_pinctrl_pinconf *pcf);
+int scmi_pinctrl_convert_from_pcf(unsigned long *configs,
+				  struct scmi_pinctrl_pinconf *pcf);
+unsigned int scmi_pinctrl_count_multi_bit_values(unsigned long *configs,
+						 unsigned int no_configs);
 
 /**
  * struct scmi_notify_ops  - represents notifications' operations provided by
