@@ -12,7 +12,6 @@
 #include <linux/of_device.h>
 #include <linux/usb/xhci_pdriver.h>
 
-#include "../host/xhci-plat.h"
 #include "core.h"
 
 void dwc3_host_wakeup_capable(struct device *dev, bool wakeup)
@@ -99,11 +98,6 @@ int dwc3_host_init(struct dwc3 *dwc)
 		dev_err(dwc->dev, "couldn't add resources to xHCI device\n");
 		goto err;
 	}
-
-	ret = platform_device_add_data(xhci, &dwc3_xhci_plat_priv,
-					sizeof(dwc3_xhci_plat_priv));
-	if (ret)
-		goto err;
 
 	memset(props, 0, sizeof(struct property_entry) * ARRAY_SIZE(props));
 
