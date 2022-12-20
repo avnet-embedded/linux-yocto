@@ -229,6 +229,12 @@ static const struct flash_info macronix_nor_parts[] = {
 		/* MX25L3255E */
 		.id = SNOR_ID(0xc2, 0x9e, 0x16),
 		.fixups = &mx25l3255e_fixups,
+	}, {
+		.id = SNOR_ID(0xc2, 0x80, 0x3a),
+		.name = "mx25um51245g",
+		.size = SZ_64M,
+		.no_sfdp_flags = SECT_4K,
+		.fixup_flags = SPI_NOR_4B_OPCODES,
 	},
 	/*
 	 * This spares us of adding new flash entries for flashes that can be
