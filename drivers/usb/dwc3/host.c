@@ -20,10 +20,6 @@ void dwc3_host_wakeup_capable(struct device *dev, bool wakeup)
 }
 EXPORT_SYMBOL(dwc3_host_wakeup_capable);
 
-static const struct xhci_plat_priv dwc3_xhci_plat_priv = {
-	.quirks = XHCI_SKIP_PHY_INIT,
-};
-
 static int dwc3_host_get_irq(struct dwc3 *dwc)
 {
 	struct platform_device	*dwc3_pdev = to_platform_device(dwc->dev);
