@@ -3142,7 +3142,12 @@ void console_flush_on_panic(enum con_flush_mode mode)
 	 * If another context is holding the console lock,
 	 * @console_may_schedule might be set. Clear it so that
 	 * this context does not call cond_resched() while flushing.
+	 *
+	 * Since semaphores are not NMI-safe, the console lock must be
+	 * ignored if the panic is in NMI context.
 	 */
+	if (!in_nmi())
+		console_trylock();
 	console_may_schedule = 0;
 
 	if (mode == CONSOLE_REPLAY_ALL) {
@@ -3164,6 +3169,8 @@ void console_flush_on_panic(enum con_flush_mode mode)
 	}
 
 	console_flush_all(false, &next_seq, &handover);
+	if (!in_nmi())
+		console_unlock();
 }
 
 /*
@@ -3192,7 +3199,8 @@ struct tty_driver *console_device(int *index)
 	}
 	console_srcu_read_unlock(cookie);
 
-	console_unlock();
+	if (!in_nmi())
+		console_unlock();
 	return driver;
 }
 
