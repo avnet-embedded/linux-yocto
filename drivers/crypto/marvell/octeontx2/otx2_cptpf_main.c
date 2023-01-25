@@ -598,6 +598,14 @@ static int cptpf_get_rid(struct pci_dev *pdev, struct otx2_cptpf_dev *cptpf)
 		eng_grps->rid = pdev->revision;
 		return 0;
 	}
+	/*
+	 * Enable T106_MODE for cn10ka B0 chip to set it in backward compatibility
+	 * mode until all dataplane applications adapts new features of cn10ka B0.
+	 */
+	if (is_dev_cn10ka_b0(pdev))
+		otx2_cpt_write_af_reg(&cptpf->afpf_mbox, pdev, CPT_AF_CTL, BIT_ULL(18),
+				      BLKADDR_CPT0);
+
 	otx2_cpt_read_af_reg(&cptpf->afpf_mbox, pdev, CPT_AF_CTL, &reg_val,
 			     BLKADDR_CPT0);
 	if ((is_dev_cn10ka_b0(pdev) && (reg_val & BIT_ULL(18))) ||
