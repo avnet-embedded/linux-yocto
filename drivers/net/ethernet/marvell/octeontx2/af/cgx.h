@@ -32,9 +32,9 @@
 #define CMR_P2X_SEL_SHIFT		59ULL
 #define CMR_P2X_SEL_NIX0		1ULL
 #define CMR_P2X_SEL_NIX1		2ULL
-#define CMR_EN				BIT_ULL(55)
 #define DATA_PKT_TX_EN			BIT_ULL(53)
 #define DATA_PKT_RX_EN			BIT_ULL(54)
+#define CMR_EN				BIT_ULL(55)
 #define CGX_LMAC_TYPE_SHIFT		40
 #define CGX_LMAC_TYPE_MASK		0xF
 #define CGXX_CMRX_INT			0x040
@@ -172,6 +172,7 @@ void cgx_lmac_ptp_config(void *cgxd, int lmac_id, bool enable);
 int cgx_set_link_state(void *cgxd, int lmac_id, bool enable);
 int cgx_set_phy_mod_type(int mod, void *cgxd, int lmac_id);
 int cgx_get_phy_mod_type(void *cgxd, int lmac_id);
+u8 cgx_lmac_get_p2x(int cgx_id, int lmac_id);
 
 void cgx_lmac_enadis_higig2(void *cgxd, int lmac_id, bool enable);
 bool is_higig2_enabled(void *cgxd, int lmac_id);

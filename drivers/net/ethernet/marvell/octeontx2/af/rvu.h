@@ -277,6 +277,7 @@ struct rvu_pfvf {
 	u8	lbkid;	     /* NIX0/1 lbk link ID */
 	unsigned long flags;
 	struct  sdp_node_info *sdp_info;
+	u8	nix_blkaddr; /* BLKADDR_NIX0/1 assigned to this PF */
 };
 
 enum rvu_pfvf_flags {
