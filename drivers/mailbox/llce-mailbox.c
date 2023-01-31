@@ -1281,23 +1281,22 @@ static int process_pop_rxout(struct mbox_chan *chan, struct llce_rx_msg *msg)
 	void __iomem *pop0 = LLCE_FIFO_POP0(rxout);
 	struct llce_can_shared_memory *sh_mem = mb->sh_mem;
 	unsigned int chan_index;
-	u32 rx_mb, frame_id;
+	u32 rx_mb, rx_short_mb;
 	u16 filter_id;
-
 
 	/* Get RX mailbox */
 	rx_mb = readl(pop0) & LLCE_CAN_CONFIG_FIFO_FIXED_MASK;
 
-	frame_id = sh_mem->can_rx_mb_desc[rx_mb].mb_frame_idx;
 	filter_id = sh_mem->can_rx_mb_desc[rx_mb].filter_id;
 
 	chan_index = get_channel_offset(S32G_LLCE_CAN_RX_MB, priv->index);
 
 	if (filter_id == USE_LONG_MB) {
-		msg->rx_pop.mb.data.longm = &sh_mem->can_mb[frame_id];
+		msg->rx_pop.mb.data.longm = &sh_mem->can_mb[rx_mb];
 		msg->rx_pop.mb.is_long = true;
 	} else {
-		msg->rx_pop.mb.data.shortm = &sh_mem->can_short_mb[frame_id];
+		rx_short_mb = rx_mb - LLCE_CAN_CONFIG_MAXRXMB;
+		msg->rx_pop.mb.data.shortm = &sh_mem->can_short_mb[rx_short_mb];
 		msg->rx_pop.mb.is_long = false;
 	}
 
@@ -1312,8 +1311,7 @@ static u32 *get_ctrl_extension(struct llce_mb *mb)
 	return (uint32_t *)(mb->status + LLCE_RXMBEXTENSION_OFFSET);
 }
 
-static uint8_t get_hwctrl(struct llce_mb *mb, uint32_t frame_id,
-			  uint32_t mb_index)
+static uint8_t get_hwctrl(struct llce_mb *mb, uint32_t frame_id)
 {
 	u32 *ctrl_extensions = get_ctrl_extension(mb);
 
@@ -1327,14 +1325,11 @@ static void pop_logger_frame(struct llce_mb *mb, struct llce_can_mb **frame,
 	struct llce_can_shared_memory *sh_mem = mb->sh_mem;
 	void __iomem *out_fifo = get_logger_out(mb);
 	void __iomem *pop0 = LLCE_FIFO_POP0(out_fifo);
-	u32 frame_id;
 
 	*index = readl(pop0) & LLCE_CAN_CONFIG_FIFO_FIXED_MASK;
 
-	frame_id = sh_mem->can_rx_mb_desc[*index].mb_frame_idx;
-
-	*frame = &sh_mem->can_mb[frame_id];
-	*hw_ctrl = get_hwctrl(mb, frame_id, *index);
+	*frame = &sh_mem->can_mb[*index];
+	*hw_ctrl = get_hwctrl(mb, *index);
 }
 
 static void release_logger_index(struct llce_mb *mb, uint32_t index)
@@ -1843,7 +1838,7 @@ static int llce_platform_deinit(struct llce_mb *mb)
 }
 
 static int get_fw_version(struct llce_mb *mb,
-			  struct llce_can_get_fw_version *ver)
+			  struct llce_fw_version *ver)
 {
 	struct llce_can_command cmd = {
 		.cmd_id = LLCE_CAN_CMD_GETFWVERSION,
@@ -1863,7 +1858,7 @@ static int get_fw_version(struct llce_mb *mb,
 }
 
 static void fw_logger_support(struct llce_mb *mb,
-			      struct llce_can_get_fw_version *ver)
+			      struct llce_fw_version *ver)
 {
 	struct device *dev = mb->controller.dev;
 
@@ -1874,7 +1869,7 @@ static void fw_logger_support(struct llce_mb *mb,
 }
 
 static void print_fw_version(struct llce_mb *mb,
-			     struct llce_can_get_fw_version *ver)
+			     struct llce_fw_version *ver)
 {
 	struct device *dev = mb->controller.dev;
 
@@ -1907,7 +1902,7 @@ static void deinit_core_clock(struct clk *clk)
 
 static int llce_mb_probe(struct platform_device *pdev)
 {
-	struct llce_can_get_fw_version ver;
+	struct llce_fw_version ver;
 	struct mbox_controller *ctrl;
 	struct llce_mb *mb;
 	struct device *dev = &pdev->dev;
