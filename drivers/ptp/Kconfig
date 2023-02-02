@@ -120,8 +120,8 @@ config PTP_1588_CLOCK_KVM
 
 config PTP_1588_CLOCK_IDT82P33
 	tristate "IDT 82P33xxx PTP clock"
-	depends on PTP_1588_CLOCK && I2C
-	default n
+	depends on PTP_1588_CLOCK
+	default m
 	help
 	  This driver adds support for using the IDT 82P33xxx as a PTP
 	  clock. This clock is only useful if your time stamping MAC
@@ -132,7 +132,7 @@ config PTP_1588_CLOCK_IDT82P33
 
 config PTP_1588_CLOCK_IDTCM
 	tristate "IDT CLOCKMATRIX as PTP clock"
-	depends on PTP_1588_CLOCK && I2C
+	depends on PTP_1588_CLOCK
 	default n
 	help
 	  This driver adds support for using IDT CLOCKMATRIX(TM) as a PTP

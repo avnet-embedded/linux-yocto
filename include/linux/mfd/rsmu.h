@@ -1,42 +1,39 @@
 /* SPDX-License-Identifier: GPL-2.0+ */
 /*
- * Multi-function driver for the IDT ClockMatrix(TM) and 82p33xxx families of
- * timing and synchronization devices.
+ * Core interface for Renesas Synchronization Management Unit (SMU) devices.
  *
- * Copyright (C) 2019 Integrated Device Technology, Inc., a Renesas Company.
+ * Copyright (C) 2021 Integrated Device Technology, Inc., a Renesas Company.
  */
 
 #ifndef __LINUX_MFD_RSMU_H
 #define __LINUX_MFD_RSMU_H
 
-/* We only support Clockmatrix and Sabre now */
+#define RSMU_MAX_WRITE_COUNT	(255)
+#define RSMU_MAX_READ_COUNT	(255)
+
+/* The supported devices are ClockMatrix, Sabre and SnowLotus */
 enum rsmu_type {
-	RSMU_CM		= 0,
-	RSMU_SABRE	= 1,
-	RSMU_NONE	= 2,
+	RSMU_CM		= 0x34000,
+	RSMU_SABRE	= 0x33810,
+	RSMU_SL		= 0x19850,
 };
 
 /**
  *
- * struct rsmu_pdata - platform data structure for MFD cell devices.
+ * struct rsmu_ddata - device data structure for sub devices.
  *
- * @lock: Mutex used by cell devices to make sure a series of requests
- * are not interrupted.
- *
- * @type: RSMU device type.
- *
- * @index: Device index.
+ * @dev:    i2c/spi device.
+ * @regmap: i2c/spi bus access.
+ * @lock:   mutex used by sub devices to make sure a series of
+ *          bus access requests are not interrupted.
+ * @type:   RSMU device type.
+ * @page:   i2c/spi bus driver internal use only.
  */
-struct rsmu_pdata {
+struct rsmu_ddata {
+	struct device *dev;
+	struct regmap *regmap;
+	struct mutex lock;
 	enum rsmu_type type;
-	struct mutex *lock;
-	u8 index;
+	u32 page;
 };
-
-/**
- * NOTE: the functions below are not intended for use outside
- * of the IDT synchronization management unit drivers
- */
-extern int rsmu_write(struct device *dev, u16 reg, u8 *buf, u16 size);
-extern int rsmu_read(struct device *dev, u16 reg, u8 *buf, u16 size);
 #endif /*  __LINUX_MFD_RSMU_H */

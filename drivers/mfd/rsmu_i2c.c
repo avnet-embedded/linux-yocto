@@ -1,28 +1,29 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Multi-function driver for the IDT ClockMatrix(TM) and 82P33xxx families of
- * timing and synchronization devices.
+ * I2C driver for Renesas Synchronization Management Unit (SMU) devices.
  *
- * Copyright (C) 2019 Integrated Device Technology, Inc., a Renesas Company.
+ * Copyright (C) 2021 Integrated Device Technology, Inc., a Renesas Company.
  */
 
-#include <linux/kernel.h>
-#include <linux/module.h>
-#include <linux/init.h>
-#include <linux/slab.h>
 #include <linux/i2c.h>
-#include <linux/regmap.h>
-#include <linux/of.h>
+#include <linux/init.h>
+#include <linux/kernel.h>
 #include <linux/mfd/core.h>
 #include <linux/mfd/rsmu.h>
-#include "rsmu_private.h"
+#include <linux/module.h>
+#include <linux/of.h>
+#include <linux/regmap.h>
+#include <linux/slab.h>
+
+#include "rsmu.h"
 
 /*
- * 16-bit register address: the lower 8 bits of the register address come
- * from the offset addr byte and the upper 8 bits come from the page register.
+ * 32-bit register address: the lower 8 bits of the register address come
+ * from the offset addr byte and the upper 24 bits come from the page register.
  */
-#define	RSMU_CM_PAGE_ADDR		0xFD
-#define	RSMU_CM_PAGE_WINDOW		256
+#define	RSMU_CM_PAGE_ADDR		0xFC
+#define RSMU_CM_PAGE_MASK               0xFFFFFF00
+#define RSMU_CM_ADDRESS_MASK    	0x000000FF
 
 /*
  * 15-bit register address: the lower 7 bits of the register address come
@@ -30,87 +31,6 @@
  */
 #define	RSMU_SABRE_PAGE_ADDR		0x7F
 #define	RSMU_SABRE_PAGE_WINDOW		128
-
-static bool rsmu_cm_volatile_reg(struct device *dev, unsigned int reg);
-static bool rsmu_sabre_volatile_reg(struct device *dev, unsigned int reg);
-
-/* Current mfd device index */
-static atomic_t rsmu_ndevs = ATOMIC_INIT(0);
-
-/* Platform data */
-static struct rsmu_pdata rsmu_pdata[RSMU_MAX_MFD_DEV];
-
-/* clockmatrix phc devices */
-static struct mfd_cell rsmu_cm_pdev[RSMU_MAX_MFD_DEV] = {
-	[0] = {
-		.name = "idtcm-ptp0",
-		.of_compatible	= "renesas,idtcm-ptp0",
-	},
-	[1] = {
-		.name = "idtcm-ptp1",
-		.of_compatible	= "renesas,idtcm-ptp1",
-	},
-	[2] = {
-		.name = "idtcm-ptp2",
-		.of_compatible	= "renesas,idtcm-ptp2",
-	},
-	[3] = {
-		.name = "idtcm-ptp3",
-		.of_compatible	= "renesas,idtcm-ptp3",
-	},
-};
-
-/* sabre phc devices */
-static struct mfd_cell rsmu_sabre_pdev[RSMU_MAX_MFD_DEV] = {
-	[0] = {
-		.name = "idt82p33-ptp0",
-		.of_compatible	= "renesas,idt82p33-ptp0",
-	},
-	[1] = {
-		.name = "idt82p33-ptp1",
-		.of_compatible	= "renesas,idt82p33-ptp1",
-	},
-	[2] = {
-		.name = "idt82p33-ptp2",
-		.of_compatible	= "renesas,idt82p33-ptp2",
-	},
-	[3] = {
-		.name = "idt82p33-ptp3",
-		.of_compatible	= "renesas,idt82p33-ptp3",
-	},
-};
-
-/* rsmu character devices */
-static struct mfd_cell rsmu_cdev[RSMU_MAX_MFD_DEV] = {
-	[0] = {
-		.name = "rsmu-cdev0",
-		.of_compatible	= "renesas,rsmu-cdev0",
-	},
-	[1] = {
-		.name = "rsmu-cdev1",
-		.of_compatible	= "renesas,rsmu-cdev1",
-	},
-	[2] = {
-		.name = "rsmu-cdev2",
-		.of_compatible	= "renesas,rsmu-cdev2",
-	},
-	[3] = {
-		.name = "rsmu-cdev3",
-		.of_compatible	= "renesas,rsmu-cdev3",
-	},
-};
-
-static const struct regmap_range_cfg rsmu_cm_range_cfg[] = {
-	{
-		.range_min = 0,
-		.range_max = 0xD000,
-		.selector_reg = RSMU_CM_PAGE_ADDR,
-		.selector_mask = 0xFF,
-		.selector_shift = 0,
-		.window_start = 0,
-		.window_len = RSMU_CM_PAGE_WINDOW,
-	}
-};
 
 static const struct regmap_range_cfg rsmu_sabre_range_cfg[] = {
 	{
@@ -124,39 +44,6 @@ static const struct regmap_range_cfg rsmu_sabre_range_cfg[] = {
 	}
 };
 
-static const struct regmap_config rsmu_regmap_configs[] = {
-	[RSMU_CM] = {
-		.reg_bits = 8,
-		.val_bits = 8,
-		.max_register = 0xD000,
-		.ranges = rsmu_cm_range_cfg,
-		.num_ranges = ARRAY_SIZE(rsmu_cm_range_cfg),
-		.volatile_reg = rsmu_cm_volatile_reg,
-		.cache_type = REGCACHE_RBTREE,
-		.can_multi_write = true,
-	},
-	[RSMU_SABRE] = {
-		.reg_bits = 8,
-		.val_bits = 8,
-		.max_register = 0x400,
-		.ranges = rsmu_sabre_range_cfg,
-		.num_ranges = ARRAY_SIZE(rsmu_sabre_range_cfg),
-		.volatile_reg = rsmu_sabre_volatile_reg,
-		.cache_type = REGCACHE_RBTREE,
-		.can_multi_write = true,
-	},
-};
-
-static bool rsmu_cm_volatile_reg(struct device *dev, unsigned int reg)
-{
-	switch (reg) {
-	case RSMU_CM_PAGE_ADDR:
-		return false;
-	default:
-		return true;
-	}
-}
-
 static bool rsmu_sabre_volatile_reg(struct device *dev, unsigned int reg)
 {
 	switch (reg) {
@@ -167,178 +54,250 @@ static bool rsmu_sabre_volatile_reg(struct device *dev, unsigned int reg)
 	}
 }
 
-int rsmu_read(struct device *dev, u16 reg, u8 *buf, u16 size)
+static int rsmu_read_device(struct rsmu_ddata *rsmu, u8 reg, u8 *buf, u16 bytes)
 {
-	struct rsmu_dev *rsmu = dev_get_drvdata(dev);
+	struct i2c_client *client = to_i2c_client(rsmu->dev);
+	struct i2c_msg msg[2];
+	int cnt;
 
-	return regmap_bulk_read(rsmu->regmap, reg, buf, size);
-}
-EXPORT_SYMBOL_GPL(rsmu_read);
+	msg[0].addr = client->addr;
+	msg[0].flags = 0;
+	msg[0].len = 1;
+	msg[0].buf = &reg;
 
-int rsmu_write(struct device *dev, u16 reg, u8 *buf, u16 size)
-{
-	struct rsmu_dev *rsmu = dev_get_drvdata(dev);
+	msg[1].addr = client->addr;
+	msg[1].flags = I2C_M_RD;
+	msg[1].len = bytes;
+	msg[1].buf = buf;
 
-	return regmap_bulk_write(rsmu->regmap, reg, buf, size);
-}
-EXPORT_SYMBOL_GPL(rsmu_write);
+	cnt = i2c_transfer(client->adapter, msg, 2);
 
-static int rsmu_mfd_init(struct rsmu_dev *rsmu, struct mfd_cell *mfd,
-			 struct rsmu_pdata *pdata)
-{
-	int ret;
-
-	mfd->platform_data = pdata;
-	mfd->pdata_size = sizeof(struct rsmu_pdata);
-
-	ret = mfd_add_devices(rsmu->dev, -1, mfd, 1, NULL, 0, NULL);
-	if (ret < 0) {
-		dev_err(rsmu->dev, "mfd_add_devices failed with %s\n",
-			mfd->name);
-		return ret;
-	}
-
-	return ret;
-}
-
-static int rsmu_dev_init(struct rsmu_dev *rsmu)
-{
-	struct rsmu_pdata *pdata;
-	struct mfd_cell *pmfd;
-	struct mfd_cell *cmfd;
-	int ret;
-
-	/* Initialize regmap */
-	rsmu->regmap = devm_regmap_init_i2c(rsmu->client,
-					    &rsmu_regmap_configs[rsmu->type]);
-	if (IS_ERR(rsmu->regmap)) {
-		ret = PTR_ERR(rsmu->regmap);
-		dev_err(rsmu->dev, "Failed to allocate register map: %d\n",
-			ret);
-		return ret;
-	}
-
-	/* Initialize device index */
-	rsmu->index = atomic_read(&rsmu_ndevs);
-	if (rsmu->index >= RSMU_MAX_MFD_DEV)
-		return -ENODEV;
-
-	/* Initialize platform data */
-	pdata = &rsmu_pdata[rsmu->index];
-	pdata->lock = &rsmu->lock;
-	pdata->type = rsmu->type;
-	pdata->index = rsmu->index;
-
-	/* Initialize MFD devices */
-	cmfd = &rsmu_cdev[rsmu->index];
-	if (rsmu->type == RSMU_CM)
-		pmfd = &rsmu_cm_pdev[rsmu->index];
-	else if (rsmu->type == RSMU_SABRE)
-		pmfd = &rsmu_sabre_pdev[rsmu->index];
-	else
-		return -EINVAL;
-
-	ret = rsmu_mfd_init(rsmu, pmfd, pdata);
-	if (ret)
-		return ret;
-
-	return rsmu_mfd_init(rsmu, cmfd, pdata);
-}
-
-static int rsmu_dt_init(struct rsmu_dev *rsmu)
-{
-	struct device_node *np = rsmu->dev->of_node;
-
-	rsmu->type = RSMU_NONE;
-	if (of_device_is_compatible(np, "idt,8a34000")) {
-		rsmu->type = RSMU_CM;
-	} else if (of_device_is_compatible(np, "idt,82p33810")) {
-		rsmu->type = RSMU_SABRE;
-	} else {
-		dev_err(rsmu->dev, "unknown RSMU device\n");
-		return -EINVAL;
+	if (cnt < 0) {
+		dev_err(rsmu->dev, "i2c_transfer failed at at addr: %04x!",reg);
+		return cnt;
+	} else if (cnt != 2) {
+		dev_err(rsmu->dev,
+			"i2c_transfer sent only %d of 2 messages", cnt);
+		return -EIO;
 	}
 
 	return 0;
 }
 
-static int rsmu_probe(struct i2c_client *client, const struct i2c_device_id *id)
+static int rsmu_write_device(struct rsmu_ddata *rsmu, u8 reg, u8 *buf, u16 bytes)
 {
-	struct rsmu_dev *rsmu;
+	struct i2c_client *client = to_i2c_client(rsmu->dev);
+	/* we add 1 byte for device register */
+	u8 msg[RSMU_MAX_WRITE_COUNT + 1];
+	int cnt;
+
+	if (bytes > RSMU_MAX_WRITE_COUNT)
+		return -EINVAL;
+
+	msg[0] = reg;
+	memcpy(&msg[1], buf, bytes);
+
+	cnt = i2c_master_send(client, msg, bytes + 1);
+
+	if (cnt < 0) {
+		dev_err(&client->dev,
+			"i2c_master_send failed at addr: %04x!", reg);
+		return cnt;
+	}
+
+	return 0;
+}
+
+static int rsmu_write_page_register(struct rsmu_ddata *rsmu, u32 reg)
+{
+	u32 page = reg & RSMU_CM_PAGE_MASK;
+	u8 buf[4];
+	int err;
+
+	/* Do not modify offset register for none-scsr registers */
+	if (reg < RSMU_CM_SCSR_BASE)
+		return 0;
+
+	/* Simply return if we are on the same page */
+	if (rsmu->page == page)
+		return 0;
+
+	buf[0] = 0x0;
+	buf[1] = (u8)((page >> 8) & 0xFF);
+	buf[2] = (u8)((page >> 16) & 0xFF);
+	buf[3] = (u8)((page >> 24) & 0xFF);
+
+	err = rsmu_write_device(rsmu, RSMU_CM_PAGE_ADDR, buf, sizeof(buf));
+	if (err)
+		dev_err(rsmu->dev, "Failed to set page offset 0x%x\n", page);
+	else
+		/* Remember the last page */
+		rsmu->page = page;
+
+	return err;
+}
+
+static int rsmu_reg_read(void *context, unsigned int reg, unsigned int *val)
+{
+	struct rsmu_ddata *rsmu = i2c_get_clientdata((struct i2c_client *)context);
+	u8 addr = (u8)(reg & RSMU_CM_ADDRESS_MASK);
+	int err;
+
+	err = rsmu_write_page_register(rsmu, reg);
+	if (err)
+		return err;
+
+	err = rsmu_read_device(rsmu, addr, (u8 *)val, 1);
+	if (err)
+		dev_err(rsmu->dev, "Failed to read offset address 0x%x\n", addr);
+
+	return err;
+}
+
+static int rsmu_reg_write(void *context, unsigned int reg, unsigned int val)
+{
+	struct rsmu_ddata *rsmu = i2c_get_clientdata((struct i2c_client *)context);
+	u8 addr = (u8)(reg & RSMU_CM_ADDRESS_MASK);
+	u8 data = (u8)val;
+	int err;
+
+	err = rsmu_write_page_register(rsmu, reg);
+	if (err)
+		return err;
+
+	err = rsmu_write_device(rsmu, addr, &data, 1);
+	if (err)
+		dev_err(rsmu->dev,
+			"Failed to write offset address 0x%x\n", addr);
+
+	return err;
+}
+
+static const struct regmap_config rsmu_cm_regmap_config = {
+	.reg_bits = 32,
+	.val_bits = 8,
+	.max_register = 0x20120000,
+	.reg_read = rsmu_reg_read,
+	.reg_write = rsmu_reg_write,
+	.cache_type = REGCACHE_NONE,
+};
+
+static const struct regmap_config rsmu_sabre_regmap_config = {
+	.reg_bits = 8,
+	.val_bits = 8,
+	.max_register = 0x400,
+	.ranges = rsmu_sabre_range_cfg,
+	.num_ranges = ARRAY_SIZE(rsmu_sabre_range_cfg),
+	.volatile_reg = rsmu_sabre_volatile_reg,
+	.cache_type = REGCACHE_RBTREE,
+	.can_multi_write = true,
+};
+
+static const struct regmap_config rsmu_sl_regmap_config = {
+	.reg_bits = 16,
+	.val_bits = 8,
+	.reg_format_endian = REGMAP_ENDIAN_BIG,
+	.max_register = 0x340,
+	.cache_type = REGCACHE_NONE,
+	.can_multi_write = true,
+};
+
+static int rsmu_i2c_probe(struct i2c_client *client,
+			  const struct i2c_device_id *id)
+{
+	const struct regmap_config *cfg;
+	struct rsmu_ddata *rsmu;
 	int ret;
 
-	rsmu = devm_kzalloc(&client->dev, sizeof(struct rsmu_dev),
-			       GFP_KERNEL);
-	if (rsmu == NULL)
+	rsmu = devm_kzalloc(&client->dev, sizeof(*rsmu), GFP_KERNEL);
+	if (!rsmu)
 		return -ENOMEM;
 
 	i2c_set_clientdata(client, rsmu);
-	mutex_init(&rsmu->lock);
+
 	rsmu->dev = &client->dev;
-	rsmu->client = client;
+	rsmu->type = (enum rsmu_type)id->driver_data;
 
-	ret = rsmu_dt_init(rsmu);
-	if (ret)
+	switch (rsmu->type) {
+	case RSMU_CM:
+		cfg = &rsmu_cm_regmap_config;
+		break;
+	case RSMU_SABRE:
+		cfg = &rsmu_sabre_regmap_config;
+		break;
+	case RSMU_SL:
+		cfg = &rsmu_sl_regmap_config;
+		break;
+	default:
+		dev_err(rsmu->dev, "Unsupported RSMU device type: %d\n", rsmu->type);
+		return -ENODEV;
+	}
+
+	if (rsmu->type == RSMU_CM)
+		rsmu->regmap = devm_regmap_init(&client->dev, NULL, client, cfg);
+	else
+		rsmu->regmap = devm_regmap_init_i2c(client, cfg);
+	if (IS_ERR(rsmu->regmap)) {
+		ret = PTR_ERR(rsmu->regmap);
+		dev_err(rsmu->dev, "Failed to allocate register map: %d\n", ret);
 		return ret;
+	}
 
-	mutex_lock(&rsmu->lock);
-
-	ret = rsmu_dev_init(rsmu);
-	if (ret == 0)
-		atomic_inc(&rsmu_ndevs);
-
-	mutex_unlock(&rsmu->lock);
-
-	return ret;
+	return rsmu_core_init(rsmu);
 }
 
-static int rsmu_remove(struct i2c_client *client)
+static int rsmu_i2c_remove(struct i2c_client *client)
 {
-	struct rsmu_dev *rsmu = i2c_get_clientdata(client);
+	struct rsmu_ddata *rsmu = i2c_get_clientdata(client);
 
-	mfd_remove_devices(&client->dev);
-	mutex_destroy(&rsmu->lock);
-	atomic_dec(&rsmu_ndevs);
+	rsmu_core_exit(rsmu);
 
 	return 0;
 }
 
-static const struct i2c_device_id rsmu_id[] = {
-	{ "8a34000", 0 },
-	{ "82p33810", 0 },
-	{ }
+static const struct i2c_device_id rsmu_i2c_id[] = {
+	{ "8a34000",  RSMU_CM },
+	{ "8a34001",  RSMU_CM },
+	{ "82p33810", RSMU_SABRE },
+	{ "82p33811", RSMU_SABRE },
+	{ "8v19n850", RSMU_SL },
+	{ "8v19n851", RSMU_SL },
+	{}
 };
-MODULE_DEVICE_TABLE(i2c, rsmu_id);
+MODULE_DEVICE_TABLE(i2c, rsmu_i2c_id);
 
-static const struct of_device_id rsmu_of_match[] = {
-	{.compatible = "idt,8a34000", },
-	{.compatible = "idt,82p33810", },
-	{},
+static const struct of_device_id rsmu_i2c_of_match[] = {
+	{ .compatible = "idt,8a34000",  .data = (void *)RSMU_CM },
+	{ .compatible = "idt,8a34001",  .data = (void *)RSMU_CM },
+	{ .compatible = "idt,82p33810", .data = (void *)RSMU_SABRE },
+	{ .compatible = "idt,82p33811", .data = (void *)RSMU_SABRE },
+	{ .compatible = "idt,8v19n850", .data = (void *)RSMU_SL },
+	{ .compatible = "idt,8v19n851", .data = (void *)RSMU_SL },
+	{}
 };
-MODULE_DEVICE_TABLE(of, rsmu_of_match);
+MODULE_DEVICE_TABLE(of, rsmu_i2c_of_match);
 
-static struct i2c_driver rsmu_driver = {
+static struct i2c_driver rsmu_i2c_driver = {
 	.driver = {
-		   .name = "rsmu-i2c",
-		   .of_match_table = of_match_ptr(rsmu_of_match),
+		.name = "rsmu-i2c",
+		.of_match_table = of_match_ptr(rsmu_i2c_of_match),
 	},
-	.probe = rsmu_probe,
-	.remove	= rsmu_remove,
-	.id_table = rsmu_id,
+	.probe = rsmu_i2c_probe,
+	.remove	= rsmu_i2c_remove,
+	.id_table = rsmu_i2c_id,
 };
 
-static int __init rsmu_init(void)
+static int __init rsmu_i2c_init(void)
 {
-	return i2c_add_driver(&rsmu_driver);
+	return i2c_add_driver(&rsmu_i2c_driver);
 }
-/* init early so consumer devices can complete system boot */
-subsys_initcall(rsmu_init);
+subsys_initcall(rsmu_i2c_init);
 
-static void __exit rsmu_exit(void)
+static void __exit rsmu_i2c_exit(void)
 {
-	i2c_del_driver(&rsmu_driver);
+	i2c_del_driver(&rsmu_i2c_driver);
 }
-module_exit(rsmu_exit);
+module_exit(rsmu_i2c_exit);
 
-MODULE_DESCRIPTION("Renesas SMU I2C multi-function driver");
+MODULE_DESCRIPTION("Renesas SMU I2C driver");
 MODULE_LICENSE("GPL");
