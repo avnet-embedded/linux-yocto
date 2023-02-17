@@ -164,6 +164,131 @@ static struct class dma_devclass = {
 
 /* --- client and device registration --- */
 
+#define dma_device_satisfies_mask(device, mask) \
+	__dma_device_satisfies_mask((device), &(mask))
+static int
+__dma_device_satisfies_mask(struct dma_device *device,
+			    const dma_cap_mask_t *want)
+{
+	dma_cap_mask_t has;
+
+	bitmap_and(has.bits, want->bits, device->cap_mask.bits,
+		DMA_TX_TYPE_END);
+	return bitmap_equal(want->bits, has.bits, DMA_TX_TYPE_END);
+}
+
+static struct module *dma_chan_to_owner(struct dma_chan *chan)
+{
+	return chan->device->owner;
+}
+
+/**
+ * balance_ref_count - catch up the channel reference count
+ * @chan - channel to balance ->client_count versus dmaengine_ref_count
+ *
+ * balance_ref_count must be called under dma_list_mutex
+ */
+static void balance_ref_count(struct dma_chan *chan)
+{
+	struct module *owner = dma_chan_to_owner(chan);
+
+	while (chan->client_count < dmaengine_ref_count) {
+		__module_get(owner);
+		chan->client_count++;
+	}
+}
+
+/**
+ * dma_chan_get - try to grab a dma channel's parent driver module
+ * @chan - channel to grab
+ *
+ * Must be called under dma_list_mutex
+ */
+static int dma_chan_get(struct dma_chan *chan)
+{
+	struct module *owner = dma_chan_to_owner(chan);
+	int ret;
+
+	/* The channel is already in use, update client count */
+	if (chan->client_count) {
+		__module_get(owner);
+		chan->client_count++;
+		return 0;
+	}
+
+	if (!try_module_get(owner))
+		return -ENODEV;
+
+	/* allocate upon first client reference */
+	if (chan->device->device_alloc_chan_resources) {
+		ret = chan->device->device_alloc_chan_resources(chan);
+		if (ret < 0)
+			goto err_out;
+	}
+
+	chan->client_count++;
+
+	if (!dma_has_cap(DMA_PRIVATE, chan->device->cap_mask))
+		balance_ref_count(chan);
+
+	return 0;
+
+err_out:
+	module_put(owner);
+	return ret;
+}
+
+/**
+ * dma_chan_put - drop a reference to a dma channel's parent driver module
+ * @chan - channel to release
+ *
+ * Must be called under dma_list_mutex
+ */
+static void dma_chan_put(struct dma_chan *chan)
+{
+	/* This channel is not in use, bail out */
+	if (!chan->client_count)
+		return;
+
+	chan->client_count--;
+	module_put(dma_chan_to_owner(chan));
+
+	/* This channel is not in use anymore, free it */
+	if (!chan->client_count && chan->device->device_free_chan_resources) {
+		/* Make sure all operations have completed */
+		dmaengine_synchronize(chan);
+		chan->device->device_free_chan_resources(chan);
+	}
+
+	/* If the channel is used via a DMA request router, free the mapping */
+	if (chan->router && chan->router->route_free) {
+		chan->router->route_free(chan->router->dev, chan->route_data);
+		chan->router = NULL;
+		chan->route_data = NULL;
+	}
+}
+
+enum dma_status dma_sync_wait(struct dma_chan *chan, dma_cookie_t cookie)
+{
+	enum dma_status status;
+	unsigned long dma_sync_wait_timeout = jiffies + msecs_to_jiffies(5000);
+
+	dma_async_issue_pending(chan);
+	do {
+		status = dma_async_is_tx_complete(chan, cookie, NULL, NULL);
+		if (time_after_eq(jiffies, dma_sync_wait_timeout)) {
+			dev_err(chan->device->dev, "%s: timeout!\n", __func__);
+			return DMA_ERROR;
+		}
+		if (status != DMA_IN_PROGRESS)
+			break;
+		cpu_relax();
+	} while (1);
+
+	return status;
+}
+EXPORT_SYMBOL(dma_sync_wait);
+
 /**
  * dma_cap_mask_all - enable iteration over all operation types
  */
