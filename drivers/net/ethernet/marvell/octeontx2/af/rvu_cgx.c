@@ -242,7 +242,6 @@ static void cgx_notify_pfs(struct cgx_link_event *event, struct rvu *rvu)
 
 	do {
 		pfid = find_first_bit(&pfmap, size);
-
 		if (pfid == size)
 			dev_err(rvu->dev,
 				"CGX port%d:%d not mapped with PF\n",
