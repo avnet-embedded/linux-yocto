@@ -21,9 +21,9 @@
 
 #define HSE_KEY_HMAC_MIN_SIZE    16u /* minimum key size admitted for HMAC */
 
-#define HSE_MAX_CTX_SIZE    368ul /* maximum streaming context size */
+#define HSE_MAX_CTX_SIZE    372ul /* maximum streaming context size */
 #define HSE_MIN_RNG_SIZE    32ul /* minimum random number length */
-#define HSE_MAX_RNG_SIZE    2048ul /* maximum random number length */
+#define HSE_MAX_RNG_SIZE    512ul /* maximum random number length */
 
 /**
  * enum hse_fw_type - HSE firmware type
@@ -73,7 +73,8 @@ enum hse_event {
 /**
  * enum hse_host_event - HSE host event
  * @HSE_HOST_PERIPH_CONFIG_DONE: sent by the host to notify HSE when external
- *				 peripherals have been configured at init-time
+ *                               peripherals have been configured at init-time
+ *                               (signal valid only when triggered from MU0)
  */
 enum hse_host_event {
 	HSE_HOST_PERIPH_CONFIG_DONE = BIT(0),
@@ -213,12 +214,14 @@ enum hse_cipher_algorithm {
  * @HSE_CIPHER_BLOCK_MODE_CBC: cipher block chaining mode
  * @HSE_CIPHER_BLOCK_MODE_ECB: electronic codebook mode
  * @HSE_CIPHER_BLOCK_MODE_CFB: cipher feedback mode
+ * @HSE_CIPHER_BLOCK_MODE_OFB: output feedback mode
  */
 enum hse_block_mode {
 	HSE_CIPHER_BLOCK_MODE_CTR = 1u,
 	HSE_CIPHER_BLOCK_MODE_CBC = 2u,
 	HSE_CIPHER_BLOCK_MODE_ECB = 3u,
 	HSE_CIPHER_BLOCK_MODE_CFB = 4u,
+	HSE_CIPHER_BLOCK_MODE_OFB = 5u,
 };
 
 /**
