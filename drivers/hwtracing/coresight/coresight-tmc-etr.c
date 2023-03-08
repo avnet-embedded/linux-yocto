@@ -698,6 +698,65 @@ static const struct etr_buf_operations etr_flat_buf_ops = {
 };
 
 /*
+ * tmc_etr_alloc_resrv_buf: Allocate a contiguous DMA buffer from reserved region.
+ */
+static int tmc_etr_alloc_resrv_buf(struct tmc_drvdata *drvdata,
+				  struct etr_buf *etr_buf, int node,
+				  void **pages)
+{
+	struct etr_flat_buf *resrv_buf;
+	struct device *real_dev = drvdata->csdev->dev.parent;
+	struct coresight_device *csdev = drvdata->csdev;
+
+	/* We cannot reuse existing pages for resrv buf */
+	if (pages)
+		return -EINVAL;
+
+	resrv_buf = kzalloc(sizeof(*resrv_buf), GFP_KERNEL);
+	if (!resrv_buf)
+		return -ENOMEM;
+
+	if (coresight_get_mode(csdev) != CS_MODE_READ_PREVBOOT)
+		memset(drvdata->resrv_mem.vaddr, 0, etr_buf->size);
+
+	resrv_buf->daddr = dma_map_resource(real_dev, drvdata->resrv_mem.paddr,
+					   etr_buf->size, DMA_FROM_DEVICE, 0);
+	if (dma_mapping_error(real_dev, resrv_buf->daddr)) {
+		dev_err(real_dev, "failed to map source buffer address\n");
+		kfree(resrv_buf);
+		return -ENOMEM;
+	}
+
+	resrv_buf->vaddr = drvdata->resrv_mem.vaddr;
+	resrv_buf->size = etr_buf->size;
+	resrv_buf->dev = &drvdata->csdev->dev;
+	etr_buf->hwaddr = resrv_buf->daddr;
+	etr_buf->mode = ETR_MODE_RESRV;
+	etr_buf->private = resrv_buf;
+	return 0;
+}
+
+static void tmc_etr_free_resrv_buf(struct etr_buf *etr_buf)
+{
+	struct etr_flat_buf *resrv_buf = etr_buf->private;
+
+	if (resrv_buf && resrv_buf->daddr) {
+		struct device *real_dev = resrv_buf->dev->parent;
+
+		dma_unmap_resource(real_dev, resrv_buf->daddr,
+				resrv_buf->size, DMA_FROM_DEVICE, 0);
+	}
+	kfree(resrv_buf);
+}
+
+static const struct etr_buf_operations etr_resrv_buf_ops = {
+	.alloc = tmc_etr_alloc_resrv_buf,
+	.free = tmc_etr_free_resrv_buf,
+	.sync = tmc_etr_sync_flat_buf,
+	.get_data = tmc_etr_get_data_flat_buf,
+};
+
+/*
  * tmc_etr_alloc_sg_buf: Allocate an SG buf @etr_buf. Setup the parameters
  * appropriately.
  */
@@ -806,6 +865,7 @@ static const struct etr_buf_operations *etr_buf_ops[] = {
 	[ETR_MODE_ETR_SG] = &etr_sg_buf_ops,
 	[ETR_MODE_CATU] = NULL,
 	[ETR_MODE_SECURE] = &etr_secure_buf_ops,
+	[ETR_MODE_RESRV] = &etr_resrv_buf_ops
 };
 
 void tmc_etr_set_catu_ops(const struct etr_buf_operations *catu)
@@ -832,6 +892,7 @@ static inline int tmc_etr_mode_alloc_buf(int mode,
 	case ETR_MODE_ETR_SG:
 	case ETR_MODE_CATU:
 	case ETR_MODE_SECURE:
+	case ETR_MODE_RESRV:
 		if (etr_buf_ops[mode] && etr_buf_ops[mode]->alloc)
 			rc = etr_buf_ops[mode]->alloc(drvdata, etr_buf,
 						      node, pages);
@@ -872,11 +933,13 @@ static struct etr_buf *tmc_alloc_etr_buf(struct tmc_drvdata *drvdata,
 					 int node, void **pages)
 {
 	int rc = -ENOMEM;
+	bool has_etr_resrv_mem;
 	struct etr_buf *etr_buf;
 	struct etr_buf_hw buf_hw;
 	struct device *dev = &drvdata->csdev->dev;
 
 	get_etr_buf_hw(dev, &buf_hw);
+	has_etr_resrv_mem = tmc_etr_has_cap(drvdata, TMC_ETR_RESRV_MEM);
 	etr_buf = kzalloc(sizeof(*etr_buf), GFP_KERNEL);
 	if (!etr_buf)
 		return ERR_PTR(-ENOMEM);
@@ -893,6 +956,12 @@ static struct etr_buf *tmc_alloc_etr_buf(struct tmc_drvdata *drvdata,
 	if (drvdata->etr_mode != ETR_MODE_AUTO)
 		rc = tmc_etr_mode_alloc_buf(drvdata->etr_mode, drvdata,
 					    etr_buf, node, pages);
+
+	if (has_etr_resrv_mem) {
+		rc = tmc_etr_mode_alloc_buf(ETR_MODE_RESRV, drvdata,
+					    etr_buf, node, pages);
+		goto done;
+	}
 
 	/*
 	 * If we have to use an existing list of pages, we cannot reliably
