@@ -31,6 +31,7 @@
 /* One digit is u64 qword. */
 #define ECC_CURVE_NIST_P192_DIGITS  3
 #define ECC_CURVE_NIST_P256_DIGITS  4
+#define ECC_CURVE_NIST_P384_DIGITS  6
 #define ECC_MAX_DIGITS             (512 / 64)
 
 #define ECC_DIGITS_TO_BYTES_SHIFT 3
@@ -188,6 +189,12 @@ int vli_cmp(const u64 *left, const u64 *right, unsigned int ndigits);
 u64 vli_sub(u64 *result, const u64 *left, const u64 *right,
 	    unsigned int ndigits);
 
+void vli_mod_add(u64 *result, const u64 *left, const u64 *right,
+		 const u64 *mod, unsigned int ndigits);
+
+void vli_mod_add(u64 *result, const u64 *left, const u64 *right,
+		 const u64 *mod, unsigned int ndigits);
+
 /**
  * vli_from_be64() - Load vli from big-endian u64 array
  *
@@ -230,6 +237,13 @@ void vli_mod_inv(u64 *result, const u64 *input, const u64 *mod,
  */
 void vli_mod_mult_slow(u64 *result, const u64 *left, const u64 *right,
 		       const u64 *mod, unsigned int ndigits);
+
+void vli_mod_mult_fast(u64 *result, const u64 *left, const u64 *right,
+		       const u64 *curve_prime, unsigned int ndigits);
+
+void ecc_point_mult(struct ecc_point *result, const struct ecc_point *point,
+		    const u64 *scalar, u64 *initial_z,
+		    const struct ecc_curve *curve, unsigned int ndigits);
 
 /**
  * ecc_point_mult_shamir() - Add two points multiplied by scalars
