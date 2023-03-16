@@ -186,6 +186,17 @@ struct etr_resrv_mem {
 };
 
 /**
+ * @paddr	: Start address for previous boot register metadata region.
+ * @vaddr	: Corresponding CPU virtual address.
+ * @size	: Size of register metadata region.
+ */
+struct tmc_reg_metadata {
+	phys_addr_t     paddr;
+	void		*vaddr;
+	size_t		size;
+};
+
+/**
  * struct etr_tsync_data - Timer based sync insertion data management
  * @syncs_per_fill:    syncs inserted per buffer wrap
  * @prev_rwp:          writepointer for the last sync insertion
@@ -226,6 +237,7 @@ struct etr_tsync_data {
  * @perf_buf:	PERF buffer for ETR.
  * @id: AMBA device ID for applying device-specific quirks.
  * @resrv_mem:	Reserved Memory for ETR buffer.
+ * @reg_metadata: Previous boot register metadata.
  */
 struct tmc_drvdata {
 	struct clk		*pclk;
@@ -259,6 +271,7 @@ struct tmc_drvdata {
 	struct hrtimer		timer;
 	const struct amba_id *id;
 	struct etr_resrv_mem	resrv_mem;
+	struct tmc_reg_metadata reg_metadata;
 };
 
 struct etr_buf_operations {
@@ -300,6 +313,19 @@ struct tmc_sg_table {
 	int node;
 	struct tmc_pages table_pages;
 	struct tmc_pages data_pages;
+};
+
+struct tmc_register_snapshot {
+	uint32_t valid;         /* Indicate if this ETF/ETR was enabled */
+	uint32_t size;          /* Size of trace data */
+	uint32_t rrphi;         /* Read Pointer High Address bits */
+	uint32_t rrp;           /* Read Pointer */
+	uint32_t rwphi;         /* Write Pointer High Address bits */
+	uint32_t rwp;           /* Write Pointer */
+	uint32_t sts;           /* Status Register */
+	uint32_t trc_addrhi;    /* High Address bits of trace data in preserved region */
+	uint32_t trc_addr;      /* Address bits of trace data in preserved region */
+	uint32_t reserved[7];
 };
 
 /* Generic functions */
