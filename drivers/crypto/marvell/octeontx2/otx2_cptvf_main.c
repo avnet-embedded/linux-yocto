@@ -382,6 +382,10 @@ static int otx2_cptvf_probe(struct pci_dev *pdev,
 		goto destroy_pfvf_mbox;
 
 	cptvf->blkaddr = (cpt_block_num == 0) ? BLKADDR_CPT0 : BLKADDR_CPT1;
+
+	ret = cpt_hw_ops_get(cptvf);
+	if (ret)
+		goto unregister_interrupts;
 	/* Initialize CPT LFs */
 	ret = cptvf_lf_init(cptvf);
 	if (ret)
