@@ -1042,12 +1042,29 @@ tmc_etr_buf_insert_barrier_packet(struct etr_buf *etr_buf, u64 offset)
 static void tmc_sync_etr_buf(struct tmc_drvdata *drvdata)
 {
 	struct etr_buf *etr_buf = drvdata->etr_buf;
+	struct coresight_device *csdev = drvdata->csdev;
 	u64 rrp, rwp;
 	u32 status;
 
 	rrp = tmc_read_rrp(drvdata);
 	rwp = tmc_read_rwp(drvdata);
 	status = readl_relaxed(drvdata->base + TMC_STS);
+
+	if (coresight_get_mode(csdev) == CS_MODE_READ_PREVBOOT && drvdata->reg_metadata.vaddr) {
+		struct tmc_register_snapshot *reg_ptr;
+
+		reg_ptr = drvdata->reg_metadata.vaddr;
+		if (reg_ptr->valid != 1) {
+			dev_err(&drvdata->csdev->dev, "No or invalid ETR register snapshot captured from previous boot\n");
+			etr_buf->len = 0;
+			etr_buf->full = false;
+			return;
+		}
+
+		rrp = reg_ptr->rrp | ((u64)reg_ptr->rrphi << 32);
+		rwp = reg_ptr->rwp | ((u64)reg_ptr->rwphi << 32);
+		status = reg_ptr->sts;
+	}
 
 	/*
 	 * If there were memory errors in the session, truncate the

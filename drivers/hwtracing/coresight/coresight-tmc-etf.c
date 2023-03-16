@@ -617,11 +617,31 @@ int tmc_read_prepare_etb(struct tmc_drvdata *drvdata)
 	enum tmc_mode mode;
 	int ret = 0;
 	unsigned long flags;
+	struct coresight_device *csdev = drvdata->csdev;
 
 	/* config types are set a boot time and never change */
 	if (WARN_ON_ONCE(drvdata->config_type != TMC_CONFIG_TYPE_ETB &&
 			 drvdata->config_type != TMC_CONFIG_TYPE_ETF))
 		return -EINVAL;
+
+	if (coresight_get_mode(csdev) == CS_MODE_READ_PREVBOOT && drvdata->reg_metadata.vaddr) {
+		struct tmc_register_snapshot *reg_ptr;
+		u64 trace_addr;
+
+		reg_ptr = drvdata->reg_metadata.vaddr;
+		trace_addr = reg_ptr->trc_addr | ((u64)reg_ptr->trc_addrhi << 32);
+
+		drvdata->buf = memremap(trace_addr, reg_ptr->size, MEMREMAP_WC);
+		if (IS_ERR(drvdata->buf))
+			return -ENOMEM;
+
+		drvdata->len = reg_ptr->size;
+
+		if (reg_ptr->sts & 0x1)
+			coresight_insert_barrier_packet(drvdata->buf);
+		drvdata->reading = true;
+		return 0;
+	}
 
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 
@@ -666,11 +686,19 @@ int tmc_read_unprepare_etb(struct tmc_drvdata *drvdata)
 	enum tmc_mode mode;
 	unsigned long flags;
 	int rc = 0;
+	struct coresight_device *csdev = drvdata->csdev;
 
 	/* config types are set a boot time and never change */
 	if (WARN_ON_ONCE(drvdata->config_type != TMC_CONFIG_TYPE_ETB &&
 			 drvdata->config_type != TMC_CONFIG_TYPE_ETF))
 		return -EINVAL;
+
+	if (coresight_get_mode(csdev) == CS_MODE_READ_PREVBOOT) {
+		drvdata->reading = false;
+		memunmap(drvdata->buf);
+		drvdata->buf = NULL;
+		return 0;
+	}
 
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 
