@@ -226,6 +226,12 @@ static const struct flash_info macronix_nor_parts[] = {
 		.n_banks = 4,
 		.flags = SPI_NOR_RWW,
 	}, {
+		.id = SNOR_ID(0xc2, 0x95, 0x3a),
+		.name = "mx25u51279g",
+		.size = SZ_64M,
+		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,
+		.fixup_flags = SPI_NOR_4B_OPCODES,
+	}, {
 		/* MX25L3255E */
 		.id = SNOR_ID(0xc2, 0x9e, 0x16),
 		.fixups = &mx25l3255e_fixups,
