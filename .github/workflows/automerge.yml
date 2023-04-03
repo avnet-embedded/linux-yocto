@@ -30,13 +30,13 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - uses: hmarr/auto-approve-action@v2
+      - uses: hmarr/auto-approve-action@v3.2.1
         name: auto_approve
         if: |
           contains(toJson(github.event.pull_request.labels.*.name), 'automerge')
         with:
           github-token: ${{ secrets.DISPATCH_PAT }}
-      - uses: "pascalgn/automerge-action@v0.15.3"
+      - uses: "pascalgn/automerge-action@v0.15.6"
         name: auto_merge
         env:
           GITHUB_TOKEN: "${{ secrets.DISPATCH_PAT }}"
