@@ -19,7 +19,11 @@ Required properties:
 
 Optional properties
 - timeout-sec: Watchdog timeout values (in seconds).
-
+ The following 2 properties need to be supplied only on systems where
+ arch_timer_get_cntfrq() is different from the actual sbsa watchdog
+ clock frequency
+- clocks: shall contain the input clock.
+- clock-names: Name of the clock used.
 Example for FVP Foundation Model v8:
 
 watchdog@2a440000 {
