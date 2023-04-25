@@ -77,12 +77,6 @@ enum etm_addr_type {
 	ETM_ADDR_TYPE_STOP,
 };
 
-enum cs_mode {
-	CS_MODE_DISABLED,
-	CS_MODE_SYSFS,
-	CS_MODE_PERF,
-};
-
 /**
  * struct cs_buffer - keep track of a recording session' specifics
  * @cur:	index of the current buffer
@@ -147,7 +141,8 @@ static inline void coresight_write_reg_pair(void __iomem *addr, u64 val,
 }
 
 void coresight_disable_path(struct list_head *path);
-int coresight_enable_path(struct list_head *path, u32 mode, void *sink_data);
+int coresight_enable_path(struct list_head *path, enum cs_mode mode,
+			  void *sink_data);
 struct coresight_device *coresight_get_sink(struct list_head *path);
 struct coresight_device *
 coresight_get_enabled_sink(struct coresight_device *source);

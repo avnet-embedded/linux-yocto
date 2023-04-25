@@ -636,7 +636,8 @@ done:
 	return size;
 }
 
-static int arm_trbe_enable(struct coresight_device *csdev, u32 mode, void *data)
+static int arm_trbe_enable(struct coresight_device *csdev, enum cs_mode mode,
+			   void *data)
 {
 	struct trbe_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
 	struct trbe_cpudata *cpudata = dev_get_drvdata(&csdev->dev);
