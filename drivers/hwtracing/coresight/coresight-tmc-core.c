@@ -444,7 +444,19 @@ static inline bool tmc_etr_has_secure_access(struct tmc_drvdata *drvdata)
 	return (auth & TMC_AUTH_SID_MASK) == 0x30;
 }
 
-static bool tmc_etr_get_reserved_region(struct device *parent, void *dev_caps)
+static inline bool is_tmc_reserved_region_valid(struct device *dev)
+{
+	struct tmc_drvdata *drvdata = dev_get_drvdata(dev);
+
+	if (drvdata->resrv_mem.paddr &&
+		drvdata->resrv_mem.size &&
+		drvdata->reg_metadata.paddr &&
+		drvdata->reg_metadata.size)
+		return true;
+	return false;
+}
+
+static void tmc_get_reserved_region(struct device *parent)
 {
 	struct tmc_drvdata *drvdata = dev_get_drvdata(parent);
 	struct device_node *node;
@@ -479,10 +491,9 @@ static bool tmc_etr_get_reserved_region(struct device *parent, void *dev_caps)
 		drvdata->size = drvdata->resrv_mem.size;
 	}
 
-	return true;
 
 out:
-	return false;
+	return;
 }
 
 /* Detect and initialise the capabilities of a TMC ETR */
@@ -510,7 +521,7 @@ static int tmc_etr_setup_caps(struct device *parent, u32 devid,
 	/* Get reserved memory region if specified and
 	 * set capability to use reserved memory for trace buffer.
 	 */
-	if (tmc_etr_get_reserved_region(parent, dev_caps))
+	if (is_tmc_reserved_region_valid(parent))
 		tmc_etr_set_cap(drvdata, TMC_ETR_RESRV_MEM);
 
 	/* Check if the AXI address width is available */
@@ -658,6 +669,7 @@ static int __tmc_probe(struct device *dev, struct resource *res)
 		}
 	}
 
+	tmc_get_reserved_region(dev);
 	tmc_parse_register_metadata_region(dev);
 
 	desc.dev = dev;
