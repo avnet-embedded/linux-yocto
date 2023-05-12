@@ -237,6 +237,7 @@ properties:
           - ti,j784s4-acspcie-proxy-ctrl
           - ti,j784s4-pcie-ctrl
           - ti,keystone-pllctrl
+          - xlnx,hdcp-keymngmt-blk-1.0
       - const: syscon
 
   reg:
