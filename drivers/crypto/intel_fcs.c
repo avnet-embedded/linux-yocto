@@ -252,11 +252,9 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 		      unsigned long arg)
 {
 	struct intel_fcs_dev_ioctl *data;
-	struct intel_fcs_dev_ioctl data_var;
 	struct intel_fcs_priv *priv;
 	struct device *dev;
 	struct stratix10_svc_client_msg *msg;
-	struct stratix10_svc_client_msg msg_var;
 	const struct firmware *fw;
 	char filename[FILE_NAME_SIZE];
 	size_t tsz, rsz, datasz, ud_sz;
@@ -274,8 +272,14 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 
 	priv = container_of(file->private_data, struct intel_fcs_priv, miscdev);
 	dev = priv->client.dev;
-	data = &data_var;
-	msg = &msg_var;
+
+	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
+	if (!data)
+		return -ENOMEM;
+
+	msg = devm_kzalloc(dev, sizeof(*msg), GFP_KERNEL);
+	if (!msg)
+		return -ENOMEM;
 
 	switch (cmd) {
 	case INTEL_FCS_DEV_VALIDATION_REQUEST:
@@ -470,6 +474,7 @@ static long fcs_ioctl(struct file *file, unsigned int cmd,
 			dev_err(dev, "failed to allocate RNG buffer\n");
 			return -ENOMEM;
 		}
+
 		msg->command = COMMAND_FCS_RANDOM_NUMBER_GEN;
 		msg->payload = s_buf;
 		msg->payload_length = RANDOM_NUMBER_SIZE;
@@ -2461,7 +2466,6 @@ static int fcs_close(struct inode *inode, struct file *file)
 static int fcs_rng_read(struct hwrng *rng, void *buf, size_t max, bool wait)
 {
 	struct stratix10_svc_client_msg *msg;
-	struct stratix10_svc_client_msg msg_var;
 	struct intel_fcs_priv *priv;
 	struct device *dev;
 	void *s_buf;
@@ -2480,7 +2484,12 @@ static int fcs_rng_read(struct hwrng *rng, void *buf, size_t max, bool wait)
 
 	priv = (struct intel_fcs_priv *)rng->priv;
 	dev = priv->client.dev;
-	msg = &msg_var;
+
+	msg = devm_kzalloc(dev, sizeof(*msg), GFP_KERNEL);
+	if (!msg) {
+		dev_err(dev, "failed to allocate msg buffer\n");
+		return -ENOMEM;
+	}
 
 	s_buf = stratix10_svc_allocate_memory(priv->chan,
 					      RANDOM_NUMBER_SIZE);
@@ -2488,6 +2497,7 @@ static int fcs_rng_read(struct hwrng *rng, void *buf, size_t max, bool wait)
 		dev_err(dev, "failed to allocate random number buffer\n");
 		return -ENOMEM;
 	}
+
 	msg->command = COMMAND_FCS_RANDOM_NUMBER_GEN;
 	msg->payload = s_buf;
 	msg->payload_length = RANDOM_NUMBER_SIZE;
