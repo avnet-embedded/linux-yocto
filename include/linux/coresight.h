@@ -290,6 +290,7 @@ enum cs_mode {
 #define link_ops(csdev)		csdev->ops->link_ops
 #define helper_ops(csdev)	csdev->ops->helper_ops
 #define ect_ops(csdev)		csdev->ops->ect_ops
+#define panic_ops(csdev)	csdev->ops->panic_ops
 
 /**
  * struct coresight_ops_sink - basic operations for a sink
@@ -358,6 +359,15 @@ struct coresight_ops_helper {
 };
 
 /**
+ * struct coresight_ops_panic - Generic device ops for panic handing
+ *
+ * @sync	: Sync the device register state/trace data
+ */
+struct coresight_ops_panic {
+	int (*sync)(struct coresight_device *csdev);
+};
+ 
+/**
  * struct coresight_ops_ect - Ops for an embedded cross trigger device
  *
  * @enable	: Enable the device
@@ -374,6 +384,7 @@ struct coresight_ops {
 	const struct coresight_ops_source *source_ops;
 	const struct coresight_ops_helper *helper_ops;
 	const struct coresight_ops_ect *ect_ops;
+	const struct coresight_ops_panic *panic_ops;
 };
 
 #if IS_ENABLED(CONFIG_CORESIGHT)
