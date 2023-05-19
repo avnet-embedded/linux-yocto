@@ -170,5 +170,12 @@
 #define MEDIA_BUS_FMT_UYYVYY16_4X32		0x2106
 #define MEDIA_BUS_FMT_VUY16_1X48		0x2107
 #define MEDIA_BUS_FMT_UYVY16_2X32		0x2108
+/*
+ * This format should be used when the same driver handles
+ * both sides of the link and the bus format is a fixed
+ * metadata format that is not configurable from userspace.
+ * Width and height will be set to 0 for this format.
+ */
+#define MEDIA_BUS_FMT_METADATA_FIXED		0x7001
 
 #endif /* __LINUX_MEDIA_BUS_FORMAT_H */
