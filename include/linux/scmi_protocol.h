@@ -8,6 +8,7 @@
 #ifndef _LINUX_SCMI_PROTOCOL_H
 #define _LINUX_SCMI_PROTOCOL_H
 
+#include <linux/list.h>
 #include <linux/bitfield.h>
 #include <linux/device.h>
 #include <linux/notifier.h>
@@ -793,6 +794,15 @@ struct scmi_pinctrl_pinconf {
 	u32 *multi_bit_values;
 };
 
+struct scmi_pinctrl_pin_list_elem {
+	struct list_head list;
+	u16 pin;
+};
+
+struct scmi_pinctrl_pin_list {
+	struct list_head list;
+};
+
 /**
  * struct scmi_pinctrl_proto_ops - represents the various operations provided
  * by SCMI Pinctrl Protocol
@@ -872,6 +882,12 @@ static inline size_t scmi_pinctrl_mb_configs_size(u32 mask)
 	       sizeof(*((struct scmi_pinctrl_pinconf *)0)->multi_bit_values);
 }
 
+void scmi_pinctrl_pin_list_init(struct scmi_pinctrl_pin_list *list);
+struct scmi_pinctrl_pin_list_elem *
+	scmi_pinctrl_pin_list_remove_pin(struct scmi_pinctrl_pin_list *list,
+					 u16 pin);
+int scmi_pinctrl_pin_list_add_pin(struct scmi_pinctrl_pin_list *list,
+				  struct scmi_pinctrl_pin_list_elem *p);
 int scmi_pinctrl_create_pcf(unsigned long *configs,
 			    unsigned int num_configs,
 			    struct scmi_pinctrl_pinconf *pcf);
