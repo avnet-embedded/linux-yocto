@@ -11,23 +11,17 @@ jobs:
   git-sync:
     runs-on: ubuntu-latest
     steps:
+      - name: checkout
+        uses: actions/checkout@v3.5.2
       - name: get upstream repo
         id: upstream-repo
         run: |
           echo "upstream=$(echo ${{ github.repository }} | cut -d'/' -f2)" >> $GITHUB_OUTPUT
       - name: git-sync
-        uses: wei/git-sync@v3.0.0
+        uses: repo-sync/github-sync@v2.3.0
         with:
           source_repo: "https://git.yoctoproject.org/${{ steps.upstream-repo.outputs.upstream }}"
-          destination_repo: "${{ github.repository }}"
-          source_branch: "refs/remotes/source/*"
-          destination_branch: "refs/heads/*"
-          destination_ssh_private_key: "${{ secrets.SSH_PRIVATE_KEY_TARGET }}"
-      - name: git-sync-tags
-        uses: wei/git-sync@v3.0.0
-        with:
-          source_repo: "https://git.yoctoproject.org/${{ steps.upstream-repo.outputs.upstream }}"
-          destination_repo: "${{ github.repository }}"
-          source_branch: "refs/tags/*"
-          destination_branch: "refs/tags/*"
-          destination_ssh_private_key: "${{ secrets.SSH_PRIVATE_KEY_TARGET }}"
+          source_branch: "*"
+          destination_branch: "*"
+          sync_tags: "true"
+          github_token: ${{ secrets.DISPATCH_PAT }}
