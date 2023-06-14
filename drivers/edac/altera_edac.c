@@ -90,7 +90,7 @@ static irqreturn_t altr_sdram_mc_err_handler(int irq, void *dev_id)
 	if (status & priv->ecc_stat_ue_mask) {
 		regmap_read(drvdata->mc_vbase, priv->ecc_daddr_offset,
 			    &err_addr);
-		if (priv->ecc_uecnt_offset)
+		if (priv->ecc_cecnt_offset)
 			regmap_read(drvdata->mc_vbase, priv->ecc_uecnt_offset,
 				    &err_count);
 		panic("\nEDAC: [%d Uncorrectable errors @ 0x%08X]\n",
