@@ -181,6 +181,7 @@ static void dwc3_gadget_del_and_unmap_request(struct dwc3_ep *dep,
 	req->remaining = 0;
 	req->needs_extra_trb = false;
 	req->skip_remain_trbs = false;
+	req->num_trbs = 0;
 
 	if (req->request.status == -EINPROGRESS)
 		req->request.status = status;
