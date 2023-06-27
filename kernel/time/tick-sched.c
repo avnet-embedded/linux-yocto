@@ -87,16 +87,16 @@ static void tick_do_update_jiffies64(ktime_t now)
 	write_seqcount_begin(&jiffies_seq);
 
 	delta = ktime_sub(now, last_jiffies_update);
-	if (delta >= tick_period) {
+	if (delta >= TICK_NSEC) {
 
-		delta = ktime_sub(delta, tick_period);
+		delta = ktime_sub(delta, TICK_NSEC);
 		/* Pairs with the lockless read in this function. */
 		WRITE_ONCE(last_jiffies_update,
-			   ktime_add(last_jiffies_update, tick_period));
+			   ktime_add(last_jiffies_update, TICK_NSEC));
 
 		/* Slow path for long timeouts */
-		if (unlikely(delta >= tick_period)) {
-			s64 incr = ktime_to_ns(tick_period);
+		if (unlikely(delta >= TICK_NSEC)) {
+			s64 incr = ktime_to_ns(TICK_NSEC);
 
 			ticks = ktime_divns(delta, incr);
 
@@ -108,7 +108,7 @@ static void tick_do_update_jiffies64(ktime_t now)
 		do_timer(++ticks);
 
 		/* Keep the tick_next_period variable up to date */
-		tick_next_period = ktime_add(last_jiffies_update, tick_period);
+		tick_next_period = ktime_add(last_jiffies_update, TICK_NSEC);
 	} else {
 		write_seqcount_end(&jiffies_seq);
 		raw_spin_unlock(&jiffies_lock);
