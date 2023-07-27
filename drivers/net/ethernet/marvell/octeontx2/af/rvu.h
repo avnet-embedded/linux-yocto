@@ -579,6 +579,16 @@ static inline bool is_cgx_mapped_to_nix(unsigned short id, u8 cgx_id)
 			     id == PCI_SUBSYS_DEVID_98XX));
 }
 
+static inline bool is_rvu_supports_nix1(struct rvu *rvu)
+{
+	struct pci_dev *pdev = rvu->pdev;
+
+	if (pdev->subsystem_device == PCI_SUBSYS_DEVID_98XX)
+		return true;
+
+	return false;
+}
+
 /* Function Prototypes
  * RVU
  */
