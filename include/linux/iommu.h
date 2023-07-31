@@ -699,6 +699,10 @@ struct iommu_sva *iommu_sva_bind_device(struct device *dev,
 void iommu_sva_unbind_device(struct iommu_sva *handle);
 u32 iommu_sva_get_pasid(struct iommu_sva *handle);
 
+int iommu_group_set_qos_params(struct iommu_group *group,
+			       u16 partition, u8 perf_mon_grp);
+int iommu_group_get_qos_params(struct iommu_group *group,
+			       u16 *partition, u8 *perf_mon_grp);
 #else /* CONFIG_IOMMU_API */
 
 struct iommu_ops {};
@@ -1098,6 +1102,18 @@ static inline int iommu_sva_unbind_gpasid(struct iommu_domain *domain,
 static inline struct iommu_fwspec *dev_iommu_fwspec_get(struct device *dev)
 {
 	return NULL;
+}
+
+static inline int iommu_group_set_qos_params(struct iommu_group *group,
+					     u16 partition, u8 perf_mon_grp)
+{
+	return -ENODEV;
+}
+
+static inline int iommu_group_get_qos_params(struct iommu_group *group,
+					     u16 *partition, u8 *perf_mon_grp)
+{
+	return -ENODEV;
 }
 #endif /* CONFIG_IOMMU_API */
 
