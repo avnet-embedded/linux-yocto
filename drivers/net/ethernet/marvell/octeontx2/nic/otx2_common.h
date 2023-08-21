@@ -14,6 +14,7 @@
 #include <linux/ptp_clock_kernel.h>
 #include <linux/timecounter.h>
 #include <linux/soc/marvell/octeontx2/asm.h>
+#include <net/macsec.h>
 #include <net/pkt_cls.h>
 #include <net/devlink.h>
 #include <linux/time64.h>
@@ -27,6 +28,9 @@
 #include "otx2_devlink.h"
 #include <rvu_trace.h>
 #include "qos.h"
+
+/* IPv4 flag more fragment bit */
+#define IPV4_FLAG_MORE				0x20
 
 /* PCI device IDs */
 #define PCI_DEVID_OCTEONTX2_RVU_PF              0xA063
@@ -312,6 +316,7 @@ struct otx2_ptp {
 	bool ptp_en;
 	u64 (*convert_rx_ptp_tstmp)(u64 timestamp);
 	u64 (*convert_tx_ptp_tstmp)(u64 timestamp);
+	u64 (*ptp_tstamp2nsec)(struct timecounter *time_counter, u64 timestamp);
 	struct delayed_work synctstamp_work;
 	u64 tstamp;
 	u32 base_ns;
@@ -341,20 +346,15 @@ struct otx2_flow_config {
 #define OTX2_VF_VLAN_RX_INDEX	0
 #define OTX2_VF_VLAN_TX_INDEX	1
 	u16                     max_flows;
-	u8			dmacflt_max_flows;
+	u32			dmacflt_max_flows;
 	u32			*bmap_to_dmacindex;
 	unsigned long		*dmacflt_bmap;
 	struct list_head	flow_list;
+	struct list_head	flow_list_tc;
+	bool			ntuple;
 };
 
 #define OTX2_HW_TIMESTAMP_LEN	8
-
-struct otx2_tc_info {
-	/* hash table to store TC offloaded flows */
-	struct rhashtable		flow_table;
-	struct rhashtable_params	flow_ht_params;
-	unsigned long			*tc_entries_bitmap;
-};
 
 struct dev_hw_ops {
 	int	(*sq_aq_init)(void *dev, u16 qidx, u8 chan_offset, u16 sqb_aura);
@@ -396,7 +396,7 @@ struct cn10k_mcs_txsc {
 	struct cn10k_txsc_stats stats;
 	struct list_head entry;
 	enum macsec_validation_type last_validate_frames;
-	bool last_protect_frames;
+	bool last_replay_protect;
 	u16 hw_secy_id_tx;
 	u16 hw_secy_id_rx;
 	u16 hw_flow_id;
@@ -405,6 +405,9 @@ struct cn10k_mcs_txsc {
 	u8 sa_bmap;
 	u8 sa_key[CN10K_MCS_SA_PER_SC][MACSEC_MAX_KEY_LEN];
 	u8 encoding_sa;
+	u8 salt[CN10K_MCS_SA_PER_SC][MACSEC_SALT_LEN];
+	ssci_t ssci[CN10K_MCS_SA_PER_SC];
+	bool vlan_dev; /* macsec running on VLAN ? */
 };
 
 struct cn10k_mcs_rxsc {
@@ -417,6 +420,8 @@ struct cn10k_mcs_rxsc {
 	u16 hw_sa_id[CN10K_MCS_SA_PER_SC];
 	u8 sa_bmap;
 	u8 sa_key[CN10K_MCS_SA_PER_SC][MACSEC_MAX_KEY_LEN];
+	u8 salt[CN10K_MCS_SA_PER_SC][MACSEC_SALT_LEN];
+	ssci_t ssci[CN10K_MCS_SA_PER_SC];
 };
 
 struct cn10k_mcs_cfg {
@@ -497,7 +502,6 @@ struct otx2_nic {
 	struct otx2_ptp		*ptp;
 	struct hwtstamp_config	tstamp;
 	struct otx2_mac_table	*mac_table;
-	struct otx2_tc_info	tc_info;
 	struct workqueue_struct	*otx2_ndo_wq;
 	struct work_struct	otx2_rx_mode_work;
 
@@ -786,8 +790,10 @@ static inline void cn10k_aura_freeptr(void *dev, int aura, u64 buf)
 	u64 ptrs[2] = {0};
 
 	ptrs[1] = buf;
+	get_cpu();
 	/* Free only one buffer at time during init and teardown */
 	__cn10k_aura_freeptr(pfvf, aura, ptrs, 2);
+	put_cpu();
 }
 /* Alloc pointer from pool/aura */
 static inline u64 otx2_aura_allocptr(struct otx2_nic *pfvf, int aura)
@@ -838,7 +844,7 @@ static inline int otx2_sync_mbox_up_msg(struct mbox *mbox, int devid)
 
 	if (!otx2_mbox_nonempty(&mbox->mbox_up, devid))
 		return 0;
-	otx2_mbox_msg_send(&mbox->mbox_up, devid);
+	otx2_mbox_msg_send_up(&mbox->mbox_up, devid);
 	err = otx2_mbox_wait_for_rsp(&mbox->mbox_up, devid);
 	if (err)
 		return err;
@@ -939,7 +945,7 @@ static inline int otx2_tc_flower_rule_cnt(struct otx2_nic *pfvf)
 	if (!pfvf->flow_cfg)
 		return 0;
 
-	return bitmap_weight(pfvf->tc_info.tc_entries_bitmap, pfvf->flow_cfg->max_flows);
+	return pfvf->flow_cfg->nr_flows;
 }
 
 static inline int otx2_is_ntuple_rule_installed(struct otx2_nic *pfvf)
@@ -947,7 +953,7 @@ static inline int otx2_is_ntuple_rule_installed(struct otx2_nic *pfvf)
 	if (!pfvf->flow_cfg)
 		return false;
 
-	return (!otx2_tc_flower_rule_cnt(pfvf) && pfvf->flow_cfg->nr_flows);
+	return pfvf->flow_cfg->nr_flows;
 }
 
 /* MSI-X APIs */
@@ -1071,7 +1077,8 @@ int otx2_init_tc(struct otx2_nic *nic);
 void otx2_shutdown_tc(struct otx2_nic *nic);
 int otx2_setup_tc(struct net_device *netdev, enum tc_setup_type type,
 		  void *type_data);
-int otx2_tc_alloc_ent_bitmap(struct otx2_nic *nic);
+void otx2_tc_apply_ingress_police_rules(struct otx2_nic *nic);
+
 /* CGX/RPM DMAC filters support */
 int otx2_dmacflt_get_max_cnt(struct otx2_nic *pf);
 int otx2_dmacflt_add(struct otx2_nic *pf, const u8 *mac, u32 bit_pos);

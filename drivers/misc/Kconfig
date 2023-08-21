@@ -484,7 +484,7 @@ config MARVELL_LOKI
 
 config RSMU
 	tristate "Renesas Synchronization Management Unit (SMU)"
-	depends on MFD_RSMU_I2C
+	depends on MFD_RSMU_I2C || MFD_RSMU_SPI
 	help
 	  This option enables support for Renesas SMU, such as Clockmatrix and
 	  82P33XXX series. It will be used by Renesas PTP Clock Manager for

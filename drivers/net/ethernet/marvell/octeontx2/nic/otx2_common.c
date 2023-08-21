@@ -650,7 +650,7 @@ int otx2_txschq_config(struct otx2_nic *pfvf, int lvl)
 	} else if (lvl == NIX_TXSCH_LVL_TL4) {
 		parent =  hw->txschq_list[NIX_TXSCH_LVL_TL3][0];
 		req->reg[0] = NIX_AF_TL4X_PARENT(schq);
-		req->regval[0] = parent << 16;
+		req->regval[0] = (u64)parent << 16;
 		req->num_regs++;
 		req->reg[1] = NIX_AF_TL4X_SCHEDULE(schq);
 		req->regval[1] = dwrr_val;
@@ -662,7 +662,7 @@ int otx2_txschq_config(struct otx2_nic *pfvf, int lvl)
 	} else if (lvl == NIX_TXSCH_LVL_TL3) {
 		parent = hw->txschq_list[NIX_TXSCH_LVL_TL2][0];
 		req->reg[0] = NIX_AF_TL3X_PARENT(schq);
-		req->regval[0] = parent << 16;
+		req->regval[0] = (u64)parent << 16;
 		req->num_regs++;
 		req->reg[1] = NIX_AF_TL3X_SCHEDULE(schq);
 		req->regval[1] = dwrr_val;
@@ -675,11 +675,11 @@ int otx2_txschq_config(struct otx2_nic *pfvf, int lvl)
 	} else if (lvl == NIX_TXSCH_LVL_TL2) {
 		parent =  hw->txschq_list[NIX_TXSCH_LVL_TL1][0];
 		req->reg[0] = NIX_AF_TL2X_PARENT(schq);
-		req->regval[0] = parent << 16;
+		req->regval[0] = (u64)parent << 16;
 
 		req->num_regs++;
 		req->reg[1] = NIX_AF_TL2X_SCHEDULE(schq);
-		req->regval[1] = TXSCH_TL1_DFLT_RR_PRIO << 24 | dwrr_val;
+		req->regval[1] = (u64)TXSCH_TL1_DFLT_RR_PRIO << 24 | dwrr_val;
 
 		if (lvl == hw->txschq_link_cfg_lvl && !is_otx2_sdpvf(pfvf->pdev)) {
 			req->num_regs++;
@@ -1171,8 +1171,8 @@ void otx2_sq_free_sqbs(struct otx2_nic *pfvf)
 			dma_unmap_page_attrs(pfvf->dev, iova, hw->sqb_size,
 					     DMA_FROM_DEVICE,
 					     DMA_ATTR_SKIP_CPU_SYNC);
-			if (page_ref_count(virt_to_page(phys_to_virt(pa))))
-				put_page(virt_to_page(phys_to_virt(pa)));
+			if (page_ref_count(virt_to_head_page(phys_to_virt(pa))))
+				page_frag_free(phys_to_virt(pa));
 		}
 		sq->sqb_count = 0;
 	}
@@ -1205,8 +1205,8 @@ void otx2_free_aura_ptr(struct otx2_nic *pfvf, int type)
 			dma_unmap_page_attrs(pfvf->dev, iova, size,
 					     DMA_FROM_DEVICE,
 					     DMA_ATTR_SKIP_CPU_SYNC);
-			if (page_ref_count(virt_to_page(phys_to_virt(pa))))
-				put_page(virt_to_page(phys_to_virt(pa)));
+			if (page_ref_count(virt_to_head_page(phys_to_virt(pa))))
+				page_frag_free(phys_to_virt(pa));
 			iova = otx2_aura_allocptr(pfvf, pool_id);
 		}
 	}
@@ -1467,13 +1467,12 @@ int otx2_rq_aura_pool_init(struct otx2_nic *pfvf)
 		for (ptr = 0; ptr < num_ptrs; ptr++) {
 			err = otx2_alloc_rbuf(pfvf, pool, &bufptr);
 			if (err)
-				goto err_mem;
+				return -ENOMEM;
 			pfvf->hw_ops->aura_freeptr(pfvf, pool_id,
 						   bufptr + OTX2_HEAD_ROOM);
 		}
 	}
-err_mem:
-	return err ? -ENOMEM : 0;
+	return 0;
 fail:
 	otx2_mbox_reset(&pfvf->mbox.mbox, 0);
 	otx2_aura_pool_free(pfvf);

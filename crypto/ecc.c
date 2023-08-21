@@ -32,10 +32,10 @@
 #include <linux/fips.h>
 #include <crypto/ecdh.h>
 #include <crypto/rng.h>
+#include <crypto/internal/ecc.h>
 #include <asm/unaligned.h>
 #include <linux/ratelimit.h>
 
-#include "ecc.h"
 #include "ecc_curve_defs.h"
 
 typedef struct {
@@ -52,6 +52,8 @@ const struct ecc_curve *ecc_get_curve(unsigned int curve_id)
 		return fips_enabled ? NULL : &nist_p192;
 	case ECC_CURVE_NIST_P256:
 		return &nist_p256;
+	case ECC_CURVE_NIST_P384:
+		return &nist_p384;
 	default:
 		return NULL;
 	}
@@ -157,7 +159,7 @@ static unsigned int vli_num_digits(const u64 *vli, unsigned int ndigits)
 }
 
 /* Counts the number of bits required for vli. */
-static unsigned int vli_num_bits(const u64 *vli, unsigned int ndigits)
+unsigned int vli_num_bits(const u64 *vli, unsigned int ndigits)
 {
 	unsigned int i, num_digits;
 	u64 digit;
@@ -477,7 +479,7 @@ static void vli_square(u64 *result, const u64 *left, unsigned int ndigits)
 /* Computes result = (left + right) % mod.
  * Assumes that left < mod and right < mod, result != mod.
  */
-static void vli_mod_add(u64 *result, const u64 *left, const u64 *right,
+void vli_mod_add(u64 *result, const u64 *left, const u64 *right,
 			const u64 *mod, unsigned int ndigits)
 {
 	u64 carry;
@@ -490,6 +492,7 @@ static void vli_mod_add(u64 *result, const u64 *left, const u64 *right,
 	if (carry || vli_cmp(result, mod, ndigits) >= 0)
 		vli_sub(result, result, mod, ndigits);
 }
+EXPORT_SYMBOL(vli_mod_add);
 
 /* Computes result = (left - right) % mod.
  * Assumes that left < mod and right < mod, result != mod.
@@ -834,7 +837,7 @@ void vli_mod_mult_slow(u64 *result, const u64 *left, const u64 *right,
 EXPORT_SYMBOL(vli_mod_mult_slow);
 
 /* Computes result = (left * right) % curve_prime. */
-static void vli_mod_mult_fast(u64 *result, const u64 *left, const u64 *right,
+void vli_mod_mult_fast(u64 *result, const u64 *left, const u64 *right,
 			      const u64 *curve_prime, unsigned int ndigits)
 {
 	u64 product[2 * ECC_MAX_DIGITS];
@@ -1142,10 +1145,10 @@ static void xycz_add_c(u64 *x1, u64 *y1, u64 *x2, u64 *y2, u64 *curve_prime,
 	vli_set(x1, t7, ndigits);
 }
 
-static void ecc_point_mult(struct ecc_point *result,
-			   const struct ecc_point *point, const u64 *scalar,
-			   u64 *initial_z, const struct ecc_curve *curve,
-			   unsigned int ndigits)
+void ecc_point_mult(struct ecc_point *result,
+		    const struct ecc_point *point, const u64 *scalar,
+		    u64 *initial_z, const struct ecc_curve *curve,
+		    unsigned int ndigits)
 {
 	/* R0 and R1 */
 	u64 rx[2][ECC_MAX_DIGITS];
@@ -1204,6 +1207,7 @@ static void ecc_point_mult(struct ecc_point *result,
 	vli_set(result->x, rx[0], ndigits);
 	vli_set(result->y, ry[0], ndigits);
 }
+EXPORT_SYMBOL(ecc_point_mult);
 
 /* Computes R = P + Q mod p */
 static void ecc_point_add(const struct ecc_point *result,
@@ -1283,16 +1287,6 @@ void ecc_point_mult_shamir(const struct ecc_point *result,
 	apply_z(rx, ry, z, curve->p, ndigits);
 }
 EXPORT_SYMBOL(ecc_point_mult_shamir);
-
-static inline void ecc_swap_digits(const u64 *in, u64 *out,
-				   unsigned int ndigits)
-{
-	const __be64 *src = (__force __be64 *)in;
-	int i;
-
-	for (i = 0; i < ndigits; i++)
-		out[i] = be64_to_cpu(src[ndigits - 1 - i]);
-}
 
 static int __ecc_is_key_valid(const struct ecc_curve *curve,
 			      const u64 *private_key, unsigned int ndigits)
