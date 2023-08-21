@@ -121,6 +121,7 @@ enum LMAC_TYPE {
 	LMAC_MODE_50G_R		= 8,
 	LMAC_MODE_100G_R	= 9,
 	LMAC_MODE_USXGMII	= 10,
+	LMAC_MODE_USGMII	= 11,
 	LMAC_MODE_MAX,
 };
 
@@ -203,7 +204,7 @@ int cgx_lmac_get_pfc_frm_cfg(void *cgxd, int lmac_id, u8 *tx_pause,
 			     u8 *rx_pause);
 int verify_lmac_fc_cfg(void *cgxd, int lmac_id, u8 tx_pause, u8 rx_pause,
 		       int pfvf_idx);
-int cgx_lmac_reset(void *cgxd, int lmac_id);
+int cgx_lmac_reset(void *cgxd, int lmac_id, u8 pf_req_flr);
 u8 cgx_lmac_get_p2x(int cgx_id, int lmac_id);
 u64 cgx_get_dmacflt_dropped_pktcnt(void *cgx, int lmac_id);
 

@@ -1,17 +1,15 @@
 /* SPDX-License-Identifier: GPL-2.0+ */
-/* idt82p33_reg.h
+/*
+ * Register Map - Based on AN888_SMUforIEEE_SynchEther_82P33xxx_RevH.pdf
  *
- * Register Map - AN888_SMUforIEEE_SynchEther_82P33xxx_RevH.pdf
- *
+ * Copyright (C) 2021 Integrated Device Technology, Inc., a Renesas Company.
  */
 #ifndef HAVE_IDT82P33_REG
 #define HAVE_IDT82P33_REG
 
-/* Register address */
 #define REG_ADDR(page, offset) (((page) << 0x7) | ((offset) & 0x7f))
 
-#define PAGE_ADDR 0x7F
-
+/* Register address */
 #define DPLL1_TOD_CNFG 0x134
 #define DPLL2_TOD_CNFG 0x1B4
 
@@ -23,6 +21,12 @@
 
 #define DPLL1_OPERATING_MODE_CNFG 0x120
 #define DPLL2_OPERATING_MODE_CNFG 0x1A0
+
+#define DPLL1_HOLDOVER_MODE_CNFG_LSB 0x12A
+#define DPLL1_HOLDOVER_MODE_CNFG_MSB 0x12B
+
+#define DPLL2_HOLDOVER_MODE_CNFG_LSB 0x1A9
+#define DPLL2_HOLDOVER_MODE_CNFG_MSB 0x1AA
 
 #define DPLL1_HOLDOVER_FREQ_CNFG 0x12C
 #define DPLL2_HOLDOVER_FREQ_CNFG 0x1AC
@@ -102,7 +106,7 @@ enum hw_tod_trig_sel {
 	WR_TRIG_SEL_MAX = HW_TOD_WR_TRIG_SEL_MSB_TOD_CNFG,
 };
 
-/** @brief Enumerated type listing DPLL operational modes */
+/* Enumerated type listing DPLL operational modes */
 enum dpll_state {
 	DPLL_STATE_FREERUN = 1,
 	DPLL_STATE_HOLDOVER = 2,
@@ -110,7 +114,7 @@ enum dpll_state {
 	DPLL_STATE_PRELOCKED2 = 5,
 	DPLL_STATE_PRELOCKED = 6,
 	DPLL_STATE_LOSTPHASE = 7,
-	DPLL_STATE_MAX
+	DPLL_STATE_MAX = DPLL_STATE_LOSTPHASE,
 };
 
 #endif
