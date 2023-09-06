@@ -2956,7 +2956,7 @@ static void cpuset_css_free(struct cgroup_subsys_state *css)
 
 static void cpuset_bind(struct cgroup_subsys_state *root_css)
 {
-	percpu_down_write(&cpuset_rwsem);
+	mutex_lock(&cpuset_mutex);
 	raw_spin_lock_irq(&callback_lock);
 
 	if (is_in_v2_mode()) {
@@ -2969,7 +2969,7 @@ static void cpuset_bind(struct cgroup_subsys_state *root_css)
 	}
 
 	raw_spin_unlock_irq(&callback_lock);
-	percpu_up_write(&cpuset_rwsem);
+	mutex_unlock(&cpuset_mutex);
 }
 
 /*
