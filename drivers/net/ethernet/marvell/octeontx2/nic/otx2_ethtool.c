@@ -1328,7 +1328,6 @@ static int otx2_get_link_ksettings(struct net_device *netdev,
 	return 0;
 }
 
-#define OTX2_OVERWRITE_DEF 1
 static int otx2_set_link_ksettings(struct net_device *netdev,
 				   const struct ethtool_link_ksettings *cmd)
 {
@@ -1390,7 +1389,6 @@ static int otx2_set_link_ksettings(struct net_device *netdev,
 		rsp = (struct cgx_set_link_mode_rsp *)
 			otx2_mbox_get_rsp(&pf->mbox.mbox, 0, &req->hdr);
 		err = rsp->status;
-
 	}
 end:
 	mutex_unlock(&mbox->lock);
