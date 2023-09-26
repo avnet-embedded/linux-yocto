@@ -6516,6 +6516,23 @@ static int mvpp2_ethtool_get_rxnfc(struct net_device *dev,
 	case ETHTOOL_GRXRINGS:
 		info->data = port->nrxqs;
 		break;
+	case ETHTOOL_GRXCLSRLCNT:
+		info->rule_cnt = port->n_rfs_rules;
+		break;
+	case ETHTOOL_GRXCLSRULE:
+		ret = mvpp2_ethtool_cls_rule_get(port, info);
+		break;
+	case ETHTOOL_GRXCLSRLALL:
+		for (i = 0; i < MVPP2_N_RFS_ENTRIES_PER_FLOW; i++) {
+			if (loc == info->rule_cnt) {
+				ret = -EMSGSIZE;
+				break;
+			}
+
+			if (port->rfs_rules[i])
+				rules[loc++] = i;
+		}
+		break;
 	default:
 		return -ENOTSUPP;
 	}
