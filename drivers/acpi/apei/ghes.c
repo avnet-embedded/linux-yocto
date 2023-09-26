@@ -1498,7 +1498,7 @@ static struct platform_driver ghes_platform_driver = {
 	.remove		= ghes_remove,
 };
 
-static int __init ghes_init(void)
+void __init ghes_init(void)
 {
 	int rc;
 
@@ -1508,39 +1508,32 @@ static int __init ghes_init(void)
 
 	switch (hest_disable) {
 	case HEST_NOT_FOUND:
-		return -ENODEV;
+		return;
 	case HEST_DISABLED:
 		pr_info(GHES_PFX "HEST is not enabled!\n");
-		return -EINVAL;
+		return;
 	default:
 		break;
 	}
 
 	if (ghes_disable) {
 		pr_info(GHES_PFX "GHES is not enabled!\n");
-		return -EINVAL;
+		return;
 	}
 
 	ghes_nmi_init_cxt();
 
 	rc = platform_driver_register(&ghes_platform_driver);
 	if (rc)
-		goto err;
+		return;
 
-	if (!acpi_disabled) {
-		rc = apei_osc_setup();
-		if (rc == 0 && osc_sb_apei_support_acked)
-			pr_info(GHES_PFX "APEI firmware first mode is enabled by APEI bit and WHEA _OSC.\n");
-		else if (rc == 0 && !osc_sb_apei_support_acked)
-			pr_info(GHES_PFX "APEI firmware first mode is enabled by WHEA _OSC.\n");
-		else if (rc && osc_sb_apei_support_acked)
-			pr_info(GHES_PFX "APEI firmware first mode is enabled by APEI bit.\n");
-		else
-			pr_info(GHES_PFX "Failed to enable APEI firmware first mode.\n");
-	}
-
-	return 0;
-err:
-	return rc;
+	rc = apei_osc_setup();
+	if (rc == 0 && osc_sb_apei_support_acked)
+		pr_info(GHES_PFX "APEI firmware first mode is enabled by APEI bit and WHEA _OSC.\n");
+	else if (rc == 0 && !osc_sb_apei_support_acked)
+		pr_info(GHES_PFX "APEI firmware first mode is enabled by WHEA _OSC.\n");
+	else if (rc && osc_sb_apei_support_acked)
+		pr_info(GHES_PFX "APEI firmware first mode is enabled by APEI bit.\n");
+	else
+		pr_info(GHES_PFX "Failed to enable APEI firmware first mode.\n");
 }
-device_initcall(ghes_init);
