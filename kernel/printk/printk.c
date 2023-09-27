@@ -3136,6 +3136,9 @@ void console_unblank(void)
 	struct console *c;
 	int cookie;
 
+	if (!have_bkl_console)
+		return;
+
 	/*
 	 * First check if there are any consoles implementing the unblank()
 	 * callback. If not, there is no reason to continue and take the
@@ -3151,9 +3154,6 @@ void console_unblank(void)
 	}
 	console_srcu_read_unlock(cookie);
 	if (!found_unblank)
-		return;
-
-	if (!have_bkl_console)
 		return;
 
 	/*
@@ -3203,9 +3203,9 @@ void console_unblank(void)
  */
 void console_flush_on_panic(enum con_flush_mode mode)
 {
+	struct console *c;
 	bool handover;
 	u64 next_seq;
-	struct console *c;
 	short flags;
 	int cookie;
 	u64 seq;
@@ -3244,12 +3244,7 @@ void console_flush_on_panic(enum con_flush_mode mode)
 	 * If another context is holding the console lock,
 	 * @console_may_schedule might be set. Clear it so that
 	 * this context does not call cond_resched() while flushing.
-	 *
-	 * Since semaphores are not NMI-safe, the console lock must be
-	 * ignored if the panic is in NMI context.
 	 */
-	if (!in_nmi())
-		console_trylock();
 	console_may_schedule = 0;
 
 	if (mode == CONSOLE_REPLAY_ALL) {
@@ -3265,8 +3260,6 @@ void console_flush_on_panic(enum con_flush_mode mode)
 	}
 
 	console_flush_all(false, &next_seq, &handover);
-	if (!in_nmi())
-		console_unlock();
 }
 
 /*
