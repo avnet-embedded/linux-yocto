@@ -19,6 +19,7 @@ properties:
           - mobileye,eyeq-sd4hc
           - socionext,uniphier-sd4hc
       - const: cdns,sd4hc
+      - const: cdns,sd6hc
 
   reg:
     minItems: 1
