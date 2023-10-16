@@ -3,7 +3,7 @@
 gen := arch/$(ARCH)/include/generated
 kapi := $(gen)/asm
 
-kapi-hdrs-y := $(kapi)/cpucaps.h
+kapi-hdrs-y := $(kapi)/cpucap-defs.h
 
 targets += $(addprefix ../../../,$(gen-y) $(kapi-hdrs-y))
 
@@ -18,5 +18,5 @@ quiet_cmd_gen_cpucaps = GEN     $@
       cmd_gen_cpucaps = mkdir -p $(dir $@) && \
                      $(AWK) -f $(filter-out $(PHONY),$^) > $@
 
-$(kapi)/cpucaps.h: $(src)/gen-cpucaps.awk $(src)/cpucaps FORCE
+$(kapi)/cpucap-defs.h: $(src)/gen-cpucaps.awk $(src)/cpucaps FORCE
 	$(call if_changed,gen_cpucaps)
