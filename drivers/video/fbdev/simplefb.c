@@ -23,6 +23,7 @@
 #include <linux/platform_device.h>
 #include <linux/clk.h>
 #include <linux/of.h>
+#include <linux/of_address.h>
 #include <linux/of_clk.h>
 #include <linux/of_address.h>
 #include <linux/of_platform.h>
@@ -69,31 +70,6 @@ static int simplefb_setcolreg(u_int regno, u_int red, u_int green, u_int blue,
 	pal[regno] = value;
 
 	return 0;
-}
-
-static struct resource *simplefb_get_memory_of(struct platform_device *pdev)
-{
-	struct device_node *of_node = pdev->dev.of_node;
-	struct device_node *np;
-	struct resource *res;
-	int err;
-
-	np = of_parse_phandle(of_node, "memory-region", 0);
-	if (!np)
-		return NULL;
-
-	res = devm_kzalloc(&pdev->dev, sizeof(*res), GFP_KERNEL);
-	if (!res)
-		return ERR_PTR(-ENOMEM);
-
-	err = of_address_to_resource(np, 0, res);
-	if (err)
-		return ERR_PTR(err);
-
-	if (of_get_property(of_node, "reg", NULL))
-		dev_warn(&pdev->dev, "preferring \"memory-region\" over \"reg\" property\n");
-
-	return res;
 }
 
 struct simplefb_par {
@@ -155,12 +131,13 @@ struct simplefb_params {
 	u32 height;
 	u32 stride;
 	struct simplefb_format *format;
+	struct resource memory;
 };
 
 static int simplefb_parse_dt(struct platform_device *pdev,
 			   struct simplefb_params *params)
 {
-	struct device_node *np = pdev->dev.of_node;
+	struct device_node *np = pdev->dev.of_node, *mem;
 	int ret;
 	const char *format;
 	int i;
@@ -200,6 +177,23 @@ static int simplefb_parse_dt(struct platform_device *pdev,
 		return -EINVAL;
 	}
 
+	mem = of_parse_phandle(np, "memory-region", 0);
+	if (mem) {
+		ret = of_address_to_resource(mem, 0, &params->memory);
+		if (ret < 0) {
+			dev_err(&pdev->dev, "failed to parse memory-region\n");
+			of_node_put(mem);
+			return ret;
+		}
+
+		if (of_property_present(np, "reg"))
+			dev_warn(&pdev->dev, "preferring \"memory-region\" over \"reg\" property\n");
+
+		of_node_put(mem);
+	} else {
+		memset(&params->memory, 0, sizeof(params->memory));
+	}
+
 	return 0;
 }
 
@@ -226,6 +220,8 @@ static int simplefb_parse_pd(struct platform_device *pdev,
 		dev_err(&pdev->dev, "Invalid format value\n");
 		return -EINVAL;
 	}
+
+	memset(&params->memory, 0, sizeof(params->memory));
 
 	return 0;
 }
@@ -548,13 +544,14 @@ static int simplefb_probe(struct platform_device *pdev)
 	if (ret)
 		return ret;
 
-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	if (!res) {
-		res = simplefb_get_memory_of(pdev);
+	if (params.memory.start == 0 && params.memory.end == 0) {
+		res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 		if (!res) {
 			dev_err(&pdev->dev, "No memory resource\n");
 			return -EINVAL;
 		}
+	} else {
+		res = &params.memory;
 	}
 
 	mem = request_mem_region(res->start, resource_size(res), "simplefb");
