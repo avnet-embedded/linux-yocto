@@ -74,6 +74,13 @@ static int scmi_clk_set_rate(struct clk_hw *hw, unsigned long rate,
 	return scmi_proto_clk_ops->rate_set(clk->ph, clk->id, rate);
 }
 
+static int scmi_clk_get_available_rates(struct clk_hw *hw, u64 *rate)
+{
+	struct scmi_clk *clk = to_scmi_clk(hw);
+
+	return scmi_proto_clk_ops->available_rates(clk->ph, clk->id, rate);
+}
+
 static int scmi_clk_enable(struct clk_hw *hw)
 {
 	struct scmi_clk *clk = to_scmi_clk(hw);
@@ -100,6 +107,7 @@ static const struct clk_ops scmi_clk_ops = {
 	 */
 	.prepare = scmi_clk_enable,
 	.unprepare = scmi_clk_disable,
+	.get_available_rates = scmi_clk_get_available_rates,
 };
 
 static int scmi_clk_ops_init(struct device *dev, struct scmi_clk *sclk)
