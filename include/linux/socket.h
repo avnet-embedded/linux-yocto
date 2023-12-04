@@ -378,6 +378,7 @@ struct ucred {
 #define SOL_MCTP	285
 #define SOL_SMC		286
 #define SOL_RPMSG	287
+#define SOL_VSOCK	288
 
 /* IPX options */
 #define IPX_TYPE	1
