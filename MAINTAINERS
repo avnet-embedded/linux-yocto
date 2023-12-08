@@ -28548,6 +28548,13 @@ F:	drivers/dma/xilinx/xdma.c
 F:	include/linux/dma/amd_xdma.h
 F:	include/linux/platform_data/amd_xdma.h
 
+XILINX ZYNQMP AES GCM DRIVER
+M:	Harsh Jain <h.jain@amd.com>
+M:	Kalyani Akula <kalyani.akula@amd.com>
+L:	linux-crypto@vger.kernel.org
+S:	Supported
+F:	drivers/crypto/xilinx/zynqmp-aes-gcm.c
+
 XILINX ZYNQMP DPDMA DRIVER
 M:	Laurent Pinchart <laurent.pinchart@ideasonboard.com>
 L:	dmaengine@vger.kernel.org
