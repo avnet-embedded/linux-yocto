@@ -241,6 +241,8 @@ enum pm_api_id {
 	PM_REGISTER_ACCESS = 52,
 	PM_EFUSE_ACCESS = 53,
 	PM_FEATURE_CHECK = 63,
+	PM_FPGA_GET_VERSION = 72,
+	PM_FPGA_GET_FEATURE_LIST = 73,
 };
 
 /* PMU-FW return status codes */

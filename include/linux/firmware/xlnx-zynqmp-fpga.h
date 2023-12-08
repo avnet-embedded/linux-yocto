@@ -26,6 +26,8 @@ int zynqmp_pm_fpga_read(const u32 reg_numframes, const u64 phys_address,
 int zynqmp_pm_fpga_load(const u64 address, const u32 size, const u32 flags);
 int zynqmp_pm_fpga_get_status(u32 *value);
 int zynqmp_pm_fpga_get_config_status(u32 *value);
+int zynqmp_pm_fpga_get_version(u32 *value);
+int zynqmp_pm_fpga_get_feature_list(u32 *value);
 #else
 static inline int zynqmp_pm_fpga_read(const u32 reg_numframes,
 				      const u64 phys_address, u32 readback_type,
@@ -50,6 +52,15 @@ static inline int zynqmp_pm_fpga_get_config_status(u32 *value)
 	return -ENODEV;
 }
 
+static inline int zynqmp_pm_fpga_get_version(u32 *value)
+{
+	return -ENODEV;
+}
+
+static inline int zynqmp_pm_fpga_get_feature_list(u32 *value)
+{
+	return -ENODEV;
+}
 #endif
 
 #endif /* __FIRMWARE_ZYNQMP_FPGA_H__ */
