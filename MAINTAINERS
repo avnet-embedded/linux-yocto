@@ -28577,6 +28577,7 @@ S:	Supported
 F:	drivers/firmware/xilinx/zynqmp-secure.c
 
 XILINX ZYNQMP SHA3 DRIVER
+M:	Harsh Jain <h.jain@amd.com>
 M:	Harsha <harsha.harsha@amd.com>
 S:	Maintained
 F:	drivers/crypto/xilinx/zynqmp-sha.c
