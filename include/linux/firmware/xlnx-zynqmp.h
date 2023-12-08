@@ -216,7 +216,10 @@ enum pm_api_id {
 	PM_FPGA_LOAD = 22,
 	PM_FPGA_GET_STATUS = 23,
 	PM_GET_CHIPID = 24,
+	/* ID 25 is been used by U-boot to process secure boot images */
+	/* Secure library generic API functions */
 	PM_SECURE_SHA = 26,
+	PM_SECURE_RSA = 27,
 	PM_PINCTRL_REQUEST = 28,
 	PM_PINCTRL_RELEASE = 29,
 	PM_PINCTRL_SET_FUNCTION = 31,
