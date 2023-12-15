@@ -897,9 +897,22 @@ static int zynqmp_firmware_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
+	if (ret < 0) {
+		dev_err(dev, "no usable DMA configuration");
+		return ret;
+	}
+
 	ret = zynqmp_firmware_pm_sysfs_entry(pdev);
 	if (ret) {
 		pr_err("%s() Failed to create sysfs file with error%d\n",
+		       __func__, ret);
+		return ret;
+	}
+
+	ret = zynqmp_firmware_pdi_sysfs_entry(pdev);
+	if (ret) {
+		pr_err("%s() Failed to create sysfs binary file with error%d\n",
 		       __func__, ret);
 		return ret;
 	}
