@@ -847,6 +847,12 @@ F:	drivers/tty/serial/altera_uart.c
 F:	include/linux/altera_jtaguart.h
 F:	include/linux/altera_uart.h
 
+MAILBOX MARVELL MUB DRIVER
+M:	Wojciech Bartczak <wbartczak@marvell.com>
+M:	Piyush Malgujar <pmalgujar@marvell.com>
+S:	Maintained
+F:	drivers/firmware/octeontx2/mub.c
+
 AMAZON ANNAPURNA LABS FIC DRIVER
 M:	Talel Shenhar <talel@amazon.com>
 S:	Maintained
