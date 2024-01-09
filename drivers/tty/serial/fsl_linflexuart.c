@@ -3,7 +3,7 @@
  * Freescale LINFlexD UART serial port driver
  *
  * Copyright 2012-2016 Freescale Semiconductor, Inc.
- * Copyright 2017-2023 NXP
+ * Copyright 2017-2024 NXP
  */
 
 #include <linux/circ_buf.h>
@@ -353,7 +353,7 @@ static void linflex_stop_tx(struct uart_port *port)
 	dma_sync_single_for_cpu(lfport->port.dev, lfport->dma_tx_buf_bus,
 				lfport->dma_tx_bytes, DMA_TO_DEVICE);
 	count = lfport->dma_tx_bytes - state.residue;
-	port->icount.tx += count;
+	uart_xmit_advance(port, count);
 
 	lfport->dma_tx_in_progress = 0;
 }
@@ -476,7 +476,7 @@ static void linflex_dma_tx_complete(void *arg)
 
 	spin_lock_irqsave(&lfport->port.lock, flags);
 
-	lfport->port.icount.tx += lfport->dma_tx_bytes;
+	uart_xmit_advance(&lfport->port, lfport->dma_tx_bytes);
 	lfport->dma_tx_in_progress = 0;
 
 	if (kfifo_len(&tport->xmit_fifo) < WAKEUP_CHARS)
