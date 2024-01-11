@@ -333,7 +333,6 @@ struct sk_filter;
   *	@sk_cgrp_data: cgroup data for this cgroup
   *	@sk_memcg: this socket's memory cgroup association
   *	@sk_write_pending: a write to stream socket waits to start
-  *	@sk_disconnects: number of disconnect operations performed on this sock
   *	@sk_state_change: callback to indicate change in the state of the sock
   *	@sk_data_ready: callback to indicate there is data to be processed
   *	@sk_write_space: callback to indicate there is bf sending space available
@@ -426,7 +425,6 @@ struct sock {
 	unsigned int		sk_napi_id;
 #endif
 	int			sk_rcvbuf;
-	int			sk_disconnects;
 
 	struct sk_filter __rcu	*sk_filter;
 	union {
@@ -1077,12 +1075,6 @@ static inline void sk_wmem_queued_add(struct sock *sk, int val)
 	WRITE_ONCE(sk->sk_wmem_queued, sk->sk_wmem_queued + val);
 }
 
-static inline void sk_forward_alloc_add(struct sock *sk, int val)
-{
-	/* Paired with lockless reads of sk->sk_forward_alloc */
-	WRITE_ONCE(sk->sk_forward_alloc, sk->sk_forward_alloc + val);
-}
-
 void sk_stream_write_space(struct sock *sk);
 
 /* OOB backlog add */
@@ -1182,12 +1174,8 @@ static inline void sock_rps_record_flow(const struct sock *sk)
 		 * OR	an additional socket flag
 		 * [1] : sk_state and sk_prot are in the same cache line.
 		 */
-		if (sk->sk_state == TCP_ESTABLISHED) {
-			/* This READ_ONCE() is paired with the WRITE_ONCE()
-			 * from sock_rps_save_rxhash() and sock_rps_reset_rxhash().
-			 */
-			sock_rps_record_flow_hash(READ_ONCE(sk->sk_rxhash));
-		}
+		if (sk->sk_state == TCP_ESTABLISHED)
+			sock_rps_record_flow_hash(sk->sk_rxhash);
 	}
 #endif
 }
@@ -1196,24 +1184,20 @@ static inline void sock_rps_save_rxhash(struct sock *sk,
 					const struct sk_buff *skb)
 {
 #ifdef CONFIG_RPS
-	/* The following WRITE_ONCE() is paired with the READ_ONCE()
-	 * here, and another one in sock_rps_record_flow().
-	 */
-	if (unlikely(READ_ONCE(sk->sk_rxhash) != skb->hash))
-		WRITE_ONCE(sk->sk_rxhash, skb->hash);
+	if (unlikely(sk->sk_rxhash != skb->hash))
+		sk->sk_rxhash = skb->hash;
 #endif
 }
 
 static inline void sock_rps_reset_rxhash(struct sock *sk)
 {
 #ifdef CONFIG_RPS
-	/* Paired with READ_ONCE() in sock_rps_record_flow() */
-	WRITE_ONCE(sk->sk_rxhash, 0);
+	sk->sk_rxhash = 0;
 #endif
 }
 
 #define sk_wait_event(__sk, __timeo, __condition, __wait)		\
-	({	int __rc, __dis = __sk->sk_disconnects;			\
+	({	int __rc;						\
 		release_sock(__sk);					\
 		__rc = __condition;					\
 		if (!__rc) {						\
@@ -1223,7 +1207,7 @@ static inline void sock_rps_reset_rxhash(struct sock *sk)
 		}							\
 		sched_annotate_sleep();					\
 		lock_sock(__sk);					\
-		__rc = __dis == __sk->sk_disconnects ? __condition : -EPIPE; \
+		__rc = __condition;					\
 		__rc;							\
 	})
 
@@ -1352,7 +1336,6 @@ struct proto {
 	/*
 	 * Pressure flag: try to collapse.
 	 * Technical note: it is used by multiple contexts non atomically.
-	 * Make sure to use READ_ONCE()/WRITE_ONCE() for all reads/writes.
 	 * All the __sk_mem_schedule() is of this nature: accounting
 	 * is strict, actions are advisory and have some latency.
 	 */
@@ -1433,7 +1416,7 @@ static inline int sk_forward_alloc_get(const struct sock *sk)
 	if (sk->sk_prot->forward_alloc_get)
 		return sk->sk_prot->forward_alloc_get(sk);
 #endif
-	return READ_ONCE(sk->sk_forward_alloc);
+	return sk->sk_forward_alloc;
 }
 
 static inline bool __sk_stream_memory_free(const struct sock *sk, int wake)
@@ -1478,12 +1461,6 @@ static inline bool sk_has_memory_pressure(const struct sock *sk)
 	return sk->sk_prot->memory_pressure != NULL;
 }
 
-static inline bool sk_under_global_memory_pressure(const struct sock *sk)
-{
-	return sk->sk_prot->memory_pressure &&
-		!!READ_ONCE(*sk->sk_prot->memory_pressure);
-}
-
 static inline bool sk_under_memory_pressure(const struct sock *sk)
 {
 	if (!sk->sk_prot->memory_pressure)
@@ -1493,7 +1470,7 @@ static inline bool sk_under_memory_pressure(const struct sock *sk)
 	    mem_cgroup_under_socket_pressure(sk->sk_memcg))
 		return true;
 
-	return !!READ_ONCE(*sk->sk_prot->memory_pressure);
+	return !!*sk->sk_prot->memory_pressure;
 }
 
 static inline long
@@ -1570,7 +1547,7 @@ proto_memory_pressure(struct proto *prot)
 {
 	if (!prot->memory_pressure)
 		return false;
-	return !!READ_ONCE(*prot->memory_pressure);
+	return !!*prot->memory_pressure;
 }
 
 
@@ -1729,14 +1706,14 @@ static inline void sk_mem_charge(struct sock *sk, int size)
 {
 	if (!sk_has_account(sk))
 		return;
-	sk_forward_alloc_add(sk, -size);
+	sk->sk_forward_alloc -= size;
 }
 
 static inline void sk_mem_uncharge(struct sock *sk, int size)
 {
 	if (!sk_has_account(sk))
 		return;
-	sk_forward_alloc_add(sk, size);
+	sk->sk_forward_alloc += size;
 	sk_mem_reclaim(sk);
 }
 
@@ -2062,33 +2039,21 @@ static inline void sk_tx_queue_set(struct sock *sk, int tx_queue)
 	/* sk_tx_queue_mapping accept only upto a 16-bit value */
 	if (WARN_ON_ONCE((unsigned short)tx_queue >= USHRT_MAX))
 		return;
-	/* Paired with READ_ONCE() in sk_tx_queue_get() and
-	 * other WRITE_ONCE() because socket lock might be not held.
-	 */
-	WRITE_ONCE(sk->sk_tx_queue_mapping, tx_queue);
+	sk->sk_tx_queue_mapping = tx_queue;
 }
 
 #define NO_QUEUE_MAPPING	USHRT_MAX
 
 static inline void sk_tx_queue_clear(struct sock *sk)
 {
-	/* Paired with READ_ONCE() in sk_tx_queue_get() and
-	 * other WRITE_ONCE() because socket lock might be not held.
-	 */
-	WRITE_ONCE(sk->sk_tx_queue_mapping, NO_QUEUE_MAPPING);
+	sk->sk_tx_queue_mapping = NO_QUEUE_MAPPING;
 }
 
 static inline int sk_tx_queue_get(const struct sock *sk)
 {
-	if (sk) {
-		/* Paired with WRITE_ONCE() in sk_tx_queue_clear()
-		 * and sk_tx_queue_set().
-		 */
-		int val = READ_ONCE(sk->sk_tx_queue_mapping);
+	if (sk && sk->sk_tx_queue_mapping != NO_QUEUE_MAPPING)
+		return sk->sk_tx_queue_mapping;
 
-		if (val != NO_QUEUE_MAPPING)
-			return val;
-	}
 	return -1;
 }
 
@@ -2177,7 +2142,6 @@ static inline void sock_graft(struct sock *sk, struct socket *parent)
 }
 
 kuid_t sock_i_uid(struct sock *sk);
-unsigned long __sock_i_ino(struct sock *sk);
 unsigned long sock_i_ino(struct sock *sk);
 
 static inline kuid_t sock_net_uid(const struct net *net, const struct sock *sk)
@@ -2237,7 +2201,7 @@ static inline void __dst_negative_advice(struct sock *sk)
 		if (ndst != dst) {
 			rcu_assign_pointer(sk->sk_dst_cache, ndst);
 			sk_tx_queue_clear(sk);
-			WRITE_ONCE(sk->sk_dst_pending_confirm, 0);
+			sk->sk_dst_pending_confirm = 0;
 		}
 	}
 }
@@ -2254,7 +2218,7 @@ __sk_dst_set(struct sock *sk, struct dst_entry *dst)
 	struct dst_entry *old_dst;
 
 	sk_tx_queue_clear(sk);
-	WRITE_ONCE(sk->sk_dst_pending_confirm, 0);
+	sk->sk_dst_pending_confirm = 0;
 	old_dst = rcu_dereference_protected(sk->sk_dst_cache,
 					    lockdep_sock_is_held(sk));
 	rcu_assign_pointer(sk->sk_dst_cache, dst);
@@ -2267,7 +2231,7 @@ sk_dst_set(struct sock *sk, struct dst_entry *dst)
 	struct dst_entry *old_dst;
 
 	sk_tx_queue_clear(sk);
-	WRITE_ONCE(sk->sk_dst_pending_confirm, 0);
+	sk->sk_dst_pending_confirm = 0;
 	old_dst = xchg((__force struct dst_entry **)&sk->sk_dst_cache, dst);
 	dst_release(old_dst);
 }
