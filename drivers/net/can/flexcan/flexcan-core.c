@@ -2504,6 +2504,10 @@ static int __maybe_unused flexcan_resume(struct device *device)
 			if (err)
 				return err;
 
+			err = pm_runtime_force_resume(device);
+			if (err)
+				return err;
+
 			err = flexcan_chip_start(dev);
 			if (err) {
 				flexcan_transceiver_disable(priv);
