@@ -43,9 +43,9 @@
 	spe_interrupt) + sizeof(u16))
 
 /* Basic configuration for ACPI */
-#ifdef	CONFIG_ACPI
 pgprot_t __acpi_get_mem_attribute(phys_addr_t addr);
 
+#ifdef	CONFIG_ACPI
 /* ACPI table mapping after acpi_permanent_mmap is set */
 void __iomem *acpi_os_ioremap(acpi_physical_address phys, acpi_size size);
 #define acpi_os_ioremap acpi_os_ioremap
