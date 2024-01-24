@@ -865,6 +865,12 @@ M:	Piyush Malgujar <pmalgujar@marvell.com>
 S:	Maintained
 F:	drivers/firmware/octeontx2/memtest.c
 
+MAILBOX MARVELL MAC MANAGEMENT DRIVER
+M:	Wojciech Bartczak <wbartczak@marvell.com>
+M:	Piyush Malgujar <pmalgujar@marvell.com>
+S:	Maintained
+F:	drivers/firmware/octeontx2/mac_mgmt.c
+
 AMAZON ANNAPURNA LABS FIC DRIVER
 M:	Talel Shenhar <talel@amazon.com>
 S:	Maintained
