@@ -30,7 +30,7 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - uses: hmarr/auto-approve-action@v3.2.1
+      - uses: hmarr/auto-approve-action@v4.0.0
         name: auto_approve
         if: |
           contains(toJson(github.event.pull_request.labels.*.name), 'automerge')
