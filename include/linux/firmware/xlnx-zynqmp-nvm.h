@@ -8,9 +8,24 @@
 #ifndef __FIRMWARE_ZYNQMP_NVM_H__
 #define __FIRMWARE_ZYNQMP_NVM_H__
 
+/* NVM Commands */
+#define PM_EFUSE_READ_VERSAL		0xB17
+
 #if IS_REACHABLE(CONFIG_ZYNQMP_FIRMWARE)
 int zynqmp_pm_efuse_access(const u64 address, u32 *out);
+int versal_pm_efuse_read(const u64 address, u32 offset, u32 size);
+int versal_pm_efuse_write(const u64 address, const u32 operationid, const u8 envdis);
 #else
+static inline int versal_pm_efuse_read(const u64 address, u32 offset, u32 size)
+{
+	return -ENODEV;
+}
+
+static inline int versal_pm_efuse_write(const u64 address, const u32 operationid, const u8 envdis)
+{
+	return -ENODEV;
+}
+
 static inline int zynqmp_pm_efuse_access(const u64 address, u32 *out)
 {
 	return -ENODEV;
