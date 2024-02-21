@@ -1195,7 +1195,66 @@ static int axienet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
 	u16 map = skb_get_queue_mapping(skb); /* Single dma queue default*/
 
-	return axienet_queue_xmit(skb, ndev, map);
+	num_frag = skb_shinfo(skb)->nr_frags;
+	cur_p = &lp->tx_bd_v[lp->tx_bd_tail];
+
+	if (axienet_check_tx_bd_space(lp, num_frag + 1)) {
+		if (netif_queue_stopped(ndev))
+			return NETDEV_TX_BUSY;
+
+		netif_stop_queue(ndev);
+
+		/* Matches barrier in axienet_start_xmit_done */
+		smp_mb();
+
+		/* Space might have just been freed - check again */
+		if (axienet_check_tx_bd_space(lp, num_frag + 1))
+			return NETDEV_TX_BUSY;
+
+		netif_wake_queue(ndev);
+	}
+
+	if (skb->ip_summed == CHECKSUM_PARTIAL) {
+		if (lp->features & XAE_FEATURE_FULL_TX_CSUM) {
+			/* Tx Full Checksum Offload Enabled */
+			cur_p->app0 |= 2;
+		} else if (lp->features & XAE_FEATURE_PARTIAL_TX_CSUM) {
+			csum_start_off = skb_transport_offset(skb);
+			csum_index_off = csum_start_off + skb->csum_offset;
+			/* Tx Partial Checksum Offload Enabled */
+			cur_p->app0 |= 1;
+			cur_p->app1 = (csum_start_off << 16) | csum_index_off;
+		}
+	} else if (skb->ip_summed == CHECKSUM_UNNECESSARY) {
+		cur_p->app0 |= 2; /* Tx Full Checksum Offload Enabled */
+	}
+
+	cur_p->cntrl = skb_headlen(skb) | XAXIDMA_BD_CTRL_TXSOF_MASK;
+	cur_p->phys = dma_map_single(ndev->dev.parent, skb->data,
+				     skb_headlen(skb), DMA_TO_DEVICE);
+
+	for (ii = 0; ii < num_frag; ii++) {
+		++lp->tx_bd_tail;
+		lp->tx_bd_tail %= TX_BD_NUM;
+		cur_p = &lp->tx_bd_v[lp->tx_bd_tail];
+		frag = &skb_shinfo(skb)->frags[ii];
+		cur_p->phys = dma_map_single(ndev->dev.parent,
+					     skb_frag_address(frag),
+					     skb_frag_size(frag),
+					     DMA_TO_DEVICE);
+		cur_p->cntrl = skb_frag_size(frag);
+	}
+
+	cur_p->cntrl |= XAXIDMA_BD_CTRL_TXEOF_MASK;
+	cur_p->app4 = (unsigned long)skb;
+
+	tail_p = lp->tx_bd_p + sizeof(*lp->tx_bd_v) * lp->tx_bd_tail;
+	/* Start the transfer */
+	axienet_dma_out32(lp, XAXIDMA_TX_TDESC_OFFSET, tail_p);
+	++lp->tx_bd_tail;
+	lp->tx_bd_tail %= TX_BD_NUM;
+
+	return NETDEV_TX_OK;
 }
 
 /**
