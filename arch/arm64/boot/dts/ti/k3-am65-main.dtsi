@@ -885,6 +885,8 @@
 
 		interrupts = <GIC_SPI 166 IRQ_TYPE_LEVEL_HIGH>;
 
+		status = "disabled";
+
 		dma-coherent;
 
 		dss_ports: ports {
