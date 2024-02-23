@@ -146,7 +146,7 @@ void dma_release_declared_memory(struct device *dev)
 
 	if (!mem)
 		return;
-	dma_release_coherent_memory(mem);
+	_dma_release_coherent_memory(mem);
 	dev->dma_mem = NULL;
 }
 EXPORT_SYMBOL(dma_release_declared_memory);
