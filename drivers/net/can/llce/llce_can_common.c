@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0+ OR BSD-3-Clause
-/* Copyright 2021-2022 NXP */
+/* Copyright 2021 NXP */
 #include <linux/can/dev.h>
 #include <linux/can/dev/llce_can_common.h>
 #include <linux/ctype.h>
@@ -128,34 +128,28 @@ static const struct llce_error llce_errors[] = {
 	LLCE_CAN_ERROR_ENTRY(LLCE_NOTIF_BUSOFF_DONE),
 };
 
-static int get_llce_can_id(const char *node_name, int *id)
+static int get_llce_can_id(const char *node_name, unsigned long *id)
 {
 	const char *p = node_name + strlen(node_name) - 1;
 
 	while (isdigit(*p))
 		p--;
 
-	return kstrtoint(p + 1, 10, id);
+	return kstrtoul(p + 1, 10, id);
 }
 
-static int get_netdev_id(struct device *dev)
+static void *get_netdev_name(struct device *dev, const char *basename)
 {
+	unsigned long id;
+	char *dev_name;
 	const char *node_name;
-	int id;
+	size_t name_len;
 
 	node_name = dev->of_node->name;
 	if (get_llce_can_id(node_name, &id)) {
 		dev_err(dev, "Failed to detect node id for: %s\n", node_name);
-		return -EIO;
+		return ERR_PTR(-EIO);
 	}
-
-	return id;
-}
-
-static void *get_netdev_name(struct device *dev, const char *basename, int id)
-{
-	char *dev_name;
-	size_t name_len;
 
 	/* 0-99 device ids + \0 */
 	name_len = strlen(basename) + 3;
@@ -163,7 +157,7 @@ static void *get_netdev_name(struct device *dev, const char *basename, int id)
 	if (!dev_name)
 		return ERR_PTR(-ENOMEM);
 
-	snprintf(dev_name, name_len, "%s%d", basename, id);
+	snprintf(dev_name, name_len, "%s%lu", basename, id);
 
 	return dev_name;
 }
@@ -556,19 +550,13 @@ struct llce_can_dev *init_llce_can_dev(struct device *dev, size_t priv_size,
 	char *dev_name;
 	struct llce_can_dev *llce;
 	struct net_device *netdev;
-	int id, ret = 0;
+	int ret = 0;
 
 	netdev = alloc_candev(priv_size, 1);
 	if (!netdev)
 		return ERR_PTR(-ENOMEM);
 
-	id = get_netdev_id(dev);
-	if (id < 0) {
-		ret = id;
-		goto free_mem;
-	}
-
-	dev_name = get_netdev_name(dev, basename, id);
+	dev_name = get_netdev_name(dev, basename);
 	if (IS_ERR_VALUE(dev_name)) {
 		ret = PTR_ERR(dev_name);
 		goto free_mem;
@@ -578,7 +566,7 @@ struct llce_can_dev *init_llce_can_dev(struct device *dev, size_t priv_size,
 	SET_NETDEV_DEV(netdev, dev);
 
 	llce = netdev_priv(netdev);
-	llce->id = id;
+
 	llce->stats = devm_kcalloc(dev, ARRAY_SIZE(llce_errors),
 				   sizeof(*llce->stats), GFP_KERNEL);
 	if (!llce->stats) {
@@ -589,7 +577,6 @@ struct llce_can_dev *init_llce_can_dev(struct device *dev, size_t priv_size,
 	init_llce_rx_client(llce, dev);
 
 	netdev->ethtool_ops = &llce_can_ethtool_ops;
-
 free_mem:
 	if (ret) {
 		free_candev(netdev);
