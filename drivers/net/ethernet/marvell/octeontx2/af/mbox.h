@@ -1907,6 +1907,7 @@ struct get_rep_cnt_rsp {
 struct esw_cfg_req {
 	struct mbox_msghdr hdr;
 	u8 ena;
+	u64 rsvd;
 };
 
 struct rep_event {
