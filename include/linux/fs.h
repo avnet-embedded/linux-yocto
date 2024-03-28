@@ -314,6 +314,8 @@ enum rw_hint {
 #define IOCB_SYNC		(1 << 5)
 #define IOCB_WRITE		(1 << 6)
 #define IOCB_NOWAIT		(1 << 7)
+/* kiocb is a read or write operation submitted by fs/aio.c. */
+#define IOCB_AIO_RW		(1 << 23)
 
 struct kiocb {
 	struct file		*ki_filp;
@@ -1744,6 +1746,7 @@ extern long compat_ptr_ioctl(struct file *file, unsigned int cmd,
 extern void inode_init_owner(struct inode *inode, const struct inode *dir,
 			umode_t mode);
 extern bool may_open_dev(const struct path *path);
+umode_t mode_strip_sgid(const struct inode *dir, umode_t mode);
 /*
  * VFS FS_IOC_FIEMAP helper definitions.
  */
@@ -3621,11 +3624,11 @@ extern int generic_fadvise(struct file *file, loff_t offset, loff_t len,
 			   int advice);
 
 #if defined(CONFIG_IO_URING)
-extern struct sock *io_uring_get_socket(struct file *file);
+bool io_is_uring_fops(struct file *file);
 #else
-static inline struct sock *io_uring_get_socket(struct file *file)
+static inline bool io_is_uring_fops(struct file *file)
 {
-	return NULL;
+	return false;
 }
 #endif
 
