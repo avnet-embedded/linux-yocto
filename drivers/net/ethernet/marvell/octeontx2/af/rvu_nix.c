@@ -2497,12 +2497,10 @@ static void nix_smq_flush_fill_ctx(struct rvu *rvu, int blkaddr, int smq,
 			smq_tree_ctx->pir_off = NIX_AF_TL2X_PIR(schq);
 			parent_off = NIX_AF_TL2X_PARENT(schq);
 		} else if (lvl == NIX_TXSCH_LVL_TL3) {
-			smq_flush_ctx->tl3_schq = schq;
 			smq_tree_ctx->cir_off = NIX_AF_TL3X_CIR(schq);
 			smq_tree_ctx->pir_off = NIX_AF_TL3X_PIR(schq);
 			parent_off = NIX_AF_TL3X_PARENT(schq);
 		} else if (lvl == NIX_TXSCH_LVL_TL4) {
-			smq_flush_ctx->tl4_schq = schq;
 			smq_tree_ctx->cir_off = NIX_AF_TL4X_CIR(schq);
 			smq_tree_ctx->pir_off = NIX_AF_TL4X_PIR(schq);
 			parent_off = NIX_AF_TL4X_PARENT(schq);
@@ -2526,8 +2524,14 @@ static void nix_smq_flush_fill_ctx(struct rvu *rvu, int blkaddr, int smq,
 
 static void nix_dump_smq_status(struct rvu *rvu, int blkaddr, struct nix_smq_flush_ctx *ctx)
 {
-	dev_info(rvu->dev, "smq:%d tl1_schq:%d tl2:%d tl3:%d tl4:%d\n", ctx->smq, ctx->tl1_schq,
-		 ctx->tl2_schq, ctx->tl3_schq, ctx->tl4_schq);
+	u16 tl1_schq = ctx->smq_tree_ctx[NIX_TXSCH_LVL_TL1].schq;
+	u16 tl2_schq = ctx->smq_tree_ctx[NIX_TXSCH_LVL_TL2].schq;
+
+	dev_info(rvu->dev, "smq:%d tl1:%d tl2:%d tl3:%d tl4:%d\n", ctx->smq,
+		 ctx->smq_tree_ctx[NIX_TXSCH_LVL_TL1].schq,
+		 ctx->smq_tree_ctx[NIX_TXSCH_LVL_TL2].schq,
+		 ctx->smq_tree_ctx[NIX_TXSCH_LVL_TL3].schq,
+		 ctx->smq_tree_ctx[NIX_TXSCH_LVL_TL4].schq);
 
 	dev_info(rvu->dev, "NIX_AF_SMQX_CFG:0x%llx\n",
 		 rvu_read64(rvu, blkaddr, NIX_AF_SMQX_CFG(ctx->smq)));
@@ -2540,9 +2544,9 @@ static void nix_dump_smq_status(struct rvu *rvu, int blkaddr, struct nix_smq_flu
 	dev_info(rvu->dev, "NIX_AF_MDQX_OUT_MD_COUNT:0x%llx\n",
 		 rvu_read64(rvu, blkaddr, NIX_AF_MDQX_OUT_MD_COUNT(ctx->smq)));
 	dev_info(rvu->dev, "NIX_AF_TL1X_SW_XOFF:0x%llx\n",
-		 rvu_read64(rvu, blkaddr, NIX_AF_TL1X_SW_XOFF(ctx->tl1_schq)));
+		 rvu_read64(rvu, blkaddr, NIX_AF_TL1X_SW_XOFF(tl1_schq)));
 	dev_info(rvu->dev, "NIX_AF_TL2X_SW_XOFF=0x%llx\n",
-		 rvu_read64(rvu, blkaddr, NIX_AF_TL2X_SW_XOFF(ctx->tl2_schq)));
+		 rvu_read64(rvu, blkaddr, NIX_AF_TL2X_SW_XOFF(tl2_schq)));
 }
 
 static void nix_smq_flush_enadis_xoff(struct rvu *rvu, int blkaddr,
