@@ -1330,12 +1330,6 @@ static int zynqmp_qspi_probe(struct platform_device *pdev)
 	pm_runtime_set_active(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
 
-	ret = pm_runtime_get_sync(&pdev->dev);
-	if (ret < 0) {
-		dev_err(&pdev->dev, "Failed to pm_runtime_get_sync: %d\n", ret);
-		goto clk_dis_all;
-	}
-
 	if (of_property_read_bool(pdev->dev.of_node, "has-io-mode"))
 		xqspi->io_mode = true;
 
