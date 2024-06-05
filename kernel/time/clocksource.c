@@ -16,7 +16,7 @@
 #include <linux/kthread.h>
 #include <linux/prandom.h>
 #include <linux/cpu.h>
-
+#include <linux/debugfs.h>
 #include "tick-internal.h"
 #include "timekeeping_internal.h"
 
@@ -398,6 +398,58 @@ static inline void clocksource_reset_watchdog(void)
 }
 
 
+#define RICARDO_WD_HISTORY_SIZE 1024
+static bool force_acpi_pm_wd;
+static char ricardo_watchdog_history[RICARDO_WD_HISTORY_SIZE];
+
+static void ricardo_append_wd_select(const char *name)
+{
+	static bool buff_full = false;
+	static unsigned buff_pos = 0;
+	unsigned int len;
+
+	if (buff_full)
+		return;
+
+	if (!name)
+		return;
+
+	if (!buff_pos)
+		memset(ricardo_watchdog_history, '\0', RICARDO_WD_HISTORY_SIZE * sizeof(char));
+
+	len = strlen(name);
+
+	if ((buff_pos + len) > (RICARDO_WD_HISTORY_SIZE - 6)) {
+		memcpy(ricardo_watchdog_history + buff_pos, "FULL\n", 6);
+		buff_full = true;
+		return;
+	}
+
+	memcpy(ricardo_watchdog_history + buff_pos, name, len);
+	buff_pos += len;
+	memcpy(ricardo_watchdog_history + buff_pos, "\n", 1);
+	buff_pos ++;
+}
+
+static int ricardo_watchdog_name_show(struct seq_file *m, void *data)
+{
+	seq_printf(m, "CURRENT: %s\n", watchdog ? watchdog->name : "none");
+	seq_printf(m, "HISTORY: \n%s\n", ricardo_watchdog_history);
+	return 0;
+}
+
+DEFINE_SHOW_ATTRIBUTE(ricardo_watchdog_name);
+
+static int __init ricardo_override_cs_watchdog(char *str)
+{
+	if (!strcmp(str, "force_acpi_pm_wd")) {
+		printk(KERN_ERR "RICARDO: Force acpi_pm as watchdog\n");
+		force_acpi_pm_wd = true;
+	}
+	return 1;
+}
+early_param("ricardo_clocksource_wd", ricardo_override_cs_watchdog);
+
 static void clocksource_watchdog(struct timer_list *unused)
 {
 	u64 csnow, wdnow, cslast, wdlast, delta;
@@ -642,13 +694,23 @@ static void clocksource_select_watchdog(bool fallback)
 		if (!watchdog || cs->rating > watchdog->rating)
 			watchdog = cs;
 	}
+
 	/* If we failed to find a fallback restore the old one. */
 	if (!watchdog)
 		watchdog = old_wd;
 
+	/*
+	 * If selected watchdog is not old_wd, replace with old one. It
+	 * will be NULL if not watchdog has been selected
+	 */
+	if (force_acpi_pm_wd && strcmp(watchdog->name, "acpi_pm"))
+		watchdog = old_wd;
+
 	/* If we changed the watchdog we need to reset cycles. */
-	if (watchdog != old_wd)
+	if (watchdog != old_wd) {
 		clocksource_reset_watchdog();
+		ricardo_append_wd_select(watchdog->name);
+	}
 
 	/* Check if the watchdog timer needs to be started. */
 	clocksource_start_watchdog();
@@ -1077,6 +1139,12 @@ static void clocksource_select_fallback(void)
  */
 static int __init clocksource_done_booting(void)
 {
+	/*
+	 * static variable to ensure debugfs entry is called only once even
+	 * if this function is called multiple times (once per SMP core up?)
+	 */
+	static bool debugfs_done = false;
+	struct dentry *root;
 	mutex_lock(&clocksource_mutex);
 	curr_clocksource = clocksource_default_clock();
 	finished_booting = 1;
@@ -1086,6 +1154,16 @@ static int __init clocksource_done_booting(void)
 	__clocksource_watchdog_kthread();
 	clocksource_select();
 	mutex_unlock(&clocksource_mutex);
+
+	if (!debugfs_done) {
+		debugfs_done = true;
+		root = debugfs_create_dir("ricardo_clocksource", NULL);
+		if (!root) {
+			printk(KERN_ERR "RICARDO Unable to create debugfs dir\n");
+			return 0;
+		}
+		debugfs_create_file("watchdog_info", 0444, root, NULL, &ricardo_watchdog_name_fops);
+	}
 	return 0;
 }
 fs_initcall(clocksource_done_booting);
