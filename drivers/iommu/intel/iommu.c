@@ -39,6 +39,11 @@
 #define IS_USB_DEVICE(pdev) ((pdev->class >> 8) == PCI_CLASS_SERIAL_USB)
 #define IS_ISA_DEVICE(pdev) ((pdev->class >> 8) == PCI_CLASS_BRIDGE_ISA)
 #define IS_AZALIA(pdev) ((pdev)->vendor == 0x8086 && (pdev)->device == 0x3a3e)
+#define IS_GRR(pdev) ((pdev)->vendor == 0x8086 && (pdev)->device == 0x0dbd)
+#define IS_GRR_QAT_PF(pdev) \
+	((pdev)->vendor == 0x8086 && (pdev)->device == 0x578a)
+#define IS_GRR_QAT_VF(pdev) \
+	((pdev)->vendor == 0x8086 && (pdev)->device == 0x578b)
 
 #define IOAPIC_RANGE_START	(0xfee00000)
 #define IOAPIC_RANGE_END	(0xfeefffff)
@@ -2544,6 +2549,15 @@ static int device_def_domain_type(struct device *dev)
 			return IOMMU_DOMAIN_IDENTITY;
 
 		if ((iommu_identity_mapping & IDENTMAP_GFX) && IS_GFX_DEVICE(pdev))
+			return IOMMU_DOMAIN_IDENTITY;
+
+		if (IS_GRR(pdev))
+			return IOMMU_DOMAIN_IDENTITY;
+
+		if (IS_GRR_QAT_PF(pdev))
+			return IOMMU_DOMAIN_IDENTITY;
+
+		if (IS_GRR_QAT_VF(pdev))
 			return IOMMU_DOMAIN_IDENTITY;
 	}
 
