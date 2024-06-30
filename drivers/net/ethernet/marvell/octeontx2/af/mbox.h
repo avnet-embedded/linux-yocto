@@ -227,6 +227,7 @@ M(SSO_CONFIG_LSW,	0x612, ssow_config_lsw,			\
 M(SSO_HWS_CHNG_MSHIP,   0x613, ssow_chng_mship, ssow_chng_mship, msg_rsp)\
 M(SSO_GRP_STASH_CONFIG, 0x614, sso_grp_stash_config, sso_grp_stash_cfg, \
 				msg_rsp)				\
+M(SSO_GET_HW_INFO, 0x617, sso_get_hw_info, msg_req, sso_hw_info)   \
 /* TIM mbox IDs (range 0x800 - 0x9FF) */				\
 M(TIM_LF_ALLOC,		0x800, tim_lf_alloc,				\
 				tim_lf_alloc_req, tim_lf_alloc_rsp)	\
@@ -1646,6 +1647,29 @@ struct sso_grp_priority {
 	u8 priority;
 	u8 affinity;
 	u8 weight;
+};
+
+struct sso_hw_info {
+	struct mbox_msghdr hdr;
+	u8  hw_flr : 1;
+	u8  hw_prefetch : 1;
+	u8  sw_prefetch : 1;
+	u8  lsw : 1;
+	u8  fwd_grp : 1;
+	u8  eva_present : 1;
+	u8  no_nsched : 1;
+	u8  tag_cfg : 1;
+	u8  gwc_per_core;
+	u16 hws;
+	u16 hwgrps;
+	u16 hwgrps_per_pf;
+	u16 iue;
+	u16 taq_lines;
+	u16 taq_ent_per_line;
+	u16 xaq_buf_size;
+	u16 xaq_wq_entries;
+	u32 eva_ctx_per_hwgrp;
+	u64 rsvd[2];
 };
 
 /* SSOW mailbox error codes
