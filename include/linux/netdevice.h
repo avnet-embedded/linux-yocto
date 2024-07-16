@@ -2399,6 +2399,12 @@ struct pcpu_sw_netstats {
 	struct u64_stats_sync   syncp;
 };
 
+struct pcpu_lstats {
+	u64 packets;
+	u64 bytes;
+	struct u64_stats_sync syncp;
+};
+
 #define __netdev_alloc_pcpu_stats(type, gfp)				\
 ({									\
 	typeof(type) __percpu *pcpu_stats = alloc_percpu_gfp(type, gfp);\
@@ -3868,17 +3874,17 @@ static inline u32 netif_msg_init(int debug_value, int default_msg_enable_bits)
 #ifdef CONFIG_PREEMPT_RT_FULL
 static inline void netdev_queue_set_owner(struct netdev_queue *txq, int cpu)
 {
-	txq->xmit_lock_owner = current;
+	WRITE_ONCE(txq->xmit_lock_owner, current);
 }
 
 static inline void netdev_queue_clear_owner(struct netdev_queue *txq)
 {
-	txq->xmit_lock_owner = NULL;
+	WRITE_ONCE(txq->xmit_lock_owner, NULL);
 }
 
 static inline bool netdev_queue_has_owner(struct netdev_queue *txq)
 {
-	if (txq->xmit_lock_owner != NULL)
+	if (READ_ONCE(txq->xmit_lock_owner) != NULL)
 		return true;
 	return false;
 }
@@ -3887,17 +3893,19 @@ static inline bool netdev_queue_has_owner(struct netdev_queue *txq)
 
 static inline void netdev_queue_set_owner(struct netdev_queue *txq, int cpu)
 {
-	txq->xmit_lock_owner = cpu;
+	/* Pairs with READ_ONCE() in __dev_queue_xmit() */
+	WRITE_ONCE(txq->xmit_lock_owner, cpu);
 }
 
 static inline void netdev_queue_clear_owner(struct netdev_queue *txq)
 {
-	txq->xmit_lock_owner = -1;
+	/* Pairs with READ_ONCE() in __dev_queue_xmit() */
+	WRITE_ONCE(txq->xmit_lock_owner, -1);
 }
 
 static inline bool netdev_queue_has_owner(struct netdev_queue *txq)
 {
-	if (txq->xmit_lock_owner != -1)
+	if (READ_ONCE(txq->xmit_lock_owner) != -1)
 		return true;
 	return false;
 }
@@ -3907,8 +3915,7 @@ static inline void __netif_tx_lock(struct netdev_queue *txq, int cpu)
 {
 	spin_lock(&txq->_xmit_lock);
 	netdev_queue_set_owner(txq, cpu);
-	/* Pairs with READ_ONCE() in __dev_queue_xmit() */
-	WRITE_ONCE(txq->xmit_lock_owner, cpu);
+	netdev_queue_set_owner(txq, cpu);
 }
 
 static inline bool __netif_tx_acquire(struct netdev_queue *txq)
@@ -3926,8 +3933,7 @@ static inline void __netif_tx_lock_bh(struct netdev_queue *txq)
 {
 	spin_lock_bh(&txq->_xmit_lock);
 	netdev_queue_set_owner(txq, smp_processor_id());
-	/* Pairs with READ_ONCE() in __dev_queue_xmit() */
-	WRITE_ONCE(txq->xmit_lock_owner, smp_processor_id());
+	netdev_queue_set_owner(txq, smp_processor_id());
 }
 
 static inline bool __netif_tx_trylock(struct netdev_queue *txq)
@@ -3936,8 +3942,7 @@ static inline bool __netif_tx_trylock(struct netdev_queue *txq)
 
 	if (likely(ok)) {
 		netdev_queue_set_owner(txq, smp_processor_id());
-		/* Pairs with READ_ONCE() in __dev_queue_xmit() */
-		WRITE_ONCE(txq->xmit_lock_owner, smp_processor_id());
+		netdev_queue_set_owner(txq, smp_processor_id());
 	}
 	return ok;
 }
@@ -3945,16 +3950,14 @@ static inline bool __netif_tx_trylock(struct netdev_queue *txq)
 static inline void __netif_tx_unlock(struct netdev_queue *txq)
 {
 	netdev_queue_clear_owner(txq);
-	/* Pairs with READ_ONCE() in __dev_queue_xmit() */
-	WRITE_ONCE(txq->xmit_lock_owner, -1);
+	netdev_queue_clear_owner(txq);
 	spin_unlock(&txq->_xmit_lock);
 }
 
 static inline void __netif_tx_unlock_bh(struct netdev_queue *txq)
 {
 	netdev_queue_clear_owner(txq);
-	/* Pairs with READ_ONCE() in __dev_queue_xmit() */
-	WRITE_ONCE(txq->xmit_lock_owner, -1);
+	netdev_queue_clear_owner(txq);
 	spin_unlock_bh(&txq->_xmit_lock);
 }
 
