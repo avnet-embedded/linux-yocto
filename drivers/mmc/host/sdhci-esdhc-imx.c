@@ -1969,6 +1969,10 @@ static int sdhci_esdhc_suspend(struct device *dev)
 	if (ret)
 		return ret;
 
+	ret = mmc_gpio_set_cd_wake(host->mmc, true);
+	if (ret)
+		return ret;
+
 	sdhci_esdhc_imx_disable_clks(imx_data);
 
 	return ret;
@@ -2002,7 +2006,7 @@ static int sdhci_esdhc_resume(struct device *dev)
 			goto disable_clks;
 	}
 
-	return ret;
+	return mmc_gpio_set_cd_wake(host->mmc, false);
 
 disable_clks:
 	sdhci_esdhc_imx_disable_clks(imx_data);
