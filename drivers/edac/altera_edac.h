@@ -356,7 +356,8 @@ struct altr_sdram_mc_data {
 
 /* Single Event Upset Defines */
 #define SEU_SAFE_INJECT_SB_CE			0x50000
-#define SEU_SAFE_INJECT_DB_UE			0x002000030001
+#define SEU_SAFE_INJECT_DB_UE_MSB		0x20
+#define SEU_SAFE_INJECT_DB_UE_LSB		0x30001
 
 /* SDRAM Controller EccCtrl Register */
 #define S10_ECCCTRL1_OFST          	0xF8011100
