@@ -643,6 +643,9 @@ imx95-15x15-evk-os08a20-isp-adv7535-dtbs := imx95-15x15-evk-adv7535.dtb \
 					    imx95-19x19-evk-neoisp.dtbo
 dtb-$(CONFIG_ARCH_MXC) += imx95-15x15-evk-os08a20-isp-adv7535.dtb
 
+DTC_FLAGS_imx95-15x15-evk-rpmsg := -@
+dtb-$(CONFIG_ARCH_MXC) += imx95-15x15-evk-rpmsg.dtb
+
 dtb-$(CONFIG_ARCH_MXC) += imx95-19x19-evk.dtb \
 			  imx95-19x19-evk-lpspi-slave.dtb
 
