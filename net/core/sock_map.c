@@ -1597,7 +1597,7 @@ void sock_map_close(struct sock *sk, long timeout)
 
 	lock_sock(sk);
 	rcu_read_lock();
-	psock = sk_psock(sk);
+	psock = sk_psock_get(sk);
 	if (unlikely(!psock)) {
 		rcu_read_unlock();
 		release_sock(sk);
@@ -1606,6 +1606,7 @@ void sock_map_close(struct sock *sk, long timeout)
 		saved_close = psock->saved_close;
 		sock_map_remove_links(sk, psock);
 		rcu_read_unlock();
+		sk_psock_put(sk, psock);
 		release_sock(sk);
 	}
 	/* Make sure we do not recurse. This is a bug.
