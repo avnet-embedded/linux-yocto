@@ -400,6 +400,7 @@ int vfsub_rename(struct inode *src_dir, struct dentry *src_dentry,
 		.mnt	= path->mnt
 	};
 	struct dentry *d;
+	struct renamedata rd;
 
 	IMustLock(dir);
 	IMustLock(src_dir);
@@ -413,8 +414,13 @@ int vfsub_rename(struct inode *src_dir, struct dentry *src_dentry,
 		goto out;
 
 	lockdep_off();
-	err = vfs_rename(src_dir, src_dentry, dir, path->dentry,
-			 delegated_inode, flags);
+	rd.old_dir         = src_dir;
+	rd.old_dentry      = src_dentry;
+	rd.new_dir         = dir;
+	rd.new_dentry      = path->dentry;
+	rd.delegated_inode = delegated_inode;
+	rd.flags           = flags;
+	err = vfs_rename(&rd);
 	lockdep_on();
 	if (!err) {
 		int did;
