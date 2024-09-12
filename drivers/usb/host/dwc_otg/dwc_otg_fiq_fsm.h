@@ -129,12 +129,7 @@ enum fiq_debug_level {
 	FIQDBG_PORTHUB = (1 << 3),
 };
 
-#ifdef CONFIG_ARM64
-
-typedef spinlock_t fiq_lock_t;
-
-#else
-
+#define TICKET_SHIFT 16
 typedef struct {
 	union {
 		uint32_t slock;
@@ -143,9 +138,7 @@ typedef struct {
 			uint16_t next;
 		} tickets;
 	};
-} fiq_lock_t;
-
-#endif
+} __aligned(4) fiq_lock_t;
 
 struct fiq_state;
 
