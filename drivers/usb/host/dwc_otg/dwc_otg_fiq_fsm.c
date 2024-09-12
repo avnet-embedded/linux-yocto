@@ -74,17 +74,45 @@ void notrace _fiq_print(enum fiq_debug_level dbg_lvl, volatile struct fiq_state 
 	}
 }
 
-
-#ifdef CONFIG_ARM64
-
+#if defined(CONFIG_ARM64)
 inline void fiq_fsm_spin_lock(fiq_lock_t *lock)
 {
-	spin_lock((spinlock_t *)lock);
+       unsigned int tmp;
+       fiq_lock_t lockval, newval;
+
+       asm volatile(
+       /* Atomically increment the next ticket. */
+       "       prfm    pstl1strm, %3\n"
+       "1:     ldaxr   %w0, %3\n"
+       "       add     %w1, %w0, %w5\n"
+       "       stxr    %w2, %w1, %3\n"
+       "       cbnz    %w2, 1b\n"
+       /* Did we get the lock? */
+       "       eor     %w1, %w0, %w0, ror #16\n"
+       "       cbz     %w1, 3f\n"
+       /*
+        * No: spin on the owner. Send a local event to avoid missing an
+        * unlock before the exclusive load.
+        */
+       "       sevl\n"
+       "2:     wfe\n"
+       "       ldaxrh  %w2, %4\n"
+       "       eor     %w1, %w2, %w0, lsr #16\n"
+       "       cbnz    %w1, 2b\n"
+       /* We got the lock. Critical section starts here. */
+       "3:"
+       : "=&r" (lockval), "=&r" (newval), "=&r" (tmp), "+Q" (*lock)
+       : "Q" (lock->tickets.owner), "I" (1 << TICKET_SHIFT)
+       : "memory");
 }
 
 inline void fiq_fsm_spin_unlock(fiq_lock_t *lock)
 {
-	spin_unlock((spinlock_t *)lock);
+       asm volatile(
+       "       stlrh   %w1, %0\n"
+       : "=Q" (lock->tickets.owner)
+       : "r" (lock->tickets.owner + 1)
+       : "memory");
 }
 
 #else
