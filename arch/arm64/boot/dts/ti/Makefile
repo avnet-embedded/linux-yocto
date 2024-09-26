@@ -170,6 +170,7 @@ dtb-$(CONFIG_ARCH_K3) += k3-am69-sk-rpi-hdr-ehrpwm.dtbo
 
 # Boards with J742S2 SoC
 dtb-$(CONFIG_ARCH_K3) += k3-j742s2-evm.dtb
+dtb-$(CONFIG_ARCH_K3) += k3-j742s2-evm-ethfw.dtbo
 
 # Build time test only, enabled by CONFIG_OF_ALL_DTBS
 k3-am625-beagleplay-csi2-ov5640-dtbs := k3-am625-beagleplay.dtb \
@@ -277,6 +278,8 @@ k3-j722s-evm-dsi-rpi-7inch-panel-dtbs := k3-j722s-evm.dtb \
 	k3-j722s-evm-dsi-rpi-7inch-panel.dtbo
 k3-j722s-evm-microtips-mf101hie-panel-dtbs := k3-j722s-evm.dtb \
 	k3-j722s-evm-microtips-mf101hie-panel.dtbo
+k3-j742s2-evm-ethfw-dtbs := k3-j742s2-evm.dtb \
+	k3-j742s2-evm-ethfw.dtbo
 k3-j784s4-evm-ethfw-dtbs := k3-j784s4-evm.dtb \
 	k3-j784s4-evm-ethfw.dtbo
 k3-j784s4-evm-mcspi-loopback-dtbs := k3-j784s4-evm.dtb \
@@ -338,6 +341,7 @@ dtb- += k3-am625-beagleplay-csi2-ov5640.dtb \
 	k3-j721s2-evm-mcspi-loopback.dtb \
 	k3-j722s-evm-dsi-rpi-7inch-panel.dtb \
 	k3-j722s-evm-microtips-mf101hie-panel.dtb \
+	k3-j742s2-evm-ethfw.dtb \
 	k3-j784s4-evm-ethfw.dtb \
 	k3-j784s4-evm-mcspi-loopback.dtb \
 	k3-j784s4-evm-pcie0-pcie1-ep.dtb \
@@ -397,3 +401,4 @@ DTC_FLAGS_k3-j722s-evm-v3link-fusion += -@
 DTC_FLAGS_k3-j784s4-evm += -@
 DTC_FLAGS_k3-j784s4-evm-ethfw += -@
 DTC_FLAGS_k3-j742s2-evm += -@
+DTC_FLAGS_k3-j742s2-evm-ethfw += -@
