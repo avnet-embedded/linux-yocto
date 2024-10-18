@@ -708,6 +708,13 @@ static int tmc_etr_alloc_resrv_buf(struct tmc_drvdata *drvdata,
 	struct etr_flat_buf *resrv_buf;
 	struct device *real_dev = drvdata->csdev->dev.parent;
 
+	/*
+	 * Return if the requested buffer size is larger
+	 * than the reserved memory region.
+	 */
+	if (etr_buf->size > drvdata->resrv_buf.size)
+		return -EINVAL;
+
 	/* We cannot reuse existing pages for resrv buf */
 	if (pages)
 		return -EINVAL;
