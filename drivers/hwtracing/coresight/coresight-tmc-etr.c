@@ -708,6 +708,12 @@ static int tmc_etr_alloc_resrv_buf(struct tmc_drvdata *drvdata,
 	struct device *real_dev = drvdata->csdev->dev.parent;
 	struct coresight_device *csdev = drvdata->csdev;
 
+	/* Return if the requested buffer size is larger
+	 * than the reserved memory region.
+	 */
+	if (etr_buf->size > drvdata->resrv_mem.size)
+		return -EINVAL;
+
 	/* We cannot reuse existing pages for resrv buf */
 	if (pages)
 		return -EINVAL;
@@ -986,7 +992,11 @@ static struct etr_buf *tmc_alloc_etr_buf(struct tmc_drvdata *drvdata,
 	if (has_etr_resrv_mem) {
 		rc = tmc_etr_mode_alloc_buf(ETR_MODE_RESRV, drvdata,
 					    etr_buf, node, pages);
-		goto done;
+		/* Fallback to other modes of allocation if
+		 * reserved memory region cannot be used.
+		 */
+		if (!rc)
+			goto done;
 	}
 
 	/*
