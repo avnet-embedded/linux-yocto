@@ -184,6 +184,7 @@ static int omap2_set_gpio_debounce(struct gpio_bank *bank, unsigned offset,
 	u32			val;
 	u32			l;
 	bool			enable = !!debounce;
+	unsigned long flags;
 
 	if (!bank->dbck_flag)
 		return -ENOTSUPP;
@@ -197,11 +198,14 @@ static int omap2_set_gpio_debounce(struct gpio_bank *bank, unsigned offset,
 	l = BIT(offset);
 
 	clk_enable(bank->dbck);
+	raw_spin_lock_irqsave(&bank->lock, flags);
+
 	writel_relaxed(debounce, bank->base + bank->regs->debounce);
 
 	val = omap_gpio_rmw(bank->base + bank->regs->debounce_en, l, enable);
 	bank->dbck_enable_mask = val;
 
+	raw_spin_unlock_irqrestore(&bank->lock, flags);
 	clk_disable(bank->dbck);
 	/*
 	 * Enable debounce clock per module.
@@ -913,14 +917,11 @@ static int omap_gpio_debounce(struct gpio_chip *chip, unsigned offset,
 			      unsigned debounce)
 {
 	struct gpio_bank *bank;
-	unsigned long flags;
 	int ret;
 
 	bank = gpiochip_get_data(chip);
 
-	raw_spin_lock_irqsave(&bank->lock, flags);
 	ret = omap2_set_gpio_debounce(bank, offset, debounce);
-	raw_spin_unlock_irqrestore(&bank->lock, flags);
 
 	if (ret)
 		dev_info(chip->parent,
