@@ -14,5 +14,6 @@ Performance monitor support
    arm-ccn
    arm-cmn
    xgene-pmu
+   mrvl-odyssey-ddr-pmu
    arm_dsu_pmu
    thunderx2-pmu
