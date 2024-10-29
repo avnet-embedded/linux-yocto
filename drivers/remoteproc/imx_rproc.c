@@ -775,21 +775,6 @@ imx_rproc_elf_find_loaded_rsc_table(struct rproc *rproc, const struct firmware *
 {
 	struct imx_rproc *priv = rproc->priv;
 
-
-	if (priv->ipc_only)
-		return NULL;
-
-	if (priv->rsc_table)
-		return priv->rsc_table;
-
-	return rproc_elf_find_loaded_rsc_table(rproc, fw);
-}
-
-static struct resource_table *
-imx_rproc_elf_find_loaded_rsc_table(struct rproc *rproc, const struct firmware *fw)
-{
-	struct imx_rproc *priv = rproc->priv;
-
 	if (priv->rsc_table)
 		return (struct resource_table *)priv->rsc_table;
 
