@@ -1132,17 +1132,13 @@ static int xiic_xfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int num)
 		}
 	}
 
-	err = xiic_start_xfer(i2c);
-	if (err < 0) {
-		dev_err(adap->dev.parent, "Error xiic_start_xfer\n");
+	err = xiic_start_xfer(i2c, msgs, num);
+	if (err < 0)
 		goto out;
-	}
 
-	if (wait_event_timeout(i2c->wait, i2c->state == STATE_ERROR ||
-			       i2c->state == STATE_DONE, HZ)) {
-		err = (i2c->state == STATE_DONE) ? num : -EIO;
-		goto out;
-	} else {
+	err = wait_for_completion_timeout(&i2c->completion, XIIC_XFER_TIMEOUT);
+	mutex_lock(&i2c->lock);
+	if (err == 0) {	/* Timeout */
 		i2c->tx_msg = NULL;
 		i2c->rx_msg = NULL;
 		i2c->nmsgs = 0;
