@@ -4,7 +4,6 @@
 ---
 name: Automerge
 
-# on: pull_request_target
 on:
   pull_request:
     types:
@@ -22,7 +21,6 @@ on:
   check_suite:
     types:
       - completed
-  status: {}
 
 jobs:
   auto_merge:
