@@ -285,7 +285,7 @@ struct dentry *mrvl_spi_debug_root;
 #define SPI_NOT_CLAIMED				0x00
 #define SPI_AP_NS_OWN				0x02
 #define CDNS_XSPI_PHY_CTB_RFILE_PHY_GPIO_CTRL_1	0x8c
-#define SPI_LOCK_TIMEOUT			100
+#define SPI_LOCK_TIMEOUT			100 /* 1 second timeout */
 #define	SPI_LOCK_CHECK_TIMEOUT			10
 #define SPI_LOCK_SLEEP_DURATION_MS		10
 #endif
@@ -319,6 +319,7 @@ struct cdns_xspi_dev {
 	void __iomem *auxbase;
 	void __iomem *sdmabase;
 	void __iomem *xferbase;
+	void __iomem *lockbase;
 
 	int irq;
 	int cur_cs;
@@ -350,6 +351,14 @@ struct cdns_xspi_dev {
 
 #define MRVL_DEFAULT_CLK 25000000
 
+struct spi_lock {
+	uint32_t k_support;
+	uint32_t bl_support;
+	uint32_t atf_support;
+	uint32_t owner;
+	atomic_t lock;
+};
+
 const int cdns_xspi_clk_div_list[] = {
 	4,	//0x0 = Divide by 4.   SPI clock is 200 MHz.
 	6,	//0x1 = Divide by 6.   SPI clock is 133.33 MHz.
@@ -367,54 +376,95 @@ const int cdns_xspi_clk_div_list[] = {
 	128,	//0xD = Divide by 128. SPI clock is 6.25 MHz.
 	-1	//End of list
 };
+
+int xspi_unlock(atomic_t *lock)
+{
+	atomic_fetch_dec(lock);
+	return 0;
+}
+
+int xspi_trylock(atomic_t *lock)
+{
+	int timeout = 0xFF;
+
+	do {
+		if (atomic_fetch_inc(lock) == 0)
+			return 0;
+		atomic_fetch_dec(lock);
+	} while (timeout--);
+
+	return 1;
+}
+
 static int unlock_spi_bus(struct cdns_xspi_dev *cdns_xspi)
 {
-	if (readl(cdns_xspi->auxbase + CDNS_XSPI_PHY_CTB_RFILE_PHY_GPIO_CTRL_1) == SPI_AP_NS_OWN) {
-		writel(SPI_NOT_CLAIMED,
-		       cdns_xspi->auxbase + CDNS_XSPI_PHY_CTB_RFILE_PHY_GPIO_CTRL_1);
-		return 0;
-	}
-	pr_err("Trying to unlock NOT locked bus: %d!\n",
-		readl(cdns_xspi->auxbase + CDNS_XSPI_PHY_CTB_RFILE_PHY_GPIO_CTRL_1));
+	struct spi_lock *lock = cdns_xspi->lockbase;
 
-	return -1;
+	if (cdns_xspi->lockbase) {
+		if (lock->owner == SPI_AP_NS_OWN) {
+			lock->owner = 0;
+			return 0;
+		}
+	} else {
+		if (readl(cdns_xspi->auxbase + CDNS_XSPI_PHY_CTB_RFILE_PHY_GPIO_CTRL_1)
+				== SPI_AP_NS_OWN) {
+			writel(SPI_NOT_CLAIMED,
+			cdns_xspi->auxbase + CDNS_XSPI_PHY_CTB_RFILE_PHY_GPIO_CTRL_1);
+			return 0;
+		}
+		pr_err("Trying to unlock NOT locked bus: %d!\n",
+			readl(cdns_xspi->auxbase + CDNS_XSPI_PHY_CTB_RFILE_PHY_GPIO_CTRL_1));
+
+		return -1;
+	}
+	return 0;
 }
 
 static int lock_spi_bus(struct cdns_xspi_dev *cdns_xspi)
 {
 	uint32_t val = 0;
-	int timeout = SPI_LOCK_TIMEOUT; //10 second timeout
+	int timeout = SPI_LOCK_TIMEOUT;
+	struct spi_lock *lock = cdns_xspi->lockbase;
 
-	while (timeout >= 0) {
+	if (cdns_xspi->lockbase) {
+		while (timeout-- >= 0) {
+			if (xspi_trylock(&lock->lock) != 0) {
+				mdelay(SPI_LOCK_SLEEP_DURATION_MS);
+				continue;
+			}
+			if (lock->owner == 0 || lock->owner == SPI_AP_NS_OWN) {
+				lock->owner = SPI_AP_NS_OWN;
+				xspi_unlock(&lock->lock);
+				return 0;
+			}
+			xspi_unlock(&lock->lock);
+			mdelay(SPI_LOCK_SLEEP_DURATION_MS);
+			continue;
+		}
+		pr_err("Flash arbitration failed, lock is owned by: %d\n", lock->owner);
+		return -1;
+	}
+
+	while (timeout-- >= 0) {
 		val = readl(cdns_xspi->auxbase + CDNS_XSPI_PHY_CTB_RFILE_PHY_GPIO_CTRL_1);
 		if (val == SPI_NOT_CLAIMED || val == SPI_AP_NS_OWN) {
+			int check;
+
 			writel(SPI_AP_NS_OWN,
-			       cdns_xspi->auxbase + CDNS_XSPI_PHY_CTB_RFILE_PHY_GPIO_CTRL_1);
-			break;
+			cdns_xspi->auxbase + CDNS_XSPI_PHY_CTB_RFILE_PHY_GPIO_CTRL_1);
+
+			for (check = SPI_LOCK_CHECK_TIMEOUT + 1; check > 0; check--) {
+				val = readl(cdns_xspi->auxbase +
+					CDNS_XSPI_PHY_CTB_RFILE_PHY_GPIO_CTRL_1);
+				if (val != SPI_AP_NS_OWN)
+					break; // lock is owned by someone else, try again
+			}
+			if (check == 0)
+				return 0; // got a lock
 		}
 		mdelay(SPI_LOCK_SLEEP_DURATION_MS);
-		timeout--;
 	}
-
-	if (timeout < 0)
-		goto fail;
-
-	timeout = SPI_LOCK_CHECK_TIMEOUT;
-	while (timeout >= 0) {
-		if (readl(cdns_xspi->auxbase + CDNS_XSPI_PHY_CTB_RFILE_PHY_GPIO_CTRL_1) !=
-			  SPI_AP_NS_OWN)
-			break;
-		timeout--;
-	}
-
-	if (timeout != -1)
-		goto fail;
-
-	return 0;
-
-fail:
-	pr_err("Flash arbitration failed, lock is owned by: %d\n",
-		readl(cdns_xspi->auxbase + CDNS_XSPI_PHY_CTB_RFILE_PHY_GPIO_CTRL_1));
+	pr_err("Flash arbitration failed, lock is owned by: %d\n", val);
 	return -1;
 }
 
@@ -1664,6 +1714,17 @@ static int cdns_xspi_probe(struct platform_device *pdev)
 		cdns_xspi->xferbase = cdns_xspi->iobase + 0x8000;
 	}
 #endif
+
+	res = platform_get_resource(pdev, IORESOURCE_MEM, 4);
+	cdns_xspi->lockbase = devm_ioremap_resource(dev, res);
+	if (IS_ERR(cdns_xspi->lockbase)) {
+		dev_err(dev, "FW does not support memory lock\n");
+		cdns_xspi->lockbase = NULL;
+	} else {
+		struct spi_lock *lock = (struct spi_lock *)cdns_xspi->lockbase;
+
+		lock->k_support = 0x01;
+	}
 
 	cdns_xspi->irq = platform_get_irq(pdev, 0);
 	if (cdns_xspi->irq < 0)
