@@ -145,6 +145,9 @@ M(LMTST_TBL_SETUP,	0x00a, lmtst_tbl_setup, lmtst_tbl_setup_req,    \
 				msg_rsp)				\
 M(SET_VF_PERM,		0x00b, set_vf_perm, set_vf_perm, msg_rsp)	\
 M(PTP_GET_CAP,		0x00c, ptp_get_cap, msg_req, ptp_get_cap_rsp)	\
+M(GET_REP_CNT,		0x00d, get_rep_cnt, msg_req, get_rep_cnt_rsp)	\
+M(ESW_CFG,		0x00e, esw_cfg, esw_cfg_req, msg_rsp)	\
+M(REP_EVENT_NOTIFY,	0x00f, rep_event_notify, rep_event, msg_rsp) \
 /* CGX mbox IDs (range 0x200 - 0x3FF) */				\
 M(CGX_START_RXTX,	0x200, cgx_start_rxtx, msg_req, msg_rsp)	\
 M(CGX_STOP_RXTX,	0x201, cgx_stop_rxtx, msg_req, msg_rsp)		\
@@ -224,6 +227,7 @@ M(SSO_CONFIG_LSW,	0x612, ssow_config_lsw,			\
 M(SSO_HWS_CHNG_MSHIP,   0x613, ssow_chng_mship, ssow_chng_mship, msg_rsp)\
 M(SSO_GRP_STASH_CONFIG, 0x614, sso_grp_stash_config, sso_grp_stash_cfg, \
 				msg_rsp)				\
+M(SSO_GET_HW_INFO, 0x617, sso_get_hw_info, msg_req, sso_hw_info)   \
 /* TIM mbox IDs (range 0x800 - 0x9FF) */				\
 M(TIM_LF_ALLOC,		0x800, tim_lf_alloc,				\
 				tim_lf_alloc_req, tim_lf_alloc_rsp)	\
@@ -235,6 +239,8 @@ M(TIM_GET_MIN_INTVL,	0x805, tim_get_min_intvl, tim_intvl_req,	\
 			       tim_intvl_rsp)				\
 M(TIM_CAPTURE_COUNTERS,	0x806, tim_capture_counters, msg_req,		\
 			       tim_capture_rsp)				\
+M(TIM_CONFIG_HWWQE,	0x807, tim_config_hwwqe, tim_cfg_hwwqe_req,	\
+			       msg_rsp)					\
 /* CPT mbox IDs (range 0xA00 - 0xBFF) */				\
 M(CPT_LF_ALLOC,		0xA00, cpt_lf_alloc, cpt_lf_alloc_req_msg,	\
 			       msg_rsp)					\
@@ -394,6 +400,7 @@ M(NIX_MCAST_GRP_DESTROY, 0x802c, nix_mcast_grp_destroy, nix_mcast_grp_destroy_re
 M(NIX_MCAST_GRP_UPDATE, 0x802d, nix_mcast_grp_update,				\
 				nix_mcast_grp_update_req,			\
 				nix_mcast_grp_update_rsp)			\
+M(NIX_GET_LF_STATS,	0x802e, nix_get_lf_stats, nix_get_lf_stats_req, nix_lf_stats)	\
 /* MCS mbox IDs (range 0xA000 - 0xBFFF) */					\
 M(MCS_ALLOC_RESOURCES,	0xa000, mcs_alloc_resources, mcs_alloc_rsrc_req,	\
 				mcs_alloc_rsrc_rsp)				\
@@ -455,12 +462,16 @@ M(CPT_INST_LMTST,	0xD00, cpt_inst_lmtst, cpt_inst_lmtst_req, msg_rsp)
 #define MBOX_UP_MCS_MESSAGES						\
 M(MCS_INTR_NOTIFY,	0xE00, mcs_intr_notify, mcs_intr_info, msg_rsp)
 
+#define MBOX_UP_REP_MESSAGES						\
+M(REP_EVENT_UP_NOTIFY,	0xEF0, rep_event_up_notify, rep_event, msg_rsp) \
+
 enum {
 #define M(_name, _id, _1, _2, _3) MBOX_MSG_ ## _name = _id,
 MBOX_MESSAGES
 MBOX_UP_CGX_MESSAGES
 MBOX_UP_CPT_MESSAGES
 MBOX_UP_MCS_MESSAGES
+MBOX_UP_REP_MESSAGES
 #undef M
 };
 
@@ -1547,6 +1558,37 @@ struct nix_set_vlan_tpid {
 	u16 tpid;
 };
 
+struct nix_get_lf_stats_req {
+	struct mbox_msghdr hdr;
+	u16 pcifunc;
+	u8 reset;
+	u64 rsvd;
+};
+
+struct nix_lf_stats {
+	struct mbox_msghdr hdr;
+	u16 pcifunc;
+	struct {
+		u64 octs;
+		u64 ucast;
+		u64 bcast;
+		u64 mcast;
+		u64 drop;
+		u64 drop_octs;
+		u64 drop_mcast;
+		u64 drop_bcast;
+		u64 err;
+		u64 rsvd[5];
+	} rx;
+	struct {
+		u64 ucast;
+		u64 bcast;
+		u64 mcast;
+		u64 drop;
+		u64 octs;
+	} tx;
+};
+
 /* SSO mailbox error codes
  * Range 501 - 600.
  */
@@ -1605,6 +1647,29 @@ struct sso_grp_priority {
 	u8 priority;
 	u8 affinity;
 	u8 weight;
+};
+
+struct sso_hw_info {
+	struct mbox_msghdr hdr;
+	u8  hw_flr : 1;
+	u8  hw_prefetch : 1;
+	u8  sw_prefetch : 1;
+	u8  lsw : 1;
+	u8  fwd_grp : 1;
+	u8  eva_present : 1;
+	u8  no_nsched : 1;
+	u8  tag_cfg : 1;
+	u8  gwc_per_core;
+	u16 hws;
+	u16 hwgrps;
+	u16 hwgrps_per_pf;
+	u16 iue;
+	u16 taq_lines;
+	u16 taq_ent_per_line;
+	u16 xaq_buf_size;
+	u16 xaq_wq_entries;
+	u32 eva_ctx_per_hwgrp;
+	u64 rsvd[2];
 };
 
 /* SSOW mailbox error codes
@@ -1858,6 +1923,38 @@ struct ptp_get_cap_rsp {
 	u64 cap;
 };
 
+struct get_rep_cnt_rsp {
+	struct mbox_msghdr hdr;
+	u16 rep_cnt;
+	u16 rep_pf_map[64];
+};
+
+struct esw_cfg_req {
+	struct mbox_msghdr hdr;
+	u8 ena;
+	u64 rsvd;
+};
+
+struct rep_evt_data {
+	u8 port_state;
+	u8 vf_state;
+	u16 rx_mode;
+	u16 rx_flags;
+	u16 mtu;
+	u64 rsvd[5];
+};
+
+struct rep_event {
+	struct mbox_msghdr hdr;
+	u16 pcifunc;
+#define RVU_EVENT_PORT_STATE		BIT_ULL(0)
+#define RVU_EVENT_PFVF_STATE		BIT_ULL(1)
+#define RVU_EVENT_MTU_CHANGE		BIT_ULL(2)
+#define RVU_EVENT_RX_MODE_CHANGE	BIT_ULL(3)
+	u16 event;
+	struct rep_evt_data evt_data;
+};
+
 struct flow_msg {
 	unsigned char dmac[6];
 	unsigned char smac[6];
@@ -1898,6 +1995,7 @@ struct flow_msg {
 #define OTX2_FLOWER_MASK_MPLS_TTL		GENMASK(7, 0)
 #define OTX2_FLOWER_MASK_MPLS_NON_TTL		GENMASK(31, 8)
 	__be32 mpls_lse[4];
+	__be16 sq_id;
 };
 
 struct npc_install_flow_req {
@@ -1943,6 +2041,7 @@ struct npc_delete_flow_req {
 	u16 start;/*Disable range of entries */
 	u16 end;
 	u8 all; /* PF + VFs */
+	u16 vf;
 };
 
 struct npc_delete_flow_rsp {
@@ -2000,6 +2099,12 @@ enum tim_af_status {
 	TIM_AF_ENA_DONTFRE_NSET_PERIODIC	= -816,
 	TIM_AF_RING_ALREADY_DISABLED		= -817,
 	TIM_AF_LF_START_SYNC_FAIL		= -818,
+	TIM_AF_HWWQE_NOT_SUPPORTED      = -819,
+	TIM_AF_INVALID_HWWQE_ENA_VALUE      = -820,
+	TIM_AF_INVALID_WQE_RD_CLR_VALUE     = -821,
+	TIM_AF_INVALID_GRP_ENA_VALUE        = -822,
+	TIM_AF_INVALID_FLW_CTRL_ENA_VALUE   = -823,
+	TIM_AF_INTERVAL_EXT_NOT_SUPPORTED   = -824,
 };
 
 struct npc_get_field_hash_info_req {
@@ -2085,11 +2190,27 @@ struct tim_config_req {
 	u8	enabledontfreebuffer;
 	u32	bucketsize;
 	u32	chunksize;
-	u32	interval;   /* Cycles between traversal */
+	u32	interval_lo;   /* Cycles between traversal */
 	u8	gpioedge;
-	u8	rsvd[7];
+	u8	rsvd[3];
+	u32	interval_hi;
 	u64	intervalns; /* Nanoseconds between traversal */
 	u64	clockfreq;
+};
+
+struct tim_cfg_hwwqe_req {
+	struct mbox_msghdr hdr;
+	u16	ring;
+	u8	grp_ena;
+	u8	hwwqe_ena;
+	u8	ins_min_gap;
+	u8	flw_ctrl_ena;
+	u8	wqe_rd_clr_ena;
+	u16	grp_tmo_cntr;
+	u16	npa_tmo_cntr;
+	u16	result_offset;
+	u16	event_count_offset;
+	u64	rsvd[2];
 };
 
 struct tim_lf_alloc_rsp {
@@ -2841,6 +2962,12 @@ struct mcs_intr_info {
 	u8 mcs_id;
 	u8 lmac_id;
 	u64 rsvd;
+};
+
+struct rep_repte_req {
+	struct mbox_msghdr hdr;
+	u16 repte_pcifunc;
+	bool enable;
 };
 
 #endif /* MBOX_H */

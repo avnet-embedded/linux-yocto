@@ -226,7 +226,7 @@ int otx2_hw_set_mtu(struct otx2_nic *pfvf, int mtu)
 	u16 maxlen;
 	int err;
 
-	maxlen = otx2_get_max_mtu(pfvf) + OTX2_ETH_HLEN + OTX2_HW_TIMESTAMP_LEN;
+	maxlen = pfvf->hw.max_mtu + OTX2_ETH_HLEN + OTX2_HW_TIMESTAMP_LEN;
 
 	mutex_lock(&pfvf->mbox.lock);
 	req = otx2_mbox_alloc_msg_nix_set_hw_frs(&pfvf->mbox);
@@ -236,7 +236,7 @@ int otx2_hw_set_mtu(struct otx2_nic *pfvf, int mtu)
 	}
 
 	/* Add EDSA/HIGIG2 header length and timestamp length to maxlen */
-	req->maxlen = pfvf->netdev->mtu + OTX2_ETH_HLEN + pfvf->addl_mtu +
+	req->maxlen = mtu + OTX2_ETH_HLEN + pfvf->addl_mtu +
 		      OTX2_HW_TIMESTAMP_LEN + pfvf->xtra_hdr;
 
 	if (is_otx2_lbkvf(pfvf->pdev))
@@ -250,6 +250,7 @@ int otx2_hw_set_mtu(struct otx2_nic *pfvf, int mtu)
 	mutex_unlock(&pfvf->mbox.lock);
 	return err;
 }
+EXPORT_SYMBOL(otx2_hw_set_mtu);
 
 int otx2_config_pause_frm(struct otx2_nic *pfvf)
 {
@@ -1776,8 +1777,13 @@ void mbox_handler_cgx_stats(struct otx2_nic *pfvf,
 void mbox_handler_cgx_fec_stats(struct otx2_nic *pfvf,
 				struct cgx_fec_stats_rsp *rsp)
 {
-	pfvf->hw.cgx_fec_corr_blks += rsp->fec_corr_blks;
-	pfvf->hw.cgx_fec_uncorr_blks += rsp->fec_uncorr_blks;
+	if (test_bit(CN10K_RPM, &pfvf->hw.cap_flag)) {
+		pfvf->hw.cgx_fec_corr_blks = rsp->fec_corr_blks;
+		pfvf->hw.cgx_fec_uncorr_blks = rsp->fec_uncorr_blks;
+	} else {
+		pfvf->hw.cgx_fec_corr_blks += rsp->fec_corr_blks;
+		pfvf->hw.cgx_fec_uncorr_blks += rsp->fec_uncorr_blks;
+	}
 }
 
 void mbox_handler_npa_lf_alloc(struct otx2_nic *pfvf,
@@ -1840,6 +1846,7 @@ void otx2_free_cints(struct otx2_nic *pfvf, int n)
 		free_irq(vector, &qset->napi[qidx]);
 	}
 }
+EXPORT_SYMBOL(otx2_free_cints);
 
 void otx2_set_cints_affinity(struct otx2_nic *pfvf)
 {
