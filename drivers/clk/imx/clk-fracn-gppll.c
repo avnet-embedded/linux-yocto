@@ -200,9 +200,15 @@ static unsigned long __clk_fracn_gppll_recalc_rate(struct clk_hw *hw, unsigned l
 		break;
 	}
 
-	/* Fvco = Fref * (MFI + MFN / MFD) */
-	fvco *= (mfi * mfd + mfn);
-	do_div(fvco, mfd * rdiv * odiv);
+	if (pll->flags & CLK_FRACN_GPPLL_INTEGER) {
+		/* Fvco = (Fref / rdiv) * MFI */
+		fvco = fvco * mfi;
+		do_div(fvco, rdiv * odiv);
+	} else {
+		/* Fvco = Fref * (MFI + MFN / MFD) */
+		fvco *= (mfi * mfd + mfn);
+		do_div(fvco, mfd * rdiv * odiv);
+	}
 
 	return (unsigned long)fvco;
 }
