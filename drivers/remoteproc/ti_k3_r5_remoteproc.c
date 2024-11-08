@@ -801,17 +801,13 @@ static int k3_r5_rproc_start(struct rproc *rproc)
 	}
 
 	kproc->rproc->state = RPROC_RUNNING;
-	goto release_wait;
+	return 0;
 
 unroll_core_run:
 	list_for_each_entry_continue(core, &cluster->cores, elem) {
 		if (k3_r5_core_halt(core))
 			dev_warn(core->dev, "core halt back failed\n");
 	}
-
-release_wait:
-	core->released_from_reset = true;
-	wake_up_interruptible(&cluster->core_transition);
 
 	return ret;
 }
