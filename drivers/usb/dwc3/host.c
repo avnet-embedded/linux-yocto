@@ -185,10 +185,19 @@ int dwc3_host_init(struct dwc3 *dwc)
 		}
 	}
 
-	ret = platform_device_add_data(xhci, &dwc3_xhci_plat_quirk,
-				       sizeof(struct xhci_plat_priv));
-	if (ret)
-		goto err;
+	dwc3_pdata = (struct dwc3_platform_data *)dev_get_platdata(dwc->dev);
+	if (dwc3_pdata && dwc3_pdata->xhci_priv) {
+		dwc3_pdata->xhci_priv->plat_start = dwc3_xhci_plat_quirk.plat_start;
+		ret = platform_device_add_data(xhci, dwc3_pdata->xhci_priv,
+						sizeof(struct xhci_plat_priv));
+		if (ret)
+			goto err;
+	} else {
+		ret = platform_device_add_data(xhci, &dwc3_xhci_plat_quirk,
+						sizeof(struct xhci_plat_priv));
+		if (ret)
+			goto err;
+	}
 
 	ret = platform_device_add(xhci);
 	if (ret) {
