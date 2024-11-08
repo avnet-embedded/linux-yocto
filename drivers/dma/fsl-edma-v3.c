@@ -177,6 +177,7 @@ struct fsl_edma3_drvdata {
 	u32 dmamuxs;
 	bool has_chclk;
 	bool has_chmux;
+	bool mem_remote;
 };
 
 struct fsl_edma3_desc {
@@ -214,6 +215,7 @@ static struct fsl_edma3_drvdata fsl_edma_imx8q = {
 	.dmamuxs = 0,
 	.has_chclk = false,
 	.has_chmux = true,
+	.mem_remote = true,
 };
 
 static struct fsl_edma3_drvdata fsl_edma_imx8ulp = {
@@ -221,6 +223,7 @@ static struct fsl_edma3_drvdata fsl_edma_imx8ulp = {
 	.dmamuxs = 1,
 	.has_chclk = true,
 	.has_chmux = true,
+	.mem_remote = false,
 };
 
 static struct fsl_edma3_drvdata fsl_edma_imx93 = {
@@ -228,6 +231,7 @@ static struct fsl_edma3_drvdata fsl_edma_imx93 = {
 	.dmamuxs = 0,
 	.has_chclk = false,
 	.has_chmux = false,
+	.mem_remote = false,
 };
 
 static struct fsl_edma3_chan *to_fsl_edma3_chan(struct dma_chan *chan)
@@ -840,6 +844,9 @@ static struct dma_async_tx_descriptor *fsl_edma3_prep_memcpy(
 
 	fsl_chan->is_sw = true;
 
+	if (fsl_chan->edma3->drvdata->mem_remote)
+		fsl_chan->is_remote = true;
+
 	/* To match with copy_align and max_seg_size so 1 tcd is enough */
 	fsl_edma3_fill_tcd(fsl_chan, fsl_desc->tcd[0].vtcd, dma_src, dma_dst,
 			EDMA_TCD_ATTR_SSIZE_64BYTE | EDMA_TCD_ATTR_DSIZE_64BYTE,
@@ -1033,6 +1040,7 @@ static void fsl_edma3_free_chan_resources(struct dma_chan *chan)
 		clk_disable_unprepare(fsl_chan->clk);
 
 	fsl_chan->is_sw = false;
+	fsl_chan->is_remote = false;
 }
 
 static void fsl_edma3_synchronize(struct dma_chan *chan)
