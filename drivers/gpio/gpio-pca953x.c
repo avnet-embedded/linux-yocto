@@ -1167,6 +1167,7 @@ static int pca953x_probe(struct i2c_client *client)
 	return devm_gpiochip_add_data(dev, &chip->gpio_chip, chip);
 }
 
+#ifdef CONFIG_PM_SLEEP
 static int pca953x_regcache_sync(struct device *dev)
 {
 	struct pca953x_chip *chip = dev_get_drvdata(dev);
@@ -1216,7 +1217,7 @@ static int pca953x_regcache_sync(struct device *dev)
 	return 0;
 }
 
-static int pca953x_suspend_noirq(struct device *dev)
+static int pca953x_suspend(struct device *dev)
 {
 	struct pca953x_chip *chip = dev_get_drvdata(dev);
 
@@ -1232,7 +1233,7 @@ static int pca953x_suspend_noirq(struct device *dev)
 	return 0;
 }
 
-static int pca953x_resume_noirq(struct device *dev)
+static int pca953x_resume(struct device *dev)
 {
 	struct pca953x_chip *chip = dev_get_drvdata(dev);
 	int ret;
@@ -1263,6 +1264,7 @@ static int pca953x_resume_noirq(struct device *dev)
 
 	return 0;
 }
+#endif
 
 /* convenience to stop overlong match-table lines */
 #define OF_653X(__nrgpio, __int) ((void *)(__nrgpio | PCAL653X_TYPE | __int))
@@ -1320,8 +1322,7 @@ static const struct of_device_id pca953x_dt_ids[] = {
 
 MODULE_DEVICE_TABLE(of, pca953x_dt_ids);
 
-static DEFINE_NOIRQ_DEV_PM_OPS(pca953x_pm_ops,
-			       pca953x_suspend_noirq, pca953x_resume_noirq);
+static SIMPLE_DEV_PM_OPS(pca953x_pm_ops, pca953x_suspend, pca953x_resume);
 
 static struct i2c_driver pca953x_driver = {
 	.driver = {
