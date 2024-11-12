@@ -218,6 +218,8 @@ static const struct devlink_ops otx2_devlink_ops = {
 #ifdef CONFIG_RVU_ESWITCH
 	.eswitch_mode_get = otx2_devlink_eswitch_mode_get,
 	.eswitch_mode_set = otx2_devlink_eswitch_mode_set,
+        .port_function_hw_addr_get = rvu_rep_dl_port_fn_hw_addr_get,
+        .port_function_hw_addr_set = rvu_rep_dl_port_fn_hw_addr_set,
 #endif
 };
 
