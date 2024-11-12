@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright 2023 NXP
+ * Copyright 2023-2024 NXP
  */
 
 #include <linux/dma-mapping.h>
@@ -21,9 +21,10 @@ int ele_init_fw(struct device *dev)
 	unsigned int status;
 	int ret;
 
+	mutex_lock(&priv->mu_cmd_lock);
 	ret = imx_se_alloc_tx_rx_buf(priv);
 	if (ret)
-		return ret;
+		goto exit;
 
 	ret = plat_fill_cmd_msg_hdr(priv,
 				    (struct mu_hdr *)&priv->tx_msg->header,
@@ -53,6 +54,7 @@ int ele_init_fw(struct device *dev)
 
 exit:
 	imx_se_free_tx_rx_buf(priv);
+	mutex_unlock(&priv->mu_cmd_lock);
 
 	return ret;
 }
@@ -86,10 +88,11 @@ int ele_get_random(struct device *dev,
 		return -ENOMEM;
 	}
 
+	mutex_lock(&priv->mu_cmd_lock);
 	ret = imx_se_alloc_tx_rx_buf(priv);
 	if (ret) {
 		ret = -ENOMEM;
-		goto exit1;
+		goto exit;
 	}
 
 	tx_msg = (struct ele_rng_msg *)priv->tx_msg;
@@ -103,7 +106,9 @@ int ele_get_random(struct device *dev,
 	/* bit 1(blocking reseed): wait for trng entropy,
 	 * then reseed rng context.
 	 */
-	tx_msg->flags = BIT(1);
+	if (get_se_soc_id(dev) != SOC_ID_OF_IMX95)
+		tx_msg->flags = BIT(1);
+
 	tx_msg->data[0] = dst_dma;
 	tx_msg->data[1] = len;
 	ret = imx_ele_msg_send_rcv(priv);
@@ -116,7 +121,7 @@ int ele_get_random(struct device *dev,
 				ELE_GET_RANDOM_RSP_SZ,
 				false);
 	if (ret)
-		return ret;
+		goto exit;
 
 	status = RES_STATUS(priv->rx_msg->data[0]);
 	if (status != priv->success_tag) {
@@ -130,7 +135,7 @@ int ele_get_random(struct device *dev,
 
 exit:
 	imx_se_free_tx_rx_buf(priv);
-exit1:
+	mutex_unlock(&priv->mu_cmd_lock);
 	dmam_free_coherent(priv->dev, len, buf, dst_dma);
 
 	return ret;

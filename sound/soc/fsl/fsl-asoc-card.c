@@ -29,6 +29,7 @@
 #include "../codecs/wm8994.h"
 #include "../codecs/tlv320aic31xx.h"
 #include "../codecs/nau8822.h"
+#include "../codecs/wm8904.h"
 
 #define DRIVER_NAME "fsl-asoc-card"
 
@@ -52,6 +53,7 @@ enum fsl_asoc_card_type {
 	CARD_WM8524,
 	CARD_SI476X,
 	CARD_WM8958,
+	CARD_WM8904,
 };
 
 /**
@@ -447,21 +449,6 @@ static int be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 	return 0;
 }
 
-SND_SOC_DAILINK_DEFS(hifi,
-	DAILINK_COMP_ARRAY(COMP_EMPTY()),
-	DAILINK_COMP_ARRAY(COMP_EMPTY()),
-	DAILINK_COMP_ARRAY(COMP_EMPTY()));
-
-SND_SOC_DAILINK_DEFS(hifi_fe,
-	DAILINK_COMP_ARRAY(COMP_EMPTY()),
-	DAILINK_COMP_ARRAY(COMP_DUMMY()),
-	DAILINK_COMP_ARRAY(COMP_EMPTY()));
-
-SND_SOC_DAILINK_DEFS(hifi_be,
-	DAILINK_COMP_ARRAY(COMP_EMPTY()),
-	DAILINK_COMP_ARRAY(COMP_EMPTY()),
-	DAILINK_COMP_ARRAY(COMP_DUMMY()));
-
 static const struct snd_soc_dai_link fsl_asoc_card_dai[] = {
 	/* Default ASoC DAI Link*/
 	{
@@ -469,7 +456,6 @@ static const struct snd_soc_dai_link fsl_asoc_card_dai[] = {
 		.stream_name = "HiFi",
 		.ops = &fsl_asoc_card_ops,
 		.ignore_pmdown_time = 1,
-		SND_SOC_DAILINK_REG(hifi),
 	},
 	/* DPCM Link between Front-End and Back-End (Optional) */
 	{
@@ -480,7 +466,6 @@ static const struct snd_soc_dai_link fsl_asoc_card_dai[] = {
 		.dynamic = 1,
 		.ignore_pmdown_time = 1,
 		.dpcm_merged_chan = 1,
-		SND_SOC_DAILINK_REG(hifi_fe),
 	},
 	{
 		.name = "HiFi-ASRC-BE",
@@ -491,7 +476,6 @@ static const struct snd_soc_dai_link fsl_asoc_card_dai[] = {
 		.dpcm_capture = 1,
 		.no_pcm = 1,
 		.ignore_pmdown_time = 1,
-		SND_SOC_DAILINK_REG(hifi_be),
 	},
 };
 
@@ -706,6 +690,7 @@ static int fsl_asoc_card_probe(struct platform_device *pdev)
 	struct device_node *frameprovider = NULL;
 	struct platform_device *cpu_pdev;
 	struct fsl_asoc_card_priv *priv;
+	struct snd_soc_dai_link_component *dlc;
 	struct device *codec_dev = NULL;
 	const char *codec_dai_name;
 	const char *codec_dev_name;
@@ -778,6 +763,39 @@ static int fsl_asoc_card_probe(struct platform_device *pdev)
 
 	memcpy(priv->dai_link, fsl_asoc_card_dai,
 	       sizeof(struct snd_soc_dai_link) * ARRAY_SIZE(priv->dai_link));
+
+	/*
+	 * "Default ASoC DAI Link": 1 cpus, 1 codecs, 1 platforms
+	 * "DPCM Link Front-End":  1 cpus, 1 codecs (dummy), 1 platforms
+	 * "DPCM Link Back-End": 1 cpus, 1 codecs, 1 platforms (dummy)
+	 * totally 7 components (remove dummy)
+	 */
+	dlc = devm_kcalloc(&pdev->dev, 7, sizeof(*dlc), GFP_KERNEL);
+	if (!dlc) {
+		ret = -ENOMEM;
+		goto asrc_fail;
+	}
+
+	priv->dai_link[0].cpus = &dlc[0];
+	priv->dai_link[0].num_cpus = 1;
+	priv->dai_link[0].codecs = &dlc[1];
+	priv->dai_link[0].num_codecs = 1;
+	priv->dai_link[0].platforms = &dlc[2];
+	priv->dai_link[0].num_platforms = 1;
+
+	priv->dai_link[1].cpus = &dlc[3];
+	priv->dai_link[1].num_cpus = 1;
+	priv->dai_link[1].codecs = &asoc_dummy_dlc;
+	priv->dai_link[1].num_codecs = 1; /* dummy */
+	priv->dai_link[1].platforms = &dlc[4];
+	priv->dai_link[1].num_platforms = 1;
+
+	priv->dai_link[2].cpus = &dlc[5];
+	priv->dai_link[2].num_cpus = 1;
+	priv->dai_link[2].codecs = &dlc[6];
+	priv->dai_link[2].num_codecs = 1;
+	priv->dai_link[2].platforms = &asoc_dummy_dlc; /* dummy */
+	priv->dai_link[2].num_platforms = 1;
 
 	priv->card.dapm_routes = audio_map;
 	priv->card.num_dapm_routes = ARRAY_SIZE(audio_map);
@@ -881,6 +899,13 @@ static int fsl_asoc_card_probe(struct platform_device *pdev)
 		priv->dai_fmt |= SND_SOC_DAIFMT_CBM_CFM;
 		if (codec_dev)
 			priv->codec_priv.mclk = devm_clk_get(codec_dev, NULL);
+	} else if (of_device_is_compatible(np, "fsl,imx-audio-wm8904")) {
+		codec_dai_name = "wm8904-hifi";
+		priv->codec_priv.mclk_id = WM8904_FLL_MCLK;
+		priv->codec_priv.fll_id = WM8904_CLK_FLL;
+		priv->codec_priv.pll_id = WM8904_FLL_MCLK;
+		priv->dai_fmt |= SND_SOC_DAIFMT_CBP_CFP;
+		priv->card_type = CARD_WM8904;
 	} else {
 		dev_err(&pdev->dev, "unknown Device Tree compatible\n");
 		ret = -EINVAL;
@@ -1131,6 +1156,7 @@ static const struct of_device_id fsl_asoc_card_dt_ids[] = {
 	{ .compatible = "fsl,imx-audio-si476x", },
 	{ .compatible = "fsl,imx-audio-wm8958", },
 	{ .compatible = "fsl,imx-audio-nau8822", },
+	{ .compatible = "fsl,imx-audio-wm8904", },
 	{}
 };
 MODULE_DEVICE_TABLE(of, fsl_asoc_card_dt_ids);

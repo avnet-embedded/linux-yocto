@@ -13,9 +13,12 @@
 static int wave6_vpu_dbg_instance(struct seq_file *s, void *data)
 {
 	struct vpu_instance *inst = s->private;
+	struct vpu_performance_info *perf = &inst->performance;
 	struct vb2_queue *vq;
 	char str[128];
 	int num;
+	s64 tmp;
+	s64 fps;
 
 	if (!inst->v4l2_fh.m2m_ctx)
 		return 0;
@@ -25,14 +28,18 @@ static int wave6_vpu_dbg_instance(struct seq_file *s, void *data)
 	if (seq_write(s, str, num))
 		return 0;
 
-	num = scnprintf(str, sizeof(str), "%s : product 0x%x, fw_version r%d, hw_version 0x%x\n",
-			dev_name(inst->dev->dev),
-			inst->dev->product_code, inst->dev->fw_version, inst->dev->hw_version);
+	num = scnprintf(str, sizeof(str), "%s : product 0x%x, fw_ver %d.%d.%d(r%d), hw_ver 0x%x\n",
+			dev_name(inst->dev->dev), inst->dev->product_code,
+			(inst->dev->fw_version >> 24) & 0xFF,
+			(inst->dev->fw_version >> 16) & 0xFF,
+			(inst->dev->fw_version >> 0) & 0xFFFF,
+			inst->dev->fw_revision, inst->dev->hw_version);
 	if (seq_write(s, str, num))
 		return 0;
 
-	num = scnprintf(str, sizeof(str), "state = %s\n",
-			wave6_vpu_instance_state_name(inst->state));
+	num = scnprintf(str, sizeof(str), "state = %s, pause request %d\n",
+			wave6_vpu_instance_state_name(inst->state),
+			inst->dev->pause_request);
 	if (seq_write(s, str, num))
 		return 0;
 
@@ -66,6 +73,14 @@ static int wave6_vpu_dbg_instance(struct seq_file *s, void *data)
 	if (seq_write(s, str, num))
 		return 0;
 
+	num = scnprintf(str, sizeof(str),
+			"capture queued %d, consumed %d, used %d\n",
+			v4l2_m2m_num_dst_bufs_ready(inst->v4l2_fh.m2m_ctx),
+			wave6_vpu_get_consumed_fb_num(inst),
+			wave6_vpu_get_used_fb_num(inst));
+	if (seq_write(s, str, num))
+		return 0;
+
 	num = scnprintf(str, sizeof(str), "crop: (%d, %d) %d x %d\n",
 			inst->crop.left,
 			inst->crop.top,
@@ -93,13 +108,58 @@ static int wave6_vpu_dbg_instance(struct seq_file *s, void *data)
 	if (seq_write(s, str, num))
 		return 0;
 
+	num = scnprintf(str, sizeof(str), "fps");
+	if (seq_write(s, str, num))
+		return 0;
+	tmp = MSEC_PER_SEC * inst->processed_buf_num;
+	if (perf->ts_last > perf->ts_first + NSEC_PER_MSEC) {
+		fps = DIV_ROUND_CLOSEST(tmp, (perf->ts_last - perf->ts_first) / NSEC_PER_MSEC);
+		num = scnprintf(str, sizeof(str), " actual: %lld;", fps);
+		if (seq_write(s, str, num))
+			return 0;
+	}
+	if (perf->total_sw_time) {
+		fps = DIV_ROUND_CLOSEST(tmp, perf->total_sw_time / NSEC_PER_MSEC);
+		num = scnprintf(str, sizeof(str), " sw: %lld;", fps);
+		if (seq_write(s, str, num))
+			return 0;
+	}
+	if (perf->total_hw_time) {
+		fps = DIV_ROUND_CLOSEST(tmp, perf->total_hw_time / NSEC_PER_MSEC);
+		num = scnprintf(str, sizeof(str), " hw: %lld", fps);
+		if (seq_write(s, str, num))
+			return 0;
+	}
+	num = scnprintf(str, sizeof(str), "\n");
+	if (seq_write(s, str, num))
+		return 0;
+
+	num = scnprintf(str, sizeof(str),
+			"latency(ms) first: %llu.%06llu, max %llu.%06llu\n",
+			perf->latency_first / NSEC_PER_MSEC,
+			perf->latency_first % NSEC_PER_MSEC,
+			perf->latency_max / NSEC_PER_MSEC,
+			perf->latency_max % NSEC_PER_MSEC);
+	if (seq_write(s, str, num))
+		return 0;
+
+	num = scnprintf(str, sizeof(str),
+			"process frame time(ms) min: %llu.%06llu, max %llu.%06llu\n",
+			perf->min_process_time / NSEC_PER_MSEC,
+			perf->min_process_time % NSEC_PER_MSEC,
+			perf->max_process_time / NSEC_PER_MSEC,
+			perf->max_process_time % NSEC_PER_MSEC);
+	if (seq_write(s, str, num))
+		return 0;
+
 	if (inst->type == VPU_INST_TYPE_DEC) {
 		num = scnprintf(str, sizeof(str), "%s order\n",
 				inst->disp_mode == DISP_MODE_DISP_ORDER ? "display" : "decode");
 		if (seq_write(s, str, num))
 			return 0;
 	} else {
-		struct enc_wave_param *param = &inst->enc_param;
+		struct enc_info *p_enc_info = &inst->codec_info->enc_info;
+		struct enc_wave_param *param = &p_enc_info->open_param.wave_param;
 
 		num = scnprintf(str, sizeof(str), "profile %d, level %d, tier %d\n",
 				param->profile, param->level, param->tier);
@@ -113,7 +173,7 @@ static int wave6_vpu_dbg_instance(struct seq_file *s, void *data)
 
 		num = scnprintf(str, sizeof(str), "rc %d, mode %d, bitrate %d\n",
 				param->en_rate_control,
-				inst->rc_mode,
+				param->rc_mode,
 				param->enc_bit_rate);
 		if (seq_write(s, str, num))
 			return 0;

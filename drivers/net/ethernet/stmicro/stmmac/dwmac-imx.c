@@ -62,6 +62,7 @@ struct imx_priv_data {
 	struct device *dev;
 	struct clk *clk_tx;
 	struct clk *clk_mem;
+	int clk_en_cnt;
 	struct regmap *intf_regmap;
 	u32 intf_reg_off;
 	bool rmii_refclk_ext;
@@ -189,6 +190,8 @@ static int imx_dwmac_clks_config(void *priv, bool enabled)
 		ret = clk_prepare_enable(dwmac->clk_mem);
 		if (ret) {
 			dev_err(dwmac->dev, "mem clock enable failed\n");
+			dwmac->clk_en_cnt = dwmac->clk_en_cnt ?
+					    dwmac->clk_en_cnt - 1 : 0;
 			return ret;
 		}
 
@@ -196,13 +199,19 @@ static int imx_dwmac_clks_config(void *priv, bool enabled)
 		if (ret) {
 			dev_err(dwmac->dev, "tx clock enable failed\n");
 			clk_disable_unprepare(dwmac->clk_mem);
+			dwmac->clk_en_cnt = dwmac->clk_en_cnt ?
+					    dwmac->clk_en_cnt - 1 : 0;
 			return ret;
 		}
 		request_bus_freq(BUS_FREQ_HIGH);
+		dwmac->clk_en_cnt++;
 	} else {
-		release_bus_freq(BUS_FREQ_HIGH);
-		clk_disable_unprepare(dwmac->clk_tx);
-		clk_disable_unprepare(dwmac->clk_mem);
+		if (dwmac->clk_en_cnt > 0) {
+			release_bus_freq(BUS_FREQ_HIGH);
+			clk_disable_unprepare(dwmac->clk_tx);
+			clk_disable_unprepare(dwmac->clk_mem);
+			dwmac->clk_en_cnt--;
+		}
 	}
 
 	return ret;
@@ -335,7 +344,8 @@ imx_dwmac_parse_dt(struct imx_priv_data *dwmac, struct device *dev)
 	dwmac->clk_mem = NULL;
 
 	if (of_machine_is_compatible("fsl,imx8dxl") ||
-	    of_machine_is_compatible("fsl,imx93")) {
+	    of_machine_is_compatible("fsl,imx93") ||
+	    of_machine_is_compatible("fsl,imx91")) {
 		dwmac->clk_mem = devm_clk_get(dev, "mem");
 		if (IS_ERR(dwmac->clk_mem)) {
 			dev_err(dev, "failed to get mem clock\n");
@@ -344,7 +354,8 @@ imx_dwmac_parse_dt(struct imx_priv_data *dwmac, struct device *dev)
 	}
 
 	if (of_machine_is_compatible("fsl,imx8mp") ||
-	    of_machine_is_compatible("fsl,imx93")) {
+	    of_machine_is_compatible("fsl,imx93") ||
+	    of_machine_is_compatible("fsl,imx91")) {
 		/* Binding doc describes the propety:
 		 * is required by i.MX8MP, i.MX93.
 		 * is optinoal for i.MX8DXL.
@@ -410,6 +421,7 @@ static int imx_dwmac_probe(struct platform_device *pdev)
 	plat_dat->bsp_priv = dwmac;
 	dwmac->plat_dat = plat_dat;
 	dwmac->base_addr = stmmac_res.addr;
+	dwmac->clk_en_cnt = 0;
 
 	ret = imx_dwmac_clks_config(dwmac, true);
 	if (ret)

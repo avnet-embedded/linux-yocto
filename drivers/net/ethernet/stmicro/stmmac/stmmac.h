@@ -239,6 +239,7 @@ struct stmmac_priv {
 
 	int speed;
 	bool mdio_rst_after_resume;
+	bool wol_resume_reset;
 	unsigned int flow_ctrl;
 	unsigned int pause;
 	struct mii_bus *mii;
@@ -336,6 +337,7 @@ struct stmmac_priv {
 	/* XDP BPF Program */
 	unsigned long *af_xdp_zc_qps;
 	struct bpf_prog *xdp_prog;
+	bool fp_enabled_admin;
 };
 
 enum stmmac_state {

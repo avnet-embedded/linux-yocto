@@ -1,4 +1,5 @@
 /* Copyright 2008-2012 Freescale Semiconductor, Inc.
+ * Copyright 2019-2023 NXP
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -452,6 +453,11 @@ struct qm_dqrr_entry {
 #define QM_DQRR_STAT_FD_VALID		0x10	/* has a non-NULL FD */
 #define QM_DQRR_STAT_UNSCHEDULED	0x02	/* Unscheduled dequeue */
 #define QM_DQRR_STAT_DQCR_EXPIRED	0x01	/* VDQCR or PDQCR expired*/
+
+/* 'fqid' is a 24-bit field in every h/w descriptor */
+#define QM_FQID_MASK	GENMASK(23, 0)
+#define qm_fqid_set(p, v) ((p)->fqid = cpu_to_be32((v) & QM_FQID_MASK))
+#define qm_fqid_get(p)    (be32_to_cpu((p)->fqid) & QM_FQID_MASK)
 
 /* See 1.5.8.3: "ERN Message Response" */
 /* See 1.5.8.4: "FQ State Change Notification" */
@@ -2120,6 +2126,9 @@ const cpumask_t *qman_affine_cpus(void);
  * member of the mask returned from qman_affine_cpus().
  */
 u16 qman_affine_channel(int cpu);
+#ifdef CONFIG_FSL_DPAA_ETHERCAT
+u16 qman_affine_channel_ethercat(int cpu);
+#endif
 
 /**
  * qman_get_affine_portal - return the portal pointer affine to cpu
@@ -2127,6 +2136,10 @@ u16 qman_affine_channel(int cpu);
  *
  */
 void *qman_get_affine_portal(int cpu);
+#ifdef CONFIG_FSL_DPAA_ETHERCAT
+void *qman_get_affine_portal_ethercat(int cpu);
+u32 qman_get_affine_last_cpu(void);
+#endif
 
 /**
  * qman_poll_dqrr - process DQRR (fast-path) entries

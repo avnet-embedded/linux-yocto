@@ -122,6 +122,18 @@
 #define EDMA_TCD_CSR_ACTIVE		BIT(6)
 #define EDMA_TCD_CSR_DONE		BIT(7)
 
+#define EDMA_CH_ERR_DBE                 BIT(0)
+#define EDMA_CH_ERR_SBE                 BIT(1)
+#define EDMA_CH_ERR_SGE                 BIT(2)
+#define EDMA_CH_ERR_NCE                 BIT(3)
+#define EDMA_CH_ERR_DOE                 BIT(4)
+#define EDMA_CH_ERR_DAE                 BIT(5)
+#define EDMA_CH_ERR_SOE                 BIT(6)
+#define EDMA_CH_ERR_SAE                 BIT(7)
+#define EDMA_CH_ERR_ECX                 BIT(8)
+#define EDMA_CH_ERR_UCE                 BIT(9)
+#define EDMA_CH_ERR                     BIT(31)
+
 #define FSL_EDMA_BUSWIDTHS	(BIT(DMA_SLAVE_BUSWIDTH_1_BYTE) | \
 				BIT(DMA_SLAVE_BUSWIDTH_2_BYTES) | \
 				BIT(DMA_SLAVE_BUSWIDTH_4_BYTES) | \
@@ -197,6 +209,7 @@ struct fsl_edma3_chan {
 	void __iomem			*membase;
 	void __iomem                    *mux_addr;
 	int				txirq;
+	int				errirq;
 	int				hw_chanid;
 	int				priority;
 	int				is_rxchan;
@@ -206,6 +219,7 @@ struct fsl_edma3_chan {
 	struct dma_pool			*tcd_pool;
 	u32				chn_real_count;
 	char                            txirq_name[32];
+	char                            errirq_name[32];
 	struct platform_device		*pdev;
 	struct device			*dev;
 	struct work_struct		issue_worker;
@@ -220,6 +234,8 @@ struct fsl_edma3_drvdata {
 	bool has_chmux;
 	bool mp_chmux;
 	bool edma_v5;
+	bool mem_remote;
+	bool errirq_share;
 };
 
 struct fsl_edma3_desc {
@@ -243,7 +259,6 @@ struct fsl_edma3_engine {
 	int			errirq;
 	#define MAX_CHAN_NUM	64
 	struct fsl_edma3_reg_save edma_regs[MAX_CHAN_NUM];
-	bool			swap;	/* remote/local swapped on Audio edma */
 	bool                    bus_axi;
 	const struct fsl_edma3_drvdata *drvdata;
 	struct clk		*clk_mp;
@@ -258,7 +273,9 @@ static struct fsl_edma3_drvdata fsl_edma_imx8q = {
 	.has_chclk = false,
 	.has_chmux = true,
 	.mp_chmux = false,
+	.mem_remote = true,
 	.edma_v5 = false,
+	.errirq_share = true,
 };
 
 static struct fsl_edma3_drvdata fsl_edma_imx8ulp = {
@@ -267,7 +284,9 @@ static struct fsl_edma3_drvdata fsl_edma_imx8ulp = {
 	.has_chclk = true,
 	.has_chmux = true,
 	.mp_chmux = false,
+	.mem_remote = false,
 	.edma_v5 = false,
+	.errirq_share = false,
 };
 
 static struct fsl_edma3_drvdata fsl_edma_imx93 = {
@@ -276,7 +295,9 @@ static struct fsl_edma3_drvdata fsl_edma_imx93 = {
 	.has_chclk = false,
 	.has_chmux = false,
 	.mp_chmux = false,
+	.mem_remote = false,
 	.edma_v5 = false,
+	.errirq_share = true,
 };
 
 static struct fsl_edma3_drvdata fsl_edma_imx95 = {
@@ -285,7 +306,9 @@ static struct fsl_edma3_drvdata fsl_edma_imx95 = {
 	.has_chclk = false,
 	.has_chmux = false,
 	.mp_chmux = true,
+	.mem_remote = false,
 	.edma_v5 = true,
+	.errirq_share = true,
 };
 
 static struct fsl_edma3_chan *to_fsl_edma3_chan(struct dma_chan *chan)
@@ -320,18 +343,10 @@ static void fsl_edma3_enable_request(struct fsl_edma3_chan *fsl_chan)
 	u32 val;
 
 	val = readl(addr + EDMA_CH_SBR);
-	/* Remote/local swapped wrongly on iMX8 QM Audio edma */
-	if (fsl_chan->edma3->swap) {
-		if (!fsl_chan->is_rxchan)
-			val |= EDMA_CH_SBR_RD;
-		else
-			val |= EDMA_CH_SBR_WR;
-	} else {
-		if (fsl_chan->is_rxchan)
-			val |= EDMA_CH_SBR_RD;
-		else
-			val |= EDMA_CH_SBR_WR;
-	}
+	if (fsl_chan->is_rxchan)
+		val |= EDMA_CH_SBR_RD;
+	else
+		val |= EDMA_CH_SBR_WR;
 
 	if (fsl_chan->is_remote)
 		val &= ~(EDMA_CH_SBR_RD | EDMA_CH_SBR_WR);
@@ -345,7 +360,7 @@ static void fsl_edma3_enable_request(struct fsl_edma3_chan *fsl_chan)
 	}
 	val = readl(addr + EDMA_CH_CSR);
 
-	val |= EDMA_CH_CSR_ERQ;
+	val |= EDMA_CH_CSR_ERQ | EDMA_CH_CSR_EEI;
 	writel(val, addr + EDMA_CH_CSR);
 }
 
@@ -1061,6 +1076,9 @@ static struct dma_async_tx_descriptor *fsl_edma3_prep_memcpy(
 
 	fsl_chan->is_sw = true;
 
+	if (fsl_chan->edma3->drvdata->mem_remote)
+		fsl_chan->is_remote = true;
+
 	/* To match with copy_align and max_seg_size so 1 tcd is enough */
 	fsl_edma3_fill_tcd(fsl_chan, fsl_desc->tcd[0].vtcd, dma_src, dma_dst,
 			EDMA_TCD_ATTR_SSIZE_64BYTE | EDMA_TCD_ATTR_DSIZE_64BYTE,
@@ -1075,6 +1093,79 @@ static size_t fsl_edma3_desc_residue(struct fsl_edma3_chan *fsl_chan,
 static void fsl_edma3_get_realcnt(struct fsl_edma3_chan *fsl_chan)
 {
 	fsl_chan->chn_real_count = fsl_edma3_desc_residue(fsl_chan, NULL, true);
+}
+
+static void fsl_edma3_err_check(struct fsl_edma3_chan *fsl_chan)
+{
+	unsigned int ch_err;
+	void __iomem *base_addr;
+	u32 val;
+
+	base_addr = fsl_chan->membase;
+	scoped_guard(spinlock, &fsl_chan->vchan.lock) {
+		ch_err = readl(base_addr + EDMA_CH_ES);
+		if (!(ch_err & EDMA_CH_ERR))
+			return;
+
+		writel(EDMA_CH_ERR, base_addr + EDMA_CH_ES);
+		val = readl(base_addr + EDMA_CH_CSR);
+		val &= ~EDMA_CH_CSR_ERQ;
+		writel(val, base_addr + EDMA_CH_CSR);
+	}
+
+	/* Ignore this interrupt since channel has been disabled already */
+	if (!fsl_chan->edesc)
+		return;
+
+	if (ch_err & EDMA_CH_ERR_DBE)
+		dev_err(&fsl_chan->pdev->dev, "Destination Bus Error interrupt.\n");
+
+	if (ch_err & EDMA_CH_ERR_SBE)
+		dev_err(&fsl_chan->pdev->dev, "Source Bus Error interrupt.\n");
+
+	if (ch_err & EDMA_CH_ERR_SGE)
+		dev_err(&fsl_chan->pdev->dev, "Scatter/Gather Configuration Error interrupt.\n");
+
+	if (ch_err & EDMA_CH_ERR_NCE)
+		dev_err(&fsl_chan->pdev->dev, "NBYTES/CITER Configuration Error interrupt.\n");
+
+	if (ch_err & EDMA_CH_ERR_DOE)
+		dev_err(&fsl_chan->pdev->dev, "Destination Offset Error interrupt.\n");
+
+	if (ch_err & EDMA_CH_ERR_DAE)
+		dev_err(&fsl_chan->pdev->dev, "Destination Address Error interrupt.\n");
+
+	if (ch_err & EDMA_CH_ERR_SOE)
+		dev_err(&fsl_chan->pdev->dev, "Source Offset Error interrupt.\n");
+
+	if (ch_err & EDMA_CH_ERR_SAE)
+		dev_err(&fsl_chan->pdev->dev, "Source Address Error interrupt.\n");
+
+	if (ch_err & EDMA_CH_ERR_ECX)
+		dev_err(&fsl_chan->pdev->dev, "Transfer Canceled interrupt.\n");
+
+	if (ch_err & EDMA_CH_ERR_UCE)
+		dev_err(&fsl_chan->pdev->dev, "Uncorrectable TCD error during channel execution interrupt.\n");
+
+	fsl_chan->status = DMA_ERROR;
+}
+
+static irqreturn_t fsl_edma3_err_handler(int irq, void *dev_id)
+{
+	struct fsl_edma3_chan *fsl_chan = dev_id;
+	struct fsl_edma3_engine *fsl_edma3 = fsl_chan->edma3;
+	unsigned int ch;
+
+	if (!fsl_edma3->drvdata->errirq_share)
+		fsl_edma3_err_check(fsl_chan);
+	else {
+		for (ch = 0; ch < fsl_edma3->n_chans; ch++) {
+			fsl_chan = &fsl_edma3->chans[ch];
+			fsl_edma3_err_check(fsl_chan);
+		}
+	}
+
+	return IRQ_HANDLED;
 }
 
 static irqreturn_t fsl_edma3_tx_handler(int irq, void *dev_id)
@@ -1215,6 +1306,20 @@ static int fsl_edma3_alloc_chan_resources(struct dma_chan *chan)
 		return ret;
 	}
 
+	if (!fsl_chan->edma3->drvdata->errirq_share) {
+		ret = devm_request_irq(&pdev->dev, fsl_chan->errirq,
+				fsl_edma3_err_handler, fsl_chan->edma3->irqflag,
+				fsl_chan->errirq_name, fsl_chan);
+		if (ret) {
+			dev_err(&pdev->dev, "Can't register %s err IRQ.\n",
+				fsl_chan->errirq_name);
+			if (fsl_chan->edma3->drvdata->has_pd)
+				pm_runtime_put_sync_suspend(fsl_chan->dev);
+
+			return ret;
+		}
+	}
+
 	if (fsl_chan->edma3->drvdata->has_pd) {
 		pm_runtime_mark_last_busy(fsl_chan->dev);
 		pm_runtime_put_autosuspend(fsl_chan->dev);
@@ -1233,6 +1338,9 @@ static void fsl_edma3_free_chan_resources(struct dma_chan *chan)
 		pm_runtime_get_sync(fsl_chan->dev);
 
 	devm_free_irq(&fsl_chan->pdev->dev, fsl_chan->txirq, fsl_chan);
+
+	if (!fsl_chan->edma3->drvdata->errirq_share)
+		devm_free_irq(&fsl_chan->pdev->dev, fsl_chan->errirq, fsl_chan);
 
 	spin_lock_irqsave(&fsl_chan->vchan.lock, flags);
 	fsl_edma3_disable_request(fsl_chan);
@@ -1258,6 +1366,7 @@ static void fsl_edma3_free_chan_resources(struct dma_chan *chan)
 		clk_disable_unprepare(fsl_chan->clk);
 
 	fsl_chan->is_sw = false;
+	fsl_chan->is_remote = false;
 }
 
 static void fsl_edma3_synchronize(struct dma_chan *chan)
@@ -1321,7 +1430,6 @@ static void fsl_edma3_issue_work(struct work_struct *work)
 
 static const struct of_device_id fsl_edma3_dt_ids[] = {
 	{ .compatible = "fsl,imx8qm-edma", .data = &fsl_edma_imx8q},
-	{ .compatible = "fsl,imx8qm-adma", .data = &fsl_edma_imx8q},
 	{ .compatible = "fsl,imx8ulp-edma", .data = &fsl_edma_imx8ulp},
 	{ .compatible = "fsl,imx93-edma", .data = &fsl_edma_imx93},
 	{ .compatible = "fsl,imx95-edma", .data = &fsl_edma_imx95},
@@ -1338,6 +1446,7 @@ static int fsl_edma3_probe(struct platform_device *pdev)
 	struct fsl_edma3_chan *fsl_chan;
 	struct resource *res_mp;
 	struct resource *res;
+	char *errirq_name;
 	int len, chans;
 	int ret, i;
 	void __iomem *mp_membase, *mp_chan_membase;
@@ -1360,7 +1469,6 @@ static int fsl_edma3_probe(struct platform_device *pdev)
 	if (of_property_read_bool(np, "shared-interrupt"))
 		fsl_edma3->irqflag = IRQF_SHARED;
 
-	fsl_edma3->swap = of_device_is_compatible(np, "fsl,imx8qm-adma");
 	fsl_edma3->n_chans = chans;
 	fsl_edma3->drvdata = (const struct fsl_edma3_drvdata *)of_id->data;
 
@@ -1466,6 +1574,12 @@ static int fsl_edma3_probe(struct platform_device *pdev)
 
 		memcpy(fsl_chan->txirq_name, txirq_name, strlen(txirq_name));
 
+		if (!fsl_edma3->drvdata->errirq_share) {
+			fsl_chan->errirq = platform_get_irq(pdev, i);
+			snprintf(fsl_chan->errirq_name, sizeof(fsl_chan->errirq_name),
+				 "%s-err", fsl_chan->txirq_name);
+		}
+
 		if (fsl_edma3->drvdata->has_chclk) {
 			strncpy(clk_name, txirq_name, strlen(CHAN_PREFIX) + id_len);
 			strcpy(clk_name + strlen(CHAN_PREFIX) + id_len, CLK_POSFIX);
@@ -1483,6 +1597,20 @@ static int fsl_edma3_probe(struct platform_device *pdev)
 				fsl_edma3_issue_work);
 	}
 
+	if (fsl_edma3->drvdata->errirq_share) {
+		fsl_edma3->errirq = platform_get_irq(pdev, fsl_edma3->n_chans);
+		if (fsl_edma3->errirq < 0)
+			return fsl_edma3->errirq;
+
+		errirq_name = devm_kasprintf(&pdev->dev, GFP_KERNEL, "%s-err",
+					     dev_name(&pdev->dev));
+		ret = devm_request_irq(&pdev->dev, fsl_edma3->errirq, fsl_edma3_err_handler,
+				       0, errirq_name, &fsl_edma3->chans[0]);
+		if (ret) {
+			dev_err(&pdev->dev, "Can't register eDMA err IRQ.\n");
+			return ret;
+		}
+	}
 	mutex_init(&fsl_edma3->fsl_edma3_mutex);
 
 	dma_cap_set(DMA_PRIVATE, fsl_edma3->dma_dev.cap_mask);
@@ -1566,6 +1694,9 @@ static int fsl_edma3_remove(struct platform_device *pdev)
 
 	of_dma_controller_free(np);
 	dma_async_device_unregister(&fsl_edma3->dma_dev);
+
+	if (fsl_edma3->drvdata->errirq_share)
+		devm_free_irq(&pdev->dev, fsl_edma3->errirq, &fsl_edma3->chans[0]);
 
 	if (fsl_edma3->drvdata->has_chclk)
 		clk_disable_unprepare(fsl_edma3->clk_mp);
