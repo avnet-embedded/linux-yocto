@@ -802,6 +802,7 @@ struct ocelot_port {
 
 	u8				stp_state;
 	bool				vlan_aware;
+	bool				qinq_mode;
 	bool				is_dsa_8021q_cpu;
 	bool				learn_ena;
 
@@ -812,6 +813,7 @@ struct ocelot_port {
 	bool				force_forward;
 	u8				cut_thru;
 	u8				cut_thru_selected_by_user;
+	bool				fp_enabled_admin;
 
 	int				speed;
 };
@@ -901,6 +903,9 @@ struct ocelot {
 	struct ptp_pin_desc		ptp_pins[OCELOT_PTP_PINS_NUM];
 
 	struct ocelot_mm_state		*mm;
+
+	bool				qinq_enable;
+	struct kref			qinq_refcount;
 
 	struct ocelot_fdma		*fdma;
 };

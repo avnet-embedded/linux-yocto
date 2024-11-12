@@ -2,10 +2,13 @@
 /* Copyright 2017-2019 NXP */
 
 #include <linux/ethtool_netlink.h>
+#include <linux/fsl/netc_prb_ierb.h>
 #include <linux/fsl/ptp_netc.h>
 #include <linux/net_tstamp.h>
 #include <linux/module.h>
-#include "enetc.h"
+#include "enetc_pf.h"
+
+static void enetc_configure_port_pmac(struct enetc_hw *hw, bool enable);
 
 static const u32 enetc_si_regs[] = {
 	ENETC_SIMR, ENETC_SIPMAR0, ENETC_SIPMAR1, ENETC_SICBDRMR,
@@ -825,6 +828,38 @@ static int enetc_get_rxnfc(struct net_device *ndev, struct ethtool_rxnfc *rxnfc,
 	return 0;
 }
 
+static int enetc4_set_wol_mg_ipft_entry(struct enetc_ndev_priv *priv)
+{
+	struct enetc_si *si = priv->si;
+	struct ntmp_ipft_key *key __free(kfree);
+	struct ntmp_ipft_cfg cfg;
+	u32 val;
+	int err;
+
+	key = kzalloc(sizeof(*key), GFP_KERNEL);
+	if (!key)
+		return -ENOMEM;
+
+	memset(&cfg, 0, sizeof(cfg));
+
+	key->frm_attr_flags = NTMP_IPFT_FAF_WOL_MAGIC;
+	key->frm_attr_flags_mask = key->frm_attr_flags;
+
+	cfg.filter = BIT(0) | BIT(4) | (NTMP_IPFT_FLTA_SI_BITMAP << 5);
+	cfg.flta_tgt = 1;
+
+	err = ntmp_ipft_add_entry(&si->cbdr, key, &cfg, &priv->ipt_wol_eid);
+	if (err)
+		return err;
+
+	val = enetc_port_rd(&si->hw, ENETC4_PIPFCR);
+	if (!(val & PIPFCR_EN))
+		/* Enable ingress port filter table lookup. */
+		enetc_port_wr(&si->hw, ENETC4_PIPFCR, PIPFCR_EN);
+
+	return 0;
+}
+
 static int enetc4_set_ipft_entry(struct enetc_si *si, struct ethtool_rx_flow_spec *fs,
 				 u32 *entry_id)
 {
@@ -1280,6 +1315,27 @@ static int enetc_set_rxfh(struct net_device *ndev, const u32 *indir,
 	return err;
 }
 
+static int enetc_reset_preempt(struct net_device *ndev, bool enable)
+{
+	struct enetc_ndev_priv *priv = netdev_priv(ndev);
+	u32 temp;
+
+	temp = enetc_rd(&priv->si->hw, ENETC_PTGCR);
+	if (temp & ENETC_PTGCR_TGE)
+		enetc_wr(&priv->si->hw, ENETC_PTGCR,
+			 temp & (~ENETC_PTGCR_TGPE));
+
+	if (enable) {
+		if (priv->fp_enabled_admin) {
+			enetc_configure_port_pmac(&priv->si->hw, 1);
+		}
+	} else {
+		enetc_configure_port_pmac(&priv->si->hw, 0);
+	}
+
+	return 0;
+}
+
 static void enetc_get_channels(struct net_device *ndev,
 			       struct ethtool_channels *ch)
 {
@@ -1437,26 +1493,79 @@ static int enetc_get_ts_info(struct net_device *ndev,
 static void enetc_get_wol(struct net_device *dev,
 			  struct ethtool_wolinfo *wol)
 {
+	struct enetc_ndev_priv *priv = netdev_priv(dev);
+	struct enetc_si *si = priv->si;
+	struct enetc_pf *pf;
+
 	wol->supported = 0;
 	wol->wolopts = 0;
+	pf = enetc_si_priv(si);
 
-	if (dev->phydev)
-		phy_ethtool_get_wol(dev->phydev, wol);
+	if (pf->caps.wol) {
+		if (device_can_wakeup(priv->dev)) {
+			wol->supported = WAKE_MAGIC;
+			wol->wolopts = priv->wolopts;
+		}
+	} else {
+		if (dev->phydev)
+			phy_ethtool_get_wol(dev->phydev, wol);
+	}
 }
 
 static int enetc_set_wol(struct net_device *dev,
 			 struct ethtool_wolinfo *wol)
 {
-	int ret;
+	struct enetc_ndev_priv *priv = netdev_priv(dev);
+	struct enetc_si *si = priv->si;
+	u32 support = WAKE_MAGIC;
+	struct enetc_pf *pf;
+	int err;
 
-	if (!dev->phydev)
-		return -EOPNOTSUPP;
+	pf = enetc_si_priv(si);
 
-	ret = phy_ethtool_set_wol(dev->phydev, wol);
-	if (!ret)
-		device_set_wakeup_enable(&dev->dev, wol->wolopts);
+	if (pf->caps.wol) {
+		if (!device_can_wakeup(priv->dev) || wol->wolopts & ~support)
+			return -EOPNOTSUPP;
 
-	return ret;
+		if (wol->wolopts == priv->wolopts)
+			return 0;
+
+		if (wol->wolopts) {
+			err = enetc4_set_wol_mg_ipft_entry(priv);
+			if (err)
+				return err;
+			if (priv->rcec && netc_ierb_may_wakeonlan() == 0) {
+				priv->rcec->dev_flags |= PCI_DEV_FLAGS_NO_D3;
+				device_set_wakeup_enable(&priv->rcec->dev, 1);
+			}
+			netc_ierb_enable_wakeonlan();
+			netdev_info(dev, "enetc: wakeup enable\n");
+		} else {
+			netc_ierb_disable_wakeonlan();
+			if (priv->rcec && netc_ierb_may_wakeonlan() == 0) {
+				device_set_wakeup_enable(&priv->rcec->dev, 0);
+				priv->rcec->dev_flags &= ~PCI_DEV_FLAGS_NO_D3;
+			}
+			err = ntmp_ipft_delete_entry(&priv->si->cbdr,
+						     priv->ipt_wol_eid);
+			if (err)
+				return err;
+			netdev_info(dev, "enetc: wakeup disable\n");
+		}
+
+		priv->wolopts = wol->wolopts;
+	} else {
+		if (!dev->phydev)
+			return -EOPNOTSUPP;
+
+		err = phy_ethtool_set_wol(dev->phydev, wol);
+		if (!err) {
+			device_set_wakeup_enable(&dev->dev, wol->wolopts);
+			return err;
+		}
+	}
+
+	return 0;
 }
 
 static void enetc_get_pauseparam(struct net_device *dev,
@@ -1581,6 +1690,34 @@ static int enetc_get_mm(struct net_device *ndev, struct ethtool_mm_state *state)
 	state->max_verify_time = 127;
 
 	mutex_unlock(&priv->mm_lock);
+
+	return 0;
+}
+
+static void enetc_configure_port_pmac(struct enetc_hw *hw, bool enable)
+{
+	u32 temp;
+
+	/* Set pMAC step lock */
+	temp = enetc_port_rd(hw, ENETC_PFPMR);
+	enetc_port_wr(hw, ENETC_PFPMR, temp | ENETC_PFPMR_PMACE);
+
+	temp = enetc_port_rd(hw, ENETC_MMCSR);
+	if (enable)
+		temp |= ENETC_MMCSR_ME;
+	else
+		temp &= (~ENETC_MMCSR_ME);
+	enetc_port_wr(hw, ENETC_MMCSR, temp);
+}
+
+int enetc_pmac_reset(struct net_device *ndev, bool enable)
+{
+	struct enetc_ndev_priv *priv = netdev_priv(ndev);
+	u32 temp;
+
+	temp = enetc_port_rd(&priv->si->hw, ENETC_PFPMR);
+	if (temp & ENETC_PFPMR_PMACE)
+		enetc_configure_port_pmac(&priv->si->hw, enable);
 
 	return 0;
 }
@@ -1882,6 +2019,105 @@ void enetc_mm_link_state_update(struct enetc_ndev_priv *priv, bool link)
 }
 EXPORT_SYMBOL_GPL(enetc_mm_link_state_update);
 
+static int enetc_set_preempt(struct net_device *ndev,
+			     struct ethtool_fp *pt)
+{
+	struct enetc_ndev_priv *priv = netdev_priv(ndev);
+	u32 preempt, temp;
+	int rafs;
+	int i;
+
+	if (!pt)
+		return -EINVAL;
+
+	if (!pt->disabled && (pt->min_frag_size < 60 || pt->min_frag_size > 252))
+		return -EINVAL;
+
+	rafs = DIV_ROUND_UP((pt->min_frag_size + 4), 64) - 1;
+
+	preempt = pt->preemptible_queues_mask;
+
+	temp = enetc_rd(&priv->si->hw, ENETC_PTGCR);
+	if (temp & ENETC_PTGCR_TGE)
+		enetc_wr(&priv->si->hw, ENETC_PTGCR,
+			 temp & (~ENETC_PTGCR_TGPE));
+
+	for (i = 0; i < 8; i++) {
+		/* 1 Enabled. Traffic is transmitted on the preemptive MAC. */
+		temp = enetc_port_rd(&priv->si->hw, ENETC_PTCFPR(i));
+
+		if ((preempt >> i) & 0x1)
+			enetc_port_wr(&priv->si->hw,
+				      ENETC_PTCFPR(i),
+				      temp | ENETC_PTCFPR_FPE);
+		else
+			enetc_port_wr(&priv->si->hw,
+				      ENETC_PTCFPR(i),
+				      temp & ~ENETC_PTCFPR_FPE);
+	}
+
+	temp = enetc_port_rd(&priv->si->hw, ENETC_MMCSR);
+	temp &= ~ENETC_MMCSR_RAFS_MASK;
+	temp |= ENETC_MMCSR_RAFS(rafs);
+	if (pt->fp_enabled)
+		temp &= ~ENETC_MMCSR_VDIS;
+	else
+		temp |= ENETC_MMCSR_VDIS;
+	enetc_port_wr(&priv->si->hw, ENETC_MMCSR, temp);
+
+	if (pt->disabled) {
+		enetc_configure_port_pmac(&priv->si->hw, 0);
+		priv->fp_enabled_admin = 0;
+	} else {
+		enetc_configure_port_pmac(&priv->si->hw, 1);
+		priv->fp_enabled_admin = 1;
+	}
+
+	if (pt->disabled) {
+		temp = enetc_port_rd(&priv->si->hw, ENETC_PFPMR);
+		enetc_port_wr(&priv->si->hw, ENETC_PFPMR,
+			      temp & ~ENETC_PFPMR_PMACE);
+	}
+
+	return 0;
+}
+
+static int enetc_get_preempt(struct net_device *ndev,
+			     struct ethtool_fp *pt)
+{
+	struct enetc_ndev_priv *priv = netdev_priv(ndev);
+	u32 temp;
+	int i;
+
+	if (!pt)
+		return -EINVAL;
+
+	temp = enetc_port_rd(&priv->si->hw, ENETC_MMCSR);
+	if (!(temp & ENETC_MMCSR_VDIS) && (ENETC_MMCSR_GET_VSTS(temp) == 3))
+		pt->fp_active = true;
+	else if ((temp & ENETC_MMCSR_VDIS) && (temp & ENETC_MMCSR_ME))
+		pt->fp_active = true;
+	else
+		pt->fp_active = false;
+
+	if (temp & ENETC_MMCSR_ME)
+		pt->fp_status = true;
+	else
+		pt->fp_status = false;
+
+	pt->preemptible_queues_mask = 0;
+	for (i = 0; i < 8; i++)
+		if (enetc_port_rd(&priv->si->hw, ENETC_PTCFPR(i)) & 0x80000000)
+			pt->preemptible_queues_mask |= 1 << i;
+
+	pt->fp_supported = !!(priv->si->hw_features & ENETC_SI_F_QBU);
+	pt->supported_queues_mask = 0xff;
+	temp = enetc_port_rd(&priv->si->hw, ENETC_MMCSR);
+	pt->min_frag_size = (ENETC_MMCSR_GET_RAFS(temp) + 1) * 64;
+
+	return 0;
+}
+
 static const struct ethtool_ops enetc_pf_ethtool_ops = {
 	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
 				     ETHTOOL_COALESCE_MAX_FRAMES |
@@ -1916,6 +2152,9 @@ static const struct ethtool_ops enetc_pf_ethtool_ops = {
 	.get_mm = enetc_get_mm,
 	.set_mm = enetc_set_mm,
 	.get_mm_stats = enetc_get_mm_stats,
+	.set_preempt = enetc_set_preempt,
+	.get_preempt = enetc_get_preempt,
+	.reset_preempt = enetc_reset_preempt,
 };
 
 static const struct ethtool_ops enetc_vf_ethtool_ops = {

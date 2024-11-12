@@ -346,6 +346,8 @@ struct gro_list {
  */
 #define GRO_HASH_BUCKETS	8
 
+
+#define NAPINAMSIZ		8
 /*
  * Structure for NAPI scheduling similar to tasklet but with weighting
  */
@@ -380,6 +382,7 @@ struct napi_struct {
 	/* control-path-only fields follow */
 	struct list_head	dev_list;
 	struct hlist_node	napi_hash_node;
+	char			name[NAPINAMSIZ];
 };
 
 enum {
@@ -1414,6 +1417,9 @@ struct net_device_ops {
 	int			(*ndo_stop)(struct net_device *dev);
 	netdev_tx_t		(*ndo_start_xmit)(struct sk_buff *skb,
 						  struct net_device *dev);
+	struct sk_buff* 	(*ndo_start_recv)(struct net_device *dev, int *err);
+	int			(*ndo_fast_recv)(struct net_device *ndev, void __user *buff, size_t len, struct sockaddr __user *addr,  int __user *addr_len);
+	int			(*ndo_fast_xmit)(struct net_device *ndev, void __user *buff, size_t len);
 	netdev_features_t	(*ndo_features_check)(struct sk_buff *skb,
 						      struct net_device *dev,
 						      netdev_features_t features);
@@ -2076,6 +2082,8 @@ struct net_device {
 	unsigned long		mem_start;
 	unsigned long		base_addr;
 
+	unsigned int		fast_raw_device;
+
 	/*
 	 *	Some hardware also needs these fields (state,dev_list,
 	 *	napi_list,unreg_list,close_list) but they are not
@@ -2600,6 +2608,21 @@ void dev_net_set(struct net_device *dev, struct net *net)
 }
 
 /**
+ *	netif_napi_add_named - initialize a NAPI context
+ *	@dev:  network device
+ *	@napi: NAPI context
+ *	@poll: polling function
+ *	@weight: default weight
+ *	@name: napi instance name
+ *
+ * netif_napi_add_named() must be used to initialize a NAPI context prior to calling
+ * *any* of the other NAPI-related functions.
+ */
+void netif_napi_add_named(struct net_device *dev, struct napi_struct *napi,
+		    int (*poll)(struct napi_struct *, int), int weight,
+		    const char *name);
+
+/**
  *	netdev_priv - access network device private data
  *	@dev: network device
  *
@@ -2670,6 +2693,27 @@ static inline void netif_napi_add_tx(struct net_device *dev,
 				     int (*poll)(struct napi_struct *, int))
 {
 	netif_napi_add_tx_weight(dev, napi, poll, NAPI_POLL_WEIGHT);
+}
+
+/**
+ *	netif_napi_add_tx_named - initialize a NAPI context
+ *	@dev:  network device
+ *	@napi: NAPI context
+ *	@poll: polling function
+ *	@weight: default weight
+ *	@name: napi instance name
+ *
+ * This variant of netif_napi_add_named() should be used from drivers using NAPI
+ * to exclusively poll a TX queue.
+ * This will avoid we add it into napi_hash[], thus polluting this hash table.
+ */
+static inline void netif_napi_add_tx_named(struct net_device *dev,
+					   struct napi_struct *napi,
+					   int (*poll)(struct napi_struct *, int),
+					   int weight, const char *name)
+{
+	set_bit(NAPI_STATE_NO_BUSY_POLL, &napi->state);
+	netif_napi_add_named(dev, napi, poll, weight, name);
 }
 
 /**

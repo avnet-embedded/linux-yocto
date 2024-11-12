@@ -1028,7 +1028,8 @@ static int vsc9959_mdio_bus_alloc(struct ocelot *ocelot)
 		size_t num_phys = ocelot_port->serdes ? 1 : 0;
 		struct phylink_pcs *phylink_pcs;
 
-		if (ocelot_port->phy_mode == PHY_INTERFACE_MODE_INTERNAL)
+		/* Skip on internal ports */
+		if (dp->index == 4 || dp->index == 5)
 			continue;
 
 		phylink_pcs = lynx_pcs_create_mdiodev(felix->imdio, dp->index,
@@ -2628,6 +2629,100 @@ static const struct ocelot_ops vsc9959_ops = {
 	.tas_guard_bands_update	= vsc9959_tas_guard_bands_update,
 };
 
+static void vsc9959_port_preempt_reset(struct ocelot *ocelot, int port, bool enable)
+{
+	struct ocelot_port *ocelot_port = ocelot->ports[port];
+
+	ocelot_port_rmwl(ocelot_port, 0,
+			 DEV_MM_CONFIG_ENABLE_CONFIG_MM_RX_ENA |
+			 DEV_MM_CONFIG_ENABLE_CONFIG_MM_TX_ENA,
+			 DEV_MM_ENABLE_CONFIG);
+
+	if (enable) {
+		if (ocelot_port->fp_enabled_admin) {
+			ocelot_port_rmwl(ocelot_port,
+					 DEV_MM_CONFIG_ENABLE_CONFIG_MM_RX_ENA |
+					 DEV_MM_CONFIG_ENABLE_CONFIG_MM_TX_ENA,
+					 DEV_MM_CONFIG_ENABLE_CONFIG_MM_RX_ENA |
+					 DEV_MM_CONFIG_ENABLE_CONFIG_MM_TX_ENA,
+					 DEV_MM_ENABLE_CONFIG);
+		}
+	}
+}
+
+static int vsc9959_port_set_preempt(struct ocelot *ocelot, int port,
+				    struct ethtool_fp *fpcmd)
+{
+	struct ocelot_port *ocelot_port = ocelot->ports[port];
+	int p_queues = fpcmd->preemptible_queues_mask;
+	int mm_fragsize, val;
+
+	if (!fpcmd->disabled &&
+	    (fpcmd->min_frag_size < 60 || fpcmd->min_frag_size > 252))
+		return -EINVAL;
+
+	mm_fragsize = DIV_ROUND_UP((fpcmd->min_frag_size + 4), 64) - 1;
+
+	if (!fpcmd->disabled) {
+		val = DEV_MM_CONFIG_ENABLE_CONFIG_MM_RX_ENA |
+		      DEV_MM_CONFIG_ENABLE_CONFIG_MM_TX_ENA;
+		ocelot_port->fp_enabled_admin = 1;
+	} else {
+		val = 0;
+		ocelot_port->fp_enabled_admin = 0;
+	}
+
+	ocelot_port_rmwl(ocelot_port, val,
+			 DEV_MM_CONFIG_ENABLE_CONFIG_MM_RX_ENA |
+			 DEV_MM_CONFIG_ENABLE_CONFIG_MM_TX_ENA,
+			 DEV_MM_ENABLE_CONFIG);
+
+	ocelot_port_rmwl(ocelot_port,
+			 (fpcmd->fp_enabled ?
+			  0 : DEV_MM_CONFIG_VERIF_CONFIG_PRM_VERIFY_DIS),
+			 DEV_MM_CONFIG_VERIF_CONFIG_PRM_VERIFY_DIS,
+			 DEV_MM_VERIF_CONFIG);
+
+	ocelot_rmw_rix(ocelot,
+		       QSYS_PREEMPTION_CFG_MM_ADD_FRAG_SIZE(mm_fragsize) |
+		       QSYS_PREEMPTION_CFG_P_QUEUES(p_queues),
+		       QSYS_PREEMPTION_CFG_MM_ADD_FRAG_SIZE_M |
+		       QSYS_PREEMPTION_CFG_P_QUEUES_M,
+		       QSYS_PREEMPTION_CFG,
+		       port);
+
+	if (ocelot_port->taprio && ocelot->ops->tas_guard_bands_update)
+		ocelot->ops->tas_guard_bands_update(ocelot, port);
+
+	return 0;
+}
+
+static int vsc9959_port_get_preempt(struct ocelot *ocelot, int port,
+				    struct ethtool_fp *fpcmd)
+{
+	struct ocelot_port *ocelot_port = ocelot->ports[port];
+	u8 fragsize;
+	u32 val;
+
+	fpcmd->fp_supported = 1;
+	fpcmd->supported_queues_mask = GENMASK(7, 0);
+
+	val = ocelot_port_readl(ocelot_port, DEV_MM_STATUS);
+	val &= DEV_MM_STAT_MM_STATUS_PRMPT_ACTIVE_STATUS;
+	fpcmd->fp_active = (val ? 1 : 0);
+
+	val = ocelot_port_readl(ocelot_port, DEV_MM_ENABLE_CONFIG);
+	val &= DEV_MM_CONFIG_ENABLE_CONFIG_MM_RX_ENA;
+	fpcmd->fp_status = val;
+
+	val = ocelot_read_rix(ocelot, QSYS_PREEMPTION_CFG, port);
+	fpcmd->preemptible_queues_mask = val & QSYS_PREEMPTION_CFG_P_QUEUES_M;
+	fragsize = QSYS_PREEMPTION_CFG_MM_ADD_FRAG_SIZE_X(val);
+	fpcmd->min_frag_size = (fragsize + 1) * 64 - 4;
+
+	return 0;
+}
+
 static const struct felix_info felix_info_vsc9959 = {
 	.resources		= vsc9959_resources,
 	.num_resources		= ARRAY_SIZE(vsc9959_resources),
@@ -2651,6 +2746,9 @@ static const struct felix_info felix_info_vsc9959 = {
 	.port_modes		= vsc9959_port_modes,
 	.port_setup_tc		= vsc9959_port_setup_tc,
 	.port_sched_speed_set	= vsc9959_sched_speed_set,
+	.port_set_preempt	= vsc9959_port_set_preempt,
+	.port_get_preempt	= vsc9959_port_get_preempt,
+	.port_preempt_reset	= vsc9959_port_preempt_reset,
 };
 
 /* The INTB interrupt is shared between for PTP TX timestamp availability

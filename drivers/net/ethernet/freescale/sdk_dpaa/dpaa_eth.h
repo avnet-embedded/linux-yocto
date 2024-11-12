@@ -1,5 +1,5 @@
 /* Copyright 2008-2012 Freescale Semiconductor Inc.
- * Copyright 2019 NXP
+ * Copyright 2019-2023 NXP
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -415,6 +415,12 @@ struct dpa_priv_s {
 #ifdef CONFIG_FSL_DPAA_CEETM
 	bool ceetm_en; /* CEETM QoS enabled */
 #endif
+
+#ifdef CONFIG_FSL_DPAA_ETHERCAT
+	uint16_t ethercat_channel;  /* "fsl,qman-channel-id" */
+	struct qman_portal *p;
+	void *ecdev;
+#endif
 };
 
 struct fm_port_fqs {
@@ -444,8 +450,8 @@ struct sk_buff *_dpa_cleanup_tx_fd(const struct dpa_priv_s *priv,
 				   const struct qm_fd *fd);
 void __hot _dpa_process_parse_results(const fm_prs_result_t *parse_results,
 				      const struct qm_fd *fd,
-				      struct sk_buff *skb,
-				      int *use_gro);
+				      struct sk_buff *skb, bool *use_gro,
+				      bool dcl4c_valid);
 #ifndef CONFIG_FSL_DPAA_TS
 bool dpa_skb_is_recyclable(struct sk_buff *skb);
 bool dpa_buf_is_recyclable(struct sk_buff *skb,
@@ -460,6 +466,11 @@ int __hot skb_to_sg_fd(struct dpa_priv_s *priv,
 		       struct sk_buff *skb, struct qm_fd *fd);
 int __cold __attribute__((nonnull))
 	_dpa_fq_free(struct device *dev, struct qman_fq *fq);
+
+#ifdef CONFIG_FSL_DPAA_ETHERCAT
+int dpa_unregister_ethercat(struct net_device *net_dev);
+int ec_dpaa_receive_data(void *pecdev, const void *data, size_t size);
+#endif
 
 /* Turn on HW checksum computation for this outgoing frame.
  * If the current protocol is not something we support in this regard

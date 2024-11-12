@@ -963,12 +963,18 @@ static void stmmac_fpe_link_state_handle(struct stmmac_priv *priv, bool is_up)
 	enum stmmac_fpe_state *lp_state = &fpe_cfg->lp_fpe_state;
 	bool *hs_enable = &fpe_cfg->hs_enable;
 
-	if (is_up && *hs_enable) {
-		stmmac_fpe_send_mpacket(priv, priv->ioaddr, fpe_cfg,
-					MPACKET_VERIFY);
+	if (is_up) {
+		if (*hs_enable)
+			stmmac_fpe_send_mpacket(priv, priv->ioaddr, fpe_cfg,
+						MPACKET_VERIFY);
 	} else {
 		*lo_state = FPE_STATE_OFF;
 		*lp_state = FPE_STATE_OFF;
+		priv->plat->fpe_cfg->enable = false;
+		stmmac_fpe_configure(priv, priv->ioaddr, fpe_cfg,
+					priv->plat->tx_queues_to_use,
+					priv->plat->rx_queues_to_use,
+					false, NULL);
 	}
 }
 
@@ -987,6 +993,19 @@ static void stmmac_mac_link_down(struct phylink_config *config,
 		stmmac_fpe_link_state_handle(priv, false);
 }
 
+static void stmmac_wait_wol_resume_reset(struct stmmac_priv *priv)
+{
+	unsigned long orig_jiffies = jiffies;
+
+	while (!priv->wol_resume_reset) {
+		if (time_after(jiffies, orig_jiffies + msecs_to_jiffies(100))) {
+			netdev_dbg(priv->dev, "wait wol resume reset timeout\n");
+			break;
+		}
+		schedule();
+	}
+}
+
 static void stmmac_mac_link_up(struct phylink_config *config,
 			       struct phy_device *phy,
 			       unsigned int mode, phy_interface_t interface,
@@ -999,6 +1018,8 @@ static void stmmac_mac_link_up(struct phylink_config *config,
 	if ((priv->plat->flags & STMMAC_FLAG_SERDES_UP_AFTER_PHY_LINKUP) &&
 	    priv->plat->serdes_powerup)
 		priv->plat->serdes_powerup(priv->dev, priv->plat->bsp_priv);
+
+	stmmac_wait_wol_resume_reset(priv);
 
 	old_ctrl = readl(priv->ioaddr + MAC_CTRL_REG);
 	ctrl = old_ctrl & ~priv->hw->link.speed_mask;
@@ -2440,11 +2461,13 @@ static bool stmmac_xdp_xmit_zc(struct stmmac_priv *priv, u32 queue, u32 budget)
 		/* We are sharing with slow path and stop XSK TX desc submission when
 		 * available TX ring is less than threshold.
 		 */
-		if (unlikely(stmmac_tx_avail(priv, queue) < STMMAC_TX_XSK_AVAIL) ||
-		    !netif_carrier_ok(priv->dev)) {
+		if (unlikely(stmmac_tx_avail(priv, queue) < STMMAC_TX_XSK_AVAIL)) {
 			work_done = false;
 			break;
 		}
+
+		if (!netif_carrier_ok(priv->dev))
+			break;
 
 		if (!xsk_tx_peek_desc(pool, &xdp_desc))
 			break;
@@ -3678,6 +3701,7 @@ static int stmmac_request_irq_single(struct net_device *dev)
 	/* Request the Wake IRQ in case of another line
 	 * is used for WoL
 	 */
+	priv->wol_irq_disabled = true;
 	if (priv->wol_irq > 0 && priv->wol_irq != dev->irq) {
 		ret = request_irq(priv->wol_irq, stmmac_interrupt,
 				  IRQF_SHARED, dev->name, dev);
@@ -6989,7 +7013,9 @@ static const struct net_device_ops stmmac_netdev_ops = {
 	.ndo_fix_features = stmmac_fix_features,
 	.ndo_set_features = stmmac_set_features,
 	.ndo_set_rx_mode = stmmac_set_rx_mode,
+#ifndef CONFIG_NET_SCH_MULTIQ
 	.ndo_tx_timeout = stmmac_tx_timeout,
+#endif
 	.ndo_eth_ioctl = stmmac_ioctl,
 	.ndo_get_stats64 = stmmac_get_stats64,
 	.ndo_setup_tc = stmmac_setup_tc,
@@ -7141,6 +7167,7 @@ static void stmmac_napi_add(struct net_device *dev)
 {
 	struct stmmac_priv *priv = netdev_priv(dev);
 	u32 queue, maxq;
+	char name[NAPINAMSIZ];
 
 	maxq = max(priv->plat->rx_queues_to_use, priv->plat->tx_queues_to_use);
 
@@ -7152,16 +7179,22 @@ static void stmmac_napi_add(struct net_device *dev)
 		spin_lock_init(&ch->lock);
 
 		if (queue < priv->plat->rx_queues_to_use) {
-			netif_napi_add(dev, &ch->rx_napi, stmmac_napi_poll_rx);
+			snprintf(name, NAPINAMSIZ, "rx-%d", queue);
+			netif_napi_add_named(dev, &ch->rx_napi, stmmac_napi_poll_rx,
+					     NAPI_POLL_WEIGHT, name);
 		}
 		if (queue < priv->plat->tx_queues_to_use) {
-			netif_napi_add_tx(dev, &ch->tx_napi,
-					  stmmac_napi_poll_tx);
+			snprintf(name, NAPINAMSIZ, "tx-%d", queue);
+			netif_napi_add_tx_named(dev, &ch->tx_napi,
+						stmmac_napi_poll_tx,
+						NAPI_POLL_WEIGHT, name);
 		}
 		if (queue < priv->plat->rx_queues_to_use &&
 		    queue < priv->plat->tx_queues_to_use) {
-			netif_napi_add(dev, &ch->rxtx_napi,
-				       stmmac_napi_poll_rxtx);
+			snprintf(name, NAPINAMSIZ, "zc-%d", queue);
+			netif_napi_add_named(dev, &ch->rxtx_napi,
+					     stmmac_napi_poll_rxtx,
+					     NAPI_POLL_WEIGHT, name);
 		}
 	}
 }
@@ -7247,7 +7280,6 @@ static void stmmac_fpe_lp_task(struct work_struct *work)
 	enum stmmac_fpe_state *lo_state = &fpe_cfg->lo_fpe_state;
 	enum stmmac_fpe_state *lp_state = &fpe_cfg->lp_fpe_state;
 	bool *hs_enable = &fpe_cfg->hs_enable;
-	bool *enable = &fpe_cfg->enable;
 	int retries = 20;
 
 	while (retries-- > 0) {
@@ -7261,7 +7293,7 @@ static void stmmac_fpe_lp_task(struct work_struct *work)
 					     fpe_cfg,
 					     priv->plat->tx_queues_to_use,
 					     priv->plat->rx_queues_to_use,
-					     *enable);
+					     true, NULL);
 
 			netdev_info(priv->dev, "configured FPE\n");
 
@@ -7363,6 +7395,8 @@ int stmmac_dvr_probe(struct device *device,
 	priv = netdev_priv(ndev);
 	priv->device = device;
 	priv->dev = ndev;
+
+	priv->wol_resume_reset = true;
 
 	for (i = 0; i < MTL_MAX_RX_QUEUES; i++)
 		u64_stats_init(&priv->xstats.rxq_stats[i].napi_syncp);
@@ -7654,6 +7688,8 @@ error_phy_setup:
 	    priv->hw->pcs != STMMAC_PCS_RTBI)
 		stmmac_mdio_unregister(ndev);
 error_mdio_register:
+	pm_runtime_put_sync(device);
+	pm_runtime_disable(device);
 	stmmac_napi_del(ndev);
 error_hw_init:
 	destroy_workqueue(priv->wq);
@@ -7765,7 +7801,7 @@ int stmmac_suspend(struct device *dev)
 		stmmac_fpe_configure(priv, priv->ioaddr,
 				     priv->plat->fpe_cfg,
 				     priv->plat->tx_queues_to_use,
-				     priv->plat->rx_queues_to_use, false);
+				     priv->plat->rx_queues_to_use, false, NULL);
 
 		stmmac_fpe_handshake(priv, false);
 		stmmac_fpe_stop_wq(priv);
@@ -7858,8 +7894,10 @@ int stmmac_resume(struct device *dev)
 
 	rtnl_lock();
 	if (device_may_wakeup(priv->device) && priv->plat->pmt) {
+		priv->wol_resume_reset = false;
 		phylink_resume(priv->phylink);
 	} else {
+		priv->wol_resume_reset = true;
 		phylink_resume(priv->phylink);
 		if (device_may_wakeup(priv->device))
 			phylink_speed_up(priv->phylink);
@@ -7874,6 +7912,7 @@ int stmmac_resume(struct device *dev)
 	stmmac_free_tx_skbufs(priv);
 
 	stmmac_hw_setup(ndev, false);
+	priv->wol_resume_reset = true;
 	stmmac_init_coalesce(priv);
 	stmmac_set_rx_mode(ndev);
 

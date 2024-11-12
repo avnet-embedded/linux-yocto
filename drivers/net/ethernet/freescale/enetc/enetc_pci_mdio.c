@@ -4,6 +4,7 @@
 #include <linux/fsl/netc_prb_ierb.h>
 #include <linux/of_mdio.h>
 #include <linux/of_platform.h>
+#include <linux/pinctrl/consumer.h>
 #include "enetc_pf.h"
 #include <linux/regulator/consumer.h>
 
@@ -11,6 +12,9 @@
 #define ENETC_MDIO_DEV_NAME	"FSL PCIe IE Central MDIO"
 #define ENETC_MDIO_BUS_NAME	ENETC_MDIO_DEV_NAME " Bus"
 #define ENETC_MDIO_DRV_NAME	ENETC_MDIO_DEV_NAME " driver"
+
+DEFINE_STATIC_KEY_FALSE(enetc_has_err050089);
+EXPORT_SYMBOL_GPL(enetc_has_err050089);
 
 static int enetc_pci_mdio_probe(struct pci_dev *pdev,
 				const struct pci_device_id *ent)
@@ -30,6 +34,8 @@ static int enetc_pci_mdio_probe(struct pci_dev *pdev,
 			return err;
 		}
 	}
+
+	pinctrl_pm_select_default_state(dev);
 
 	port_regs = pci_iomap(pdev, 0, 0);
 	if (!port_regs) {
@@ -90,6 +96,12 @@ static int enetc_pci_mdio_probe(struct pci_dev *pdev,
 		goto err_pci_mem_reg;
 	}
 
+	if (pdev->vendor == PCI_VENDOR_ID_FREESCALE &&
+	    pdev->device == ENETC_MDIO_DEV_ID) {
+		static_branch_inc(&enetc_has_err050089);
+		dev_info(&pdev->dev, "Enabled ERR050089 workaround\n");
+	}
+
 	err = of_mdiobus_register(bus, node);
 	if (err)
 		goto err_mdiobus_reg;
@@ -118,6 +130,14 @@ static void enetc_pci_mdio_remove(struct pci_dev *pdev)
 	struct enetc_mdio_priv *mdio_priv;
 
 	mdiobus_unregister(bus);
+
+	if (pdev->vendor == PCI_VENDOR_ID_FREESCALE &&
+	    pdev->device == ENETC_MDIO_DEV_ID) {
+		static_branch_dec(&enetc_has_err050089);
+		if (!static_key_enabled(&enetc_has_err050089.key))
+			dev_info(&pdev->dev, "Disabled ERR050089 workaround\n");
+	}
+
 	mdio_priv = bus->priv;
 	if (mdio_priv->regulator)
 		regulator_disable(mdio_priv->regulator);
