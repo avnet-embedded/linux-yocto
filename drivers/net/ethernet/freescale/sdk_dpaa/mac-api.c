@@ -565,7 +565,7 @@ static int memac_init_phy(struct net_device *net_dev,
 
 	phy_vendor = phy_dev->drv->phy_id & GENMASK(31, 10);
 	/* Unless the PHY is capable of rate adaptation */
-	if (mac_dev->phy_if != PHY_INTERFACE_MODE_10GBASER ||
+	if ((mac_dev->phy_if != PHY_INTERFACE_MODE_10GBASER ||
 		mac_dev->phy_if != PHY_INTERFACE_MODE_USXGMII) ||
 	    (phy_vendor != PHY_VEND_AQUANTIA &&
 	     phy_vendor != PHY_VEND_AQUANTIA2)) {
