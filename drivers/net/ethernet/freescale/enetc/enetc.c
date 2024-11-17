@@ -2054,7 +2054,8 @@ static int enetc_clean_rx_ring_xdp(struct enetc_bdr *rx_ring,
 			tx_ring = priv->xdp_tx_ring[rx_ring->index];
 			enetc_tx_queue_lock(tx_ring, cpu);
 
-			if (unlikely(test_bit(ENETC_TX_DOWN, &priv->flags))) {
+			if (unlikely(test_bit(ENETC_TX_DOWN, &priv->flags) ||
+			    enetc_xdp_num_bd(rx_ring, orig_i, i) > ENETC_MAX_SKB_FRAGS)) {
 				enetc_xdp_drop(rx_ring, orig_i, i);
 				tx_ring->stats.xdp_tx_drops++;
 				enetc_tx_queue_unlock(tx_ring);
