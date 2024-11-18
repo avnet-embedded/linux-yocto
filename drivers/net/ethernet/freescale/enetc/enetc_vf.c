@@ -169,6 +169,7 @@ static int enetc_vf_set_mac_addr(struct net_device *ndev, void *addr)
 	if (!is_valid_ether_addr(saddr->sa_data))
 		return -EADDRNOTAVAIL;
 
+<<<<<< HEAD
 	err = enetc_msg_vf_set_primary_mac_addr(priv, saddr);
 	if (!err)
 		eth_hw_addr_set(ndev, saddr->sa_data);
@@ -519,6 +520,15 @@ static int enetc_vf_vlan_rx_del_vid(struct net_device *ndev,
 	}
 
 	return err;
+=======
+	err = enetc_msg_vsi_set_primary_mac_addr(priv, saddr);
+	if (err)
+		return err;
+
+	eth_hw_addr_set(ndev, saddr->sa_data);
+
+	return 0;
+>>>>>>> v6.6/standard/base
 }
 
 static int enetc_vf_set_features(struct net_device *ndev,
