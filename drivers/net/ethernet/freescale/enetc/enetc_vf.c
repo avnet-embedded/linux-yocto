@@ -170,10 +170,12 @@ static int enetc_vf_set_mac_addr(struct net_device *ndev, void *addr)
 		return -EADDRNOTAVAIL;
 
 	err = enetc_msg_vf_set_primary_mac_addr(priv, saddr);
-	if (!err)
-		eth_hw_addr_set(ndev, saddr->sa_data);
+	if (err)
+		return err;
 
-	return err;
+	eth_hw_addr_set(ndev, saddr->sa_data);
+
+	return 0;
 }
 
 static void enetc_msg_vf_set_mac_promisc(struct enetc_ndev_priv *priv,
