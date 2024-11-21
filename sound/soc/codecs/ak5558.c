@@ -324,7 +324,7 @@ static void ak5558_reset(struct ak5558_priv *ak5558, bool active)
 		return;
 
 	gpiod_set_value_cansleep(ak5558->reset_gpiod, active);
-	usleep_range(1000, 2000);
+	usleep_range(5000, 6000);
 }
 
 static int ak5558_probe(struct snd_soc_component *component)
