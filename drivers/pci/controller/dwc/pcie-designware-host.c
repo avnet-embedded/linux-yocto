@@ -302,10 +302,11 @@ int dw_pcie_host_init(struct pcie_port *pp)
 	if (cfg_res) {
 		pp->cfg0_size = resource_size(cfg_res);
 		pp->cfg0_base = cfg_res->start;
-
-		pp->va_cfg0_base = devm_pci_remap_cfg_resource(dev, cfg_res);
-		if (IS_ERR(pp->va_cfg0_base))
-			return PTR_ERR(pp->va_cfg0_base);
+		if (!pp->va_cfg0_base) {
+			pp->va_cfg0_base = devm_pci_remap_cfg_resource(dev, cfg_res);
+			if (IS_ERR(pp->va_cfg0_base))
+				return PTR_ERR(pp->va_cfg0_base);
+		}
 	} else {
 		dev_err(dev, "Missing *config* reg space\n");
 		return -ENODEV;
@@ -318,10 +319,15 @@ int dw_pcie_host_init(struct pcie_port *pp)
 			return PTR_ERR(pci->dbi_base);
 	}
 
-	bridge = devm_pci_alloc_host_bridge(dev, 0);
+	bridge = pci_alloc_host_bridge(0);
 	if (!bridge)
 		return -ENOMEM;
 
+	ret = devm_of_pci_bridge_init(dev, bridge);
+	if (ret)
+		return -ENOMEM;
+
+	bridge->dev.parent = dev;
 	pp->bridge = bridge;
 
 	/* Get the I/O range from DT */
@@ -404,6 +410,9 @@ int dw_pcie_host_init(struct pcie_port *pp)
 		if (ret)
 			goto err_free_msi;
 	}
+
+	dw_pcie_version_detect(pci);
+
 	dw_pcie_iatu_detect(pci);
 
 	dw_pcie_setup_rc(pp);
@@ -438,6 +447,8 @@ EXPORT_SYMBOL_GPL(dw_pcie_host_init);
 void dw_pcie_host_deinit(struct pcie_port *pp)
 {
 	struct dw_pcie *pci = to_dw_pcie_from_pp(pp);
+	struct device *dev = pci->dev;
+	struct resource_entry *win, *tmp;
 
 	pci_stop_root_bus(pp->bridge->bus);
 	pci_remove_root_bus(pp->bridge->bus);
@@ -446,6 +457,21 @@ void dw_pcie_host_deinit(struct pcie_port *pp)
 
 	if (pp->has_msi_ctrl)
 		dw_pcie_free_msi(pp);
+
+	resource_list_for_each_entry_safe(win, tmp, &pp->bridge->windows) {
+		switch (resource_type(win->res)) {
+		case IORESOURCE_IO:
+			pci_unmap_iospace(win->res);
+			devm_release_resource(dev, win->res);
+			break;
+		case IORESOURCE_MEM:
+			devm_release_resource(dev, win->res);
+			break;
+		default:
+			continue;
+		}
+	}
+	pci_free_host_bridge(pp->bridge);
 }
 EXPORT_SYMBOL_GPL(dw_pcie_host_deinit);
 

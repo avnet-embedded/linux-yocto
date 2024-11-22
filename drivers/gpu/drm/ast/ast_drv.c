@@ -139,6 +139,14 @@ static void ast_pci_remove(struct pci_dev *pdev)
 	drm_atomic_helper_shutdown(dev);
 }
 
+static void ast_pci_shutdown(struct pci_dev *pdev)
+{
+	struct drm_device *dev = pci_get_drvdata(pdev);
+
+	drm_dev_unregister(dev);
+	drm_atomic_helper_shutdown(dev);
+}
+
 static int ast_drm_freeze(struct drm_device *dev)
 {
 	int error;
@@ -228,6 +236,7 @@ static struct pci_driver ast_pci_driver = {
 	.id_table = ast_pciidlist,
 	.probe = ast_pci_probe,
 	.remove = ast_pci_remove,
+	.shutdown = ast_pci_shutdown,
 	.driver.pm = &ast_pm_ops,
 };
 

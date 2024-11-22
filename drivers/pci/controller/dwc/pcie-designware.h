@@ -20,6 +20,10 @@
 #include <linux/pci-epc.h>
 #include <linux/pci-epf.h>
 
+/* DWC PCIe IP-core versions */
+#define DW_PCIE_VER_500A		0x3530302A
+#define DW_PCIE_VER_562A		0x3536322A
+
 /* Parameters for the waiting for link up routine */
 #define LINK_WAIT_MAX_RETRIES		10
 #define LINK_WAIT_USLEEP_MIN		90000
@@ -74,8 +78,17 @@
 #define PCIE_MSI_INTR0_MASK		0x82C
 #define PCIE_MSI_INTR0_STATUS		0x830
 
+#define GEN3_RELATED_OFF			0x890
+#define GEN3_RELATED_OFF_GEN3_ZRXDC_NONCOMPL	BIT(0)
+#define GEN3_RELATED_OFF_GEN3_EQ_DISABLE	BIT(16)
+#define GEN3_RELATED_OFF_RATE_SHADOW_SEL_SHIFT	24
+#define GEN3_RELATED_OFF_RATE_SHADOW_SEL_MASK	GENMASK(25, 24)
+
 #define PCIE_PORT_MULTI_LANE_CTRL	0x8C0
 #define PORT_MLTI_UPCFG_SUPPORT		BIT(7)
+
+#define PCIE_VERSION_NUMBER		0x8F8
+#define PCIE_VERSION_TYPE		0x8FC
 
 #define PCIE_ATU_VIEWPORT		0x900
 #define PCIE_ATU_REGION_INBOUND		BIT(31)
@@ -129,6 +142,25 @@
 #define PCIE_ATU_UNR_LOWER_TARGET	0x14
 #define PCIE_ATU_UNR_UPPER_TARGET	0x18
 #define PCIE_ATU_UNR_UPPER_LIMIT	0x20
+
+/*
+ * RAS-DES register definitions
+ */
+#define PCIE_RAS_DES_EVENT_COUNTER_CONTROL	0x8
+#define EVENT_COUNTER_ALL_CLEAR		0x3
+#define EVENT_COUNTER_ENABLE_ALL	0x7
+#define EVENT_COUNTER_ENABLE_SHIFT	2
+#define EVENT_COUNTER_EVENT_SEL_MASK	GENMASK(7, 0)
+#define EVENT_COUNTER_EVENT_SEL_SHIFT	16
+#define EVENT_COUNTER_EVENT_Tx_L0S	0x2
+#define EVENT_COUNTER_EVENT_Rx_L0S	0x3
+#define EVENT_COUNTER_EVENT_L1		0x5
+#define EVENT_COUNTER_EVENT_L1_1	0x7
+#define EVENT_COUNTER_EVENT_L1_2	0x8
+#define EVENT_COUNTER_GROUP_SEL_SHIFT	24
+#define EVENT_COUNTER_GROUP_5		0x5
+
+#define PCIE_RAS_DES_EVENT_COUNTER_DATA		0xc
 
 /*
  * The default address offset between dbi_base and atu_base. Root controller
@@ -208,6 +240,7 @@ enum dw_pcie_as_type {
 
 struct dw_pcie_ep_ops {
 	void	(*ep_init)(struct dw_pcie_ep *ep);
+	void	(*ep_init_late)(struct dw_pcie_ep *ep);
 	int	(*raise_irq)(struct dw_pcie_ep *ep, u8 func_no,
 			     enum pci_epc_irq_type type, u16 interrupt_num);
 	const struct pci_epc_features* (*get_features)(struct dw_pcie_ep *ep);
@@ -270,6 +303,7 @@ struct dw_pcie {
 	struct dw_pcie_ep	ep;
 	const struct dw_pcie_ops *ops;
 	unsigned int		version;
+	u32			type;
 	int			num_lanes;
 	int			link_gen;
 	u8			n_fts[2];
@@ -281,6 +315,8 @@ struct dw_pcie {
 
 #define to_dw_pcie_from_ep(endpoint)   \
 		container_of((endpoint), struct dw_pcie, ep)
+
+void dw_pcie_version_detect(struct dw_pcie *pci);
 
 u8 dw_pcie_find_capability(struct dw_pcie *pci, u8 cap);
 u16 dw_pcie_find_ext_capability(struct dw_pcie *pci, u8 cap);
@@ -421,8 +457,8 @@ static inline void __iomem *dw_pcie_own_conf_map_bus(struct pci_bus *bus,
 #ifdef CONFIG_PCIE_DW_EP
 void dw_pcie_ep_linkup(struct dw_pcie_ep *ep);
 int dw_pcie_ep_init(struct dw_pcie_ep *ep);
-int dw_pcie_ep_init_complete(struct dw_pcie_ep *ep);
-void dw_pcie_ep_init_notify(struct dw_pcie_ep *ep);
+int dw_pcie_ep_init_notify(struct dw_pcie_ep *ep);
+void dw_pcie_ep_deinit_notify(struct dw_pcie_ep *ep);
 void dw_pcie_ep_exit(struct dw_pcie_ep *ep);
 int dw_pcie_ep_raise_legacy_irq(struct dw_pcie_ep *ep, u8 func_no);
 int dw_pcie_ep_raise_msi_irq(struct dw_pcie_ep *ep, u8 func_no,
@@ -444,12 +480,12 @@ static inline int dw_pcie_ep_init(struct dw_pcie_ep *ep)
 	return 0;
 }
 
-static inline int dw_pcie_ep_init_complete(struct dw_pcie_ep *ep)
+static inline int dw_pcie_ep_init_notify(struct dw_pcie_ep *ep)
 {
 	return 0;
 }
 
-static inline void dw_pcie_ep_init_notify(struct dw_pcie_ep *ep)
+static inline void dw_pcie_ep_deinit_notify(struct dw_pcie_ep *ep)
 {
 }
 

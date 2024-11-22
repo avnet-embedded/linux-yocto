@@ -5589,7 +5589,7 @@ T:	git git://anongit.freedesktop.org/drm/drm-misc
 F:	Documentation/driver-api/dma-buf.rst
 F:	drivers/dma-buf/
 F:	include/linux/*fence.h
-F:	include/linux/dma-buf*
+F:	include/linux/dma-buf.h
 F:	include/linux/dma-resv.h
 K:	\bdma_(?:buf|fence|resv)\b
 
@@ -8628,6 +8628,17 @@ L:	linux-input@vger.kernel.org
 S:	Maintained
 F:	drivers/input/touchscreen/htcpen.c
 
+HTE SUBSYSTEM
+M:	Dipen Patel <dipenp@nvidia.com>
+L:	timestamp@lists.linux.dev
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/pateldipen1984/linux.git
+Q:	https://patchwork.kernel.org/project/timestamp/list/
+S:	Maintained
+F:	Documentation/devicetree/bindings/timestamp/
+F:	Documentation/driver-api/hte/
+F:	drivers/hte/
+F:	include/linux/hte.h
+
 HTS221 TEMPERATURE-HUMIDITY IIO DRIVER
 M:	Lorenzo Bianconi <lorenzo.bianconi83@gmail.com>
 L:	linux-iio@vger.kernel.org
@@ -9815,6 +9826,13 @@ F:	include/linux/iommu.h
 F:	include/linux/iova.h
 F:	include/linux/of_iommu.h
 F:	include/uapi/linux/iommu.h
+
+IOSYS-MAP HELPERS
+M:	Thomas Zimmermann <tzimmermann@suse.de>
+L:	dri-devel@lists.freedesktop.org
+S:	Maintained
+T:	git git://anongit.freedesktop.org/drm/drm-misc
+F:	include/linux/iosys-map.h
 
 IO_URING
 M:	Jens Axboe <axboe@kernel.dk>
@@ -18421,6 +18439,14 @@ M:	Jon Hunter <jonathanh@nvidia.com>
 S:	Supported
 F:	drivers/dma/tegra*
 
+TEGRA EPL DRIVER
+M:	Rahul Bedarkar <rabedarkar@nvidia.com>
+S:	Supported
+F:	Documentation/devicetree/bindings/platform/tegra/tegra-epl.yaml
+F:	drivers/platform/tegra/tegra-epl.c
+F:	include/linux/tegra-epl.h
+F:	include/uapi/linux/tegra-epl.h
+
 TEGRA I2C DRIVER
 M:	Laxman Dewangan <ldewangan@nvidia.com>
 R:	Dmitry Osipenko <digetx@gmail.com>
@@ -20838,3 +20864,11 @@ Q:	http://patchwork.kernel.org/project/LKML/list/
 T:	git git://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
 F:	*
 F:	*/
+
+HSIERRRPTINJ
+M:	Prasun Kumar <prasunk@nvidia.com>
+S:	Supported
+B:	Mobile_Linux_Kernel
+F:	Documentation/devicetree/bindings/platform/tegra/tegra-hsierrrptinj.yaml
+F:	drivers/platform/tegra/tegra-hsierrrptinj.c
+F:	include/linux/tegra-hsierrrptinj.h

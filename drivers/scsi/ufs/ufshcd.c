@@ -82,6 +82,9 @@
 
 #define wlun_dev_to_hba(dv) shost_priv(to_scsi_device(dv)->host)
 
+/* Stream ID table selection bit mask */
+#define UFS_STREAM_ID_SEL_MASK 0x07ffffffU
+
 #define ufshcd_toggle_vreg(_dev, _vreg, _on)				\
 	({                                                              \
 		int _ret;                                               \
@@ -2389,6 +2392,11 @@ static int ufshcd_map_sg(struct ufs_hba *hba, struct ufshcd_lrb *lrbp)
 				cpu_to_le32(lower_32_bits(sg->dma_address));
 			prd_table[i].upper_addr =
 				cpu_to_le32(upper_32_bits(sg->dma_address));
+			if (hba->quirks & UFSHCD_QUIRK_ENABLE_STREAM_ID) {
+				prd_table[i].upper_addr =
+					(prd_table[i].upper_addr
+					 & UFS_STREAM_ID_SEL_MASK);
+			}
 			prd_table[i].reserved = 0;
 		}
 	} else {
@@ -3134,6 +3142,7 @@ out_unlock:
 	ufshcd_release(hba);
 	return err;
 }
+EXPORT_SYMBOL_GPL(ufshcd_query_attr);
 
 /**
  * ufshcd_query_attr_retry() - API function for sending query
@@ -3266,6 +3275,7 @@ int ufshcd_query_descriptor_retry(struct ufs_hba *hba,
 
 	return err;
 }
+EXPORT_SYMBOL_GPL(ufshcd_query_descriptor_retry);
 
 /**
  * ufshcd_map_desc_id_to_length - map descriptor IDN to its length
@@ -4279,8 +4289,6 @@ static int ufshcd_change_power_mode(struct ufs_hba *hba,
 	 * - PA_HSSERIES
 	 */
 	ufshcd_dme_set(hba, UIC_ARG_MIB(PA_RXGEAR), pwr_mode->gear_rx);
-	ufshcd_dme_set(hba, UIC_ARG_MIB(PA_ACTIVERXDATALANES),
-			pwr_mode->lane_rx);
 	if (pwr_mode->pwr_rx == FASTAUTO_MODE ||
 			pwr_mode->pwr_rx == FAST_MODE)
 		ufshcd_dme_set(hba, UIC_ARG_MIB(PA_RXTERMINATION), TRUE);
@@ -4288,8 +4296,6 @@ static int ufshcd_change_power_mode(struct ufs_hba *hba,
 		ufshcd_dme_set(hba, UIC_ARG_MIB(PA_RXTERMINATION), FALSE);
 
 	ufshcd_dme_set(hba, UIC_ARG_MIB(PA_TXGEAR), pwr_mode->gear_tx);
-	ufshcd_dme_set(hba, UIC_ARG_MIB(PA_ACTIVETXDATALANES),
-			pwr_mode->lane_tx);
 	if (pwr_mode->pwr_tx == FASTAUTO_MODE ||
 			pwr_mode->pwr_tx == FAST_MODE)
 		ufshcd_dme_set(hba, UIC_ARG_MIB(PA_TXTERMINATION), TRUE);
@@ -4331,6 +4337,20 @@ static int ufshcd_change_power_mode(struct ufs_hba *hba,
 	if (ret) {
 		dev_err(hba->dev,
 			"%s: power mode change failed %d\n", __func__, ret);
+		return ret;
+	}
+
+	ufshcd_dme_set(hba, UIC_ARG_MIB(PA_ACTIVERXDATALANES),
+			pwr_mode->lane_rx);
+	ufshcd_dme_set(hba, UIC_ARG_MIB(PA_ACTIVETXDATALANES),
+			pwr_mode->lane_tx);
+
+	ret = ufshcd_uic_change_pwr_mode(hba, pwr_mode->pwr_rx << 4
+			| pwr_mode->pwr_tx);
+
+	if (ret) {
+		dev_err(hba->dev,
+			"%s: Lane change failed %d\n", __func__, ret);
 	} else {
 		ufshcd_vops_pwr_change_notify(hba, POST_CHANGE, NULL,
 								pwr_mode);
@@ -4439,11 +4459,21 @@ int ufshcd_make_hba_operational(struct ufs_hba *hba)
 	/* Configure UTRL and UTMRL base address registers */
 	ufshcd_writel(hba, lower_32_bits(hba->utrdl_dma_addr),
 			REG_UTP_TRANSFER_REQ_LIST_BASE_L);
-	ufshcd_writel(hba, upper_32_bits(hba->utrdl_dma_addr),
+	if (hba->quirks & UFSHCD_QUIRK_ENABLE_STREAM_ID)
+		reg = (upper_32_bits(hba->utrdl_dma_addr) &
+				UFS_STREAM_ID_SEL_MASK);
+	else
+		reg = upper_32_bits(hba->utrdl_dma_addr);
+	ufshcd_writel(hba, reg,
 			REG_UTP_TRANSFER_REQ_LIST_BASE_H);
 	ufshcd_writel(hba, lower_32_bits(hba->utmrdl_dma_addr),
 			REG_UTP_TASK_REQ_LIST_BASE_L);
-	ufshcd_writel(hba, upper_32_bits(hba->utmrdl_dma_addr),
+	if (hba->quirks & UFSHCD_QUIRK_ENABLE_STREAM_ID)
+		reg = (upper_32_bits(hba->utmrdl_dma_addr) &
+				UFS_STREAM_ID_SEL_MASK);
+	else
+		reg = upper_32_bits(hba->utmrdl_dma_addr);
+	ufshcd_writel(hba, reg,
 			REG_UTP_TASK_REQ_LIST_BASE_H);
 
 	/*

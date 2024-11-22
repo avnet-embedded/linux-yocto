@@ -37,6 +37,20 @@ enum tegra_revision {
 	TEGRA_REVISION_MAX,
 };
 
+enum tegra_platform {
+	TEGRA_PLATFORM_SILICON = 0,
+	TEGRA_PLATFORM_QT,
+	TEGRA_PLATFORM_SYSTEM_FPGA,
+	TEGRA_PLATFORM_UNIT_FPGA,
+	TEGRA_PLATFORM_ASIM_QT,
+	TEGRA_PLATFORM_ASIM_LINSIM,
+	TEGRA_PLATFORM_DSIM_ASIM_LINSIM,
+	TEGRA_PLATFORM_VERIFICATION_SIMULATION,
+	TEGRA_PLATFORM_VDK,
+	TEGRA_PLATFORM_VSP,
+	TEGRA_PLATFORM_MAX,
+};
+
 struct tegra_sku_info {
 	int sku_id;
 	int cpu_process_id;
@@ -50,6 +64,7 @@ struct tegra_sku_info {
 	int gpu_speedo_id;
 	int gpu_speedo_value;
 	enum tegra_revision revision;
+	enum tegra_platform platform;
 };
 
 #ifdef CONFIG_ARCH_TEGRA
@@ -57,6 +72,7 @@ extern struct tegra_sku_info tegra_sku_info;
 u32 tegra_read_straps(void);
 u32 tegra_read_ram_code(void);
 int tegra_fuse_readl(unsigned long offset, u32 *value);
+int tegra194_miscreg_mask_serror(void);
 #else
 static struct tegra_sku_info tegra_sku_info __maybe_unused;
 
@@ -73,6 +89,11 @@ static inline u32 tegra_read_ram_code(void)
 static inline int tegra_fuse_readl(unsigned long offset, u32 *value)
 {
 	return -ENODEV;
+}
+
+static inline int tegra194_miscreg_mask_serror(void)
+{
+	return false;
 }
 #endif
 

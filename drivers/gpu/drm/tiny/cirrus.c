@@ -17,7 +17,7 @@
  */
 
 #include <linux/console.h>
-#include <linux/dma-buf-map.h>
+#include <linux/iosys-map.h>
 #include <linux/module.h>
 #include <linux/pci.h>
 
@@ -313,39 +313,41 @@ static int cirrus_mode_set(struct cirrus_device *cirrus,
 	return 0;
 }
 
-static int cirrus_fb_blit_rect(struct drm_framebuffer *fb, const struct dma_buf_map *map,
+static int cirrus_fb_blit_rect(struct drm_framebuffer *fb,
+			       const struct iosys_map *map,
 			       struct drm_rect *rect)
 {
 	struct cirrus_device *cirrus = to_cirrus(fb->dev);
+	void __iomem *dst = cirrus->vram;
 	void *vmap = map->vaddr; /* TODO: Use mapping abstraction properly */
 	int idx;
 
 	if (!drm_dev_enter(&cirrus->dev, &idx))
 		return -ENODEV;
 
-	if (cirrus->cpp == fb->format->cpp[0])
-		drm_fb_memcpy_dstclip(cirrus->vram, fb->pitches[0],
-				      vmap, fb, rect);
+	if (cirrus->cpp == fb->format->cpp[0]) {
+		dst += drm_fb_clip_offset(fb->pitches[0], fb->format, rect);
+		drm_fb_memcpy_toio(dst, fb->pitches[0], vmap, fb, rect);
 
-	else if (fb->format->cpp[0] == 4 && cirrus->cpp == 2)
-		drm_fb_xrgb8888_to_rgb565_dstclip(cirrus->vram,
-						  cirrus->pitch,
-						  vmap, fb, rect, false);
+	} else if (fb->format->cpp[0] == 4 && cirrus->cpp == 2) {
+		dst += drm_fb_clip_offset(cirrus->pitch, fb->format, rect);
+		drm_fb_xrgb8888_to_rgb565_toio(dst, cirrus->pitch, vmap, fb, rect, false);
 
-	else if (fb->format->cpp[0] == 4 && cirrus->cpp == 3)
-		drm_fb_xrgb8888_to_rgb888_dstclip(cirrus->vram,
-						  cirrus->pitch,
-						  vmap, fb, rect);
+	} else if (fb->format->cpp[0] == 4 && cirrus->cpp == 3) {
+		dst += drm_fb_clip_offset(cirrus->pitch, fb->format, rect);
+		drm_fb_xrgb8888_to_rgb888_toio(dst, cirrus->pitch, vmap, fb, rect);
 
-	else
+	} else {
 		WARN_ON_ONCE("cpp mismatch");
+	}
 
 	drm_dev_exit(idx);
 
 	return 0;
 }
 
-static int cirrus_fb_blit_fullscreen(struct drm_framebuffer *fb, const struct dma_buf_map *map)
+static int cirrus_fb_blit_fullscreen(struct drm_framebuffer *fb,
+				     const struct iosys_map *map)
 {
 	struct drm_rect fullscreen = {
 		.x1 = 0,
@@ -611,6 +613,11 @@ static void cirrus_pci_remove(struct pci_dev *pdev)
 	drm_atomic_helper_shutdown(dev);
 }
 
+static void cirrus_pci_shutdown(struct pci_dev *pdev)
+{
+	drm_atomic_helper_shutdown(pci_get_drvdata(pdev));
+}
+
 static const struct pci_device_id pciidlist[] = {
 	{
 		.vendor    = PCI_VENDOR_ID_CIRRUS,
@@ -632,6 +639,7 @@ static struct pci_driver cirrus_pci_driver = {
 	.id_table = pciidlist,
 	.probe = cirrus_pci_probe,
 	.remove = cirrus_pci_remove,
+	.shutdown = cirrus_pci_shutdown,
 };
 
 static int __init cirrus_init(void)

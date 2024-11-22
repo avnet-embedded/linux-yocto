@@ -16,6 +16,30 @@
 #include "../../pci.h"
 #include "pcie-designware.h"
 
+void dw_pcie_version_detect(struct dw_pcie *pci)
+{
+	u32 ver;
+
+	/* The content of the CSR is zero on DWC PCIe older than v4.70a */
+	ver = dw_pcie_readl_dbi(pci, PCIE_VERSION_NUMBER);
+	if (!ver)
+		return;
+
+	if (pci->version && pci->version != ver)
+		dev_warn(pci->dev, "Versions don't match (%08x != %08x)\n",
+			 pci->version, ver);
+	else
+		pci->version = ver;
+
+	ver = dw_pcie_readl_dbi(pci, PCIE_VERSION_TYPE);
+
+	if (pci->type && pci->type != ver)
+		dev_warn(pci->dev, "Types don't match (%08x != %08x)\n",
+			 pci->type, ver);
+	else
+		pci->type = ver;
+}
+
 /*
  * These interfaces resemble the pci_find_*capability() interfaces, but these
  * are for configuring host controllers, which are bridges *to* PCI devices but
@@ -289,7 +313,7 @@ static void dw_pcie_prog_outbound_atu_unroll(struct dw_pcie *pci, u8 func_no,
 	val = type | PCIE_ATU_FUNC_NUM(func_no);
 	if (upper_32_bits(limit_addr) > upper_32_bits(cpu_addr))
 		val |= PCIE_ATU_INCREASE_REGION_SIZE;
-	if (pci->version == 0x490A)
+	if ((pci->version == 0x490A) || (pci->version == DW_PCIE_VER_500A))
 		val = dw_pcie_enable_ecrc(val);
 	dw_pcie_writel_ob_unroll(pci, index, PCIE_ATU_UNR_REGION_CTRL1, val);
 	dw_pcie_writel_ob_unroll(pci, index, PCIE_ATU_UNR_REGION_CTRL2,
@@ -347,7 +371,7 @@ static void __dw_pcie_prog_outbound_atu(struct dw_pcie *pci, u8 func_no,
 	if (upper_32_bits(limit_addr) > upper_32_bits(cpu_addr) &&
 	    pci->version >= 0x460A)
 		val |= PCIE_ATU_INCREASE_REGION_SIZE;
-	if (pci->version == 0x490A)
+	if ((pci->version == 0x490A) || (pci->version == DW_PCIE_VER_500A))
 		val = dw_pcie_enable_ecrc(val);
 	dw_pcie_writel_dbi(pci, PCIE_ATU_CR1, val);
 	dw_pcie_writel_dbi(pci, PCIE_ATU_CR2, PCIE_ATU_ENABLE);
@@ -734,17 +758,17 @@ void dw_pcie_setup(struct dw_pcie *pci)
 		dw_pcie_writel_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL, val);
 	}
 
-	val = dw_pcie_readl_dbi(pci, PCIE_PORT_LINK_CONTROL);
-	val &= ~PORT_LINK_FAST_LINK_MODE;
-	val |= PORT_LINK_DLL_LINK_EN;
-	dw_pcie_writel_dbi(pci, PCIE_PORT_LINK_CONTROL, val);
-
 	if (of_property_read_bool(np, "snps,enable-cdm-check")) {
 		val = dw_pcie_readl_dbi(pci, PCIE_PL_CHK_REG_CONTROL_STATUS);
 		val |= PCIE_PL_CHK_REG_CHK_REG_CONTINUOUS |
 		       PCIE_PL_CHK_REG_CHK_REG_START;
 		dw_pcie_writel_dbi(pci, PCIE_PL_CHK_REG_CONTROL_STATUS, val);
 	}
+
+	val = dw_pcie_readl_dbi(pci, PCIE_PORT_LINK_CONTROL);
+	val &= ~PORT_LINK_FAST_LINK_MODE;
+	val |= PORT_LINK_DLL_LINK_EN;
+	dw_pcie_writel_dbi(pci, PCIE_PORT_LINK_CONTROL, val);
 
 	of_property_read_u32(np, "num-lanes", &pci->num_lanes);
 	if (!pci->num_lanes) {
