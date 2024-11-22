@@ -804,8 +804,6 @@ static u32 tegra_spi_setup_transfer_one(struct spi_device *spi,
 	u8 bits_per_word = t->bits_per_word;
 	u32 command1, command2;
 	int req_mode;
-	int ret;
-	char prod_name[15];
 	u32 tx_tap = 0, rx_tap = 0;
 
 	if (speed != tspi->cur_speed) {
