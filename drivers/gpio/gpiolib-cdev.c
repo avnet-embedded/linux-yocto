@@ -1392,10 +1392,6 @@ static long linereq_set_config_unlocked(struct linereq *lr,
 		if (!(flags & GPIO_V2_LINE_DIRECTION_FLAGS))
 			continue;
 
-		polarity_change =
-			(!!test_bit(FLAG_ACTIVE_LOW, &desc->flags) !=
-			 ((flags & GPIO_V2_LINE_FLAG_ACTIVE_LOW) != 0));
-
 		gpio_v2_line_config_flags_to_desc_flags(flags, &desc->flags);
 		edflags = flags & GPIO_V2_LINE_EDGE_DETECTOR_FLAGS;
 
