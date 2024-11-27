@@ -88,7 +88,7 @@ dtb-$(CONFIG_ARCH_MXC) += imx8mm-evk.dtb imx8mm-evk-rpmsg.dtb imx8mm-evk-rm67191
 			  imx8mm-evk-lk.dtb imx8mm-evk-rpmsg-wm8524-lpv.dtb \
 			  imx8mm-evk-rpmsg-8m-buf.dtb \
 			  imx8mm-evk-ecat.dtb \
-			  imx8mm-evk-igh.dtb \
+			  imx8mm-evk-igh.dtb
 dtb-$(CONFIG_ARCH_MXC) += imx8mm-evk-rpmsg-wm8524.dtb
 dtb-$(CONFIG_ARCH_MXC) += imx8mm-evk-ak4497.dtb imx8mm-evk-ak5558.dtb imx8mm-evk-audio-tdm.dtb
 dtb-$(CONFIG_ARCH_MXC) += imx8mm-evk-8mic-revE.dtb imx8mm-evk-8mic-swpdm.dtb \
@@ -390,7 +390,7 @@ dtb-$(CONFIG_ARCH_MXC) += imx93-14x14-evk.dtb imx93-14x14-evk-aud-hat-avb.dtb \
 			  imx93-14x14-evk-lvds-it6263.dtb imx93-14x14-evk-sja1105.dtb imx93-14x14-evk-sja1105-avb.dtb \
 			  imx93-14x14-evk-flexspi-m2.dtb imx93-14x14-evk-dsi-serdes.dtb \
 			  imx93-14x14-evk-i3c.dtb imx93-14x14-evk-imxai2eth-ath.dtb \
-			  imx93-14x14-evk-uart-sharing-cm33.dtb \
+			  imx93-14x14-evk-uart-sharing-cm33.dtb
 dtb-$(CONFIG_ARCH_MXC) += imx93-11x11-evk.dtb \
 			  imx93-11x11-evk-avb.dtb \
 			  imx93-11x11-evk-inmate.dtb imx93-11x11-evk-root.dtb imx93-11x11-evk-flexio-i2c.dtb \
