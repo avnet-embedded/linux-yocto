@@ -603,7 +603,7 @@ xfs_reflink_cancel_cow_blocks(
 
 			error = xfs_free_extent_later(*tpp, del.br_startblock,
 					del.br_blockcount, NULL,
-					XFS_AG_RESV_NONE, false);
+					XFS_AG_RESV_NONE, 0);
 			if (error)
 				break;
 
@@ -1594,6 +1594,9 @@ xfs_reflink_clear_inode_flag(
 	int			error = 0;
 
 	ASSERT(xfs_is_reflink_inode(ip));
+
+	if (!xfs_can_free_cowblocks(ip))
+		return 0;
 
 	error = xfs_reflink_inode_has_shared_extents(*tpp, ip, &needs_flag);
 	if (error || needs_flag)

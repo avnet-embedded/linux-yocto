@@ -27,7 +27,7 @@
 #define _CRYPTO_ECC_H
 
 #include <crypto/ecc_curve.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 /* One digit is u64 qword. */
 #define ECC_CURVE_NIST_P192_DIGITS  3
@@ -63,6 +63,9 @@ static inline void ecc_swap_digits(const void *in, u64 *out, unsigned int ndigit
  * @nbytes    Size of input byte array
  * @out       Output digits array
  * @ndigits:  Number of digits to create from byte array
+ *
+ * The first byte in the input byte array is expected to hold the most
+ * significant bits of the large integer.
  */
 void ecc_digits_from_bytes(const u8 *in, unsigned int nbytes,
 			   u64 *out, unsigned int ndigits);

@@ -158,7 +158,7 @@ struct ap_driver {
 				 struct ap_config_info *old_config_info);
 };
 
-#define to_ap_drv(x) container_of((x), struct ap_driver, driver)
+#define to_ap_drv(x) container_of_const((x), struct ap_driver, driver)
 
 int ap_driver_register(struct ap_driver *, struct module *, char *);
 void ap_driver_unregister(struct ap_driver *);
@@ -272,7 +272,7 @@ int ap_test_config_usage_domain(unsigned int domain);
 int ap_test_config_ctrl_domain(unsigned int domain);
 
 void ap_queue_init_reply(struct ap_queue *aq, struct ap_message *ap_msg);
-struct ap_queue *ap_queue_create(ap_qid_t qid, int device_type);
+struct ap_queue *ap_queue_create(ap_qid_t qid, struct ap_card *ac);
 void ap_queue_prepare_remove(struct ap_queue *aq);
 void ap_queue_remove(struct ap_queue *aq);
 void ap_queue_init_state(struct ap_queue *aq);

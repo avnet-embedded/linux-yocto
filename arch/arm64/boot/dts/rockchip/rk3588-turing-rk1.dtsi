@@ -198,8 +198,7 @@
 &mdio1 {
 	rgmii_phy: ethernet-phy@1 {
 		/* RTL8211F */
-		compatible = "ethernet-phy-id001c.c916",
-			     "ethernet-phy-ieee802.3-c22";
+		compatible = "ethernet-phy-id001c.c916";
 		reg = <0x1>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&rtl8211f_rst>;
@@ -297,6 +296,7 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&pmic_pins>, <&rk806_dvs1_null>,
 			    <&rk806_dvs2_null>, <&rk806_dvs3_null>;
+		system-power-controller;
 
 		vcc1-supply = <&vcc5v0_sys>;
 		vcc2-supply = <&vcc5v0_sys>;
@@ -599,6 +599,10 @@
 			};
 		};
 	};
+};
+
+&tsadc {
+	status = "okay";
 };
 
 &uart2 {

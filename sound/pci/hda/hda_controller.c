@@ -275,8 +275,7 @@ static int azx_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	spin_lock(&bus->reg_lock);
 	/* reset SYNC bits */
 	snd_hdac_stream_sync_trigger(hstr, false, sbits, sync_reg);
-	if (start)
-		snd_hdac_stream_timecounter_init(hstr, sbits);
+	snd_hdac_stream_timecounter_init(hstr, sbits, start);
 	spin_unlock(&bus->reg_lock);
 	return 0;
 }
@@ -463,7 +462,8 @@ static int azx_get_sync_time(ktime_t *device,
 	*device = ktime_add_ns(*device, (wallclk_cycles * NSEC_PER_SEC) /
 			       ((HDA_MAX_CYCLE_VALUE + 1) * runtime->rate));
 
-	*system = convert_art_to_tsc(tsc_counter);
+	system->cycles = tsc_counter;
+	system->cs_id = CSID_X86_ART;
 
 	return 0;
 }

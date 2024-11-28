@@ -903,9 +903,7 @@ static int venc_runtime_resume(struct device *dev)
 	if (r < 0)
 		return r;
 
-	clk_prepare_enable(venc.tv_dac_clk);
-
-	return 0;
+	return clk_prepare_enable(venc.tv_dac_clk);
 }
 
 static const struct dev_pm_ops venc_pm_ops = {
@@ -922,9 +920,9 @@ static const struct of_device_id venc_of_match[] = {
 
 static struct platform_driver omap_venchw_driver = {
 	.probe		= venc_probe,
-	.remove_new	= venc_remove,
-	.driver         = {
-		.name   = "omapdss_venc",
+	.remove		= venc_remove,
+	.driver		= {
+		.name	= "omapdss_venc",
 		.pm	= &venc_pm_ops,
 		.of_match_table = venc_of_match,
 		.suppress_bind_attrs = true,

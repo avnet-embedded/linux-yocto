@@ -33,7 +33,7 @@
 #if IS_ENABLED(CONFIG_IPV6)
 #include <linux/in6.h>
 #endif
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 
 static int verify_one_alg(struct nlattr **attrs, enum xfrm_attr_type_t type,
 			  struct netlink_ext_ack *extack)
@@ -201,6 +201,7 @@ static int verify_newsa_info(struct xfrm_usersa_info *p,
 {
 	int err;
 	u8 sa_dir = attrs[XFRMA_SA_DIR] ? nla_get_u8(attrs[XFRMA_SA_DIR]) : 0;
+	u16 family = p->sel.family;
 
 	err = -EINVAL;
 	switch (p->family) {
@@ -221,7 +222,10 @@ static int verify_newsa_info(struct xfrm_usersa_info *p,
 		goto out;
 	}
 
-	switch (p->sel.family) {
+	if (!family && !(p->flags & XFRM_STATE_AF_UNSPEC))
+		family = p->family;
+
+	switch (family) {
 	case AF_UNSPEC:
 		break;
 
@@ -833,6 +837,10 @@ static struct xfrm_state *xfrm_state_construct(struct net *net,
 	if (attrs[XFRMA_SA_DIR])
 		x->dir = nla_get_u8(attrs[XFRMA_SA_DIR]);
 
+	if (attrs[XFRMA_NAT_KEEPALIVE_INTERVAL])
+		x->nat_keepalive_interval =
+			nla_get_u32(attrs[XFRMA_NAT_KEEPALIVE_INTERVAL]);
+
 	err = __xfrm_init_state(x, false, attrs[XFRMA_OFFLOAD_DEV], extack);
 	if (err)
 		goto error;
@@ -1094,7 +1102,9 @@ static int copy_to_user_auth(struct xfrm_algo_auth *auth, struct sk_buff *skb)
 	if (!nla)
 		return -EMSGSIZE;
 	ap = nla_data(nla);
-	memcpy(ap, auth, sizeof(struct xfrm_algo_auth));
+	strscpy_pad(ap->alg_name, auth->alg_name, sizeof(ap->alg_name));
+	ap->alg_key_len = auth->alg_key_len;
+	ap->alg_trunc_len = auth->alg_trunc_len;
 	if (redact_secret && auth->alg_key_len)
 		memset(ap->alg_key, 0, (auth->alg_key_len + 7) / 8);
 	else
@@ -1288,6 +1298,13 @@ static int copy_to_user_state_extra(struct xfrm_state *x,
 	}
 	if (x->dir)
 		ret = nla_put_u8(skb, XFRMA_SA_DIR, x->dir);
+
+	if (x->nat_keepalive_interval) {
+		ret = nla_put_u32(skb, XFRMA_NAT_KEEPALIVE_INTERVAL,
+				  x->nat_keepalive_interval);
+		if (ret)
+			goto out;
+	}
 out:
 	return ret;
 }
@@ -2455,7 +2472,6 @@ static int xfrm_get_policy(struct sk_buff *skb, struct nlmsghdr *nlh,
 					    NETLINK_CB(skb).portid);
 		}
 	} else {
-		xfrm_dev_policy_delete(xp);
 		xfrm_audit_policy_delete(xp, err ? 0 : 1, true);
 
 		if (err != 0)
@@ -3165,6 +3181,7 @@ const struct nla_policy xfrma_policy[XFRMA_MAX+1] = {
 	[XFRMA_IF_ID]		= { .type = NLA_U32 },
 	[XFRMA_MTIMER_THRESH]   = { .type = NLA_U32 },
 	[XFRMA_SA_DIR]          = NLA_POLICY_RANGE(NLA_U8, XFRM_SA_DIR_IN, XFRM_SA_DIR_OUT),
+	[XFRMA_NAT_KEEPALIVE_INTERVAL] = { .type = NLA_U32 },
 };
 EXPORT_SYMBOL_GPL(xfrma_policy);
 
@@ -3473,6 +3490,9 @@ static inline unsigned int xfrm_sa_len(struct xfrm_state *x)
 
 	if (x->dir)
 		l += nla_total_size(sizeof(x->dir));
+
+	if (x->nat_keepalive_interval)
+		l += nla_total_size(sizeof(x->nat_keepalive_interval));
 
 	return l;
 }

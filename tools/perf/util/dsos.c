@@ -155,7 +155,7 @@ static int dsos__cmp_key_long_name_id(const void *vkey, const void *vdso)
  */
 static struct dso *__dsos__find_by_longname_id(struct dsos *dsos,
 					       const char *name,
-					       struct dso_id *id,
+					       const struct dso_id *id,
 					       bool write_locked)
 {
 	struct dsos__key key = {
@@ -163,6 +163,9 @@ static struct dso *__dsos__find_by_longname_id(struct dsos *dsos,
 		.id = id,
 	};
 	struct dso **res;
+
+	if (dsos->dsos == NULL)
+		return NULL;
 
 	if (!dsos->sorted) {
 		if (!write_locked) {
@@ -241,7 +244,7 @@ int dsos__add(struct dsos *dsos, struct dso *dso)
 
 struct dsos__find_id_cb_args {
 	const char *name;
-	struct dso_id *id;
+	const struct dso_id *id;
 	struct dso *res;
 };
 
@@ -257,7 +260,7 @@ static int dsos__find_id_cb(struct dso *dso, void *data)
 
 }
 
-static struct dso *__dsos__find_id(struct dsos *dsos, const char *name, struct dso_id *id,
+static struct dso *__dsos__find_id(struct dsos *dsos, const char *name, const struct dso_id *id,
 				   bool cmp_short, bool write_locked)
 {
 	struct dso *res;
@@ -291,7 +294,7 @@ static void dso__set_basename(struct dso *dso)
 	char *base, *lname;
 	int tid;
 
-	if (sscanf(dso__long_name(dso), "/tmp/perf-%d.map", &tid) == 1) {
+	if (perf_pid_map_tid(dso__long_name(dso), &tid)) {
 		if (asprintf(&base, "[JIT] tid %d", tid) < 0)
 			return;
 	} else {
@@ -318,7 +321,7 @@ static void dso__set_basename(struct dso *dso)
 	dso__set_short_name(dso, base, true);
 }
 
-static struct dso *__dsos__addnew_id(struct dsos *dsos, const char *name, struct dso_id *id)
+static struct dso *__dsos__addnew_id(struct dsos *dsos, const char *name, const struct dso_id *id)
 {
 	struct dso *dso = dso__new_id(name, id);
 
@@ -334,7 +337,7 @@ static struct dso *__dsos__addnew_id(struct dsos *dsos, const char *name, struct
 	return dso;
 }
 
-static struct dso *__dsos__findnew_id(struct dsos *dsos, const char *name, struct dso_id *id)
+static struct dso *__dsos__findnew_id(struct dsos *dsos, const char *name, const struct dso_id *id)
 {
 	struct dso *dso = __dsos__find_id(dsos, name, id, false, /*write_locked=*/true);
 
@@ -344,7 +347,7 @@ static struct dso *__dsos__findnew_id(struct dsos *dsos, const char *name, struc
 	return dso ? dso : __dsos__addnew_id(dsos, name, id);
 }
 
-struct dso *dsos__findnew_id(struct dsos *dsos, const char *name, struct dso_id *id)
+struct dso *dsos__findnew_id(struct dsos *dsos, const char *name, const struct dso_id *id)
 {
 	struct dso *dso;
 	down_write(&dsos->lock);

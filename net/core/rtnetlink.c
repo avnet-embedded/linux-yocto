@@ -384,6 +384,35 @@ void rtnl_unregister_all(int protocol)
 }
 EXPORT_SYMBOL_GPL(rtnl_unregister_all);
 
+int __rtnl_register_many(const struct rtnl_msg_handler *handlers, int n)
+{
+	const struct rtnl_msg_handler *handler;
+	int i, err;
+
+	for (i = 0, handler = handlers; i < n; i++, handler++) {
+		err = rtnl_register_internal(handler->owner, handler->protocol,
+					     handler->msgtype, handler->doit,
+					     handler->dumpit, handler->flags);
+		if (err) {
+			__rtnl_unregister_many(handlers, i);
+			break;
+		}
+	}
+
+	return err;
+}
+EXPORT_SYMBOL_GPL(__rtnl_register_many);
+
+void __rtnl_unregister_many(const struct rtnl_msg_handler *handlers, int n)
+{
+	const struct rtnl_msg_handler *handler;
+	int i;
+
+	for (i = n - 1, handler = handlers + n - 1; i >= 0; i--, handler--)
+		rtnl_unregister(handler->protocol, handler->msgtype);
+}
+EXPORT_SYMBOL_GPL(__rtnl_unregister_many);
+
 static LIST_HEAD(link_ops);
 
 static const struct rtnl_link_ops *rtnl_link_ops_get(const char *kind)
@@ -2003,7 +2032,7 @@ static const struct nla_policy ifla_policy[IFLA_MAX+1] = {
 	[IFLA_NUM_TX_QUEUES]	= { .type = NLA_U32 },
 	[IFLA_NUM_RX_QUEUES]	= { .type = NLA_U32 },
 	[IFLA_GSO_MAX_SEGS]	= { .type = NLA_U32 },
-	[IFLA_GSO_MAX_SIZE]	= { .type = NLA_U32 },
+	[IFLA_GSO_MAX_SIZE]	= NLA_POLICY_MIN(NLA_U32, MAX_TCP_HEADER + 1),
 	[IFLA_PHYS_PORT_ID]	= { .type = NLA_BINARY, .len = MAX_PHYS_ITEM_ID_LEN },
 	[IFLA_CARRIER_CHANGES]	= { .type = NLA_U32 },  /* ignored */
 	[IFLA_PHYS_SWITCH_ID]	= { .type = NLA_BINARY, .len = MAX_PHYS_ITEM_ID_LEN },
@@ -2028,7 +2057,7 @@ static const struct nla_policy ifla_policy[IFLA_MAX+1] = {
 	[IFLA_TSO_MAX_SIZE]	= { .type = NLA_REJECT },
 	[IFLA_TSO_MAX_SEGS]	= { .type = NLA_REJECT },
 	[IFLA_ALLMULTI]		= { .type = NLA_REJECT },
-	[IFLA_GSO_IPV4_MAX_SIZE]	= { .type = NLA_U32 },
+	[IFLA_GSO_IPV4_MAX_SIZE]	= NLA_POLICY_MIN(NLA_U32, MAX_TCP_HEADER + 1),
 	[IFLA_GRO_IPV4_MAX_SIZE]	= { .type = NLA_U32 },
 };
 
@@ -2724,7 +2753,7 @@ static int do_set_proto_down(struct net_device *dev,
 	bool proto_down;
 	int err;
 
-	if (!(dev->priv_flags & IFF_CHANGE_PROTO_DOWN)) {
+	if (!dev->change_proto_down) {
 		NL_SET_ERR_MSG(extack,  "Protodown not supported by device");
 		return -EOPNOTSUPP;
 	}
@@ -3288,7 +3317,7 @@ static int rtnl_dellink(struct sk_buff *skb, struct nlmsghdr *nlh,
 	if (ifm->ifi_index > 0)
 		dev = __dev_get_by_index(tgt_net, ifm->ifi_index);
 	else if (tb[IFLA_IFNAME] || tb[IFLA_ALT_IFNAME])
-		dev = rtnl_dev_get(net, tb);
+		dev = rtnl_dev_get(tgt_net, tb);
 	else if (tb[IFLA_GROUP])
 		err = rtnl_group_dellink(tgt_net, nla_get_u32(tb[IFLA_GROUP]));
 	else
@@ -3969,22 +3998,28 @@ static int rtnl_dellinkprop(struct sk_buff *skb, struct nlmsghdr *nlh,
 	return rtnl_linkprop(RTM_DELLINKPROP, skb, nlh, extack);
 }
 
-static u32 rtnl_calcit(struct sk_buff *skb, struct nlmsghdr *nlh)
+static noinline_for_stack u32 rtnl_calcit(struct sk_buff *skb,
+					  struct nlmsghdr *nlh)
 {
 	struct net *net = sock_net(skb->sk);
 	size_t min_ifinfo_dump_size = 0;
-	struct nlattr *tb[IFLA_MAX+1];
 	u32 ext_filter_mask = 0;
 	struct net_device *dev;
-	int hdrlen;
+	struct nlattr *nla;
+	int hdrlen, rem;
 
 	/* Same kernel<->userspace interface hack as in rtnl_dump_ifinfo. */
 	hdrlen = nlmsg_len(nlh) < sizeof(struct ifinfomsg) ?
 		 sizeof(struct rtgenmsg) : sizeof(struct ifinfomsg);
 
-	if (nlmsg_parse_deprecated(nlh, hdrlen, tb, IFLA_MAX, ifla_policy, NULL) >= 0) {
-		if (tb[IFLA_EXT_MASK])
-			ext_filter_mask = nla_get_u32(tb[IFLA_EXT_MASK]);
+	if (nlh->nlmsg_len < nlmsg_msg_size(hdrlen))
+		return NLMSG_GOODSIZE;
+
+	nla_for_each_attr_type(nla, IFLA_EXT_MASK,
+			       nlmsg_attrdata(nlh, hdrlen),
+			       nlmsg_attrlen(nlh, hdrlen), rem) {
+		if (nla_len(nla) == sizeof(u32))
+			ext_filter_mask = nla_get_u32(nla);
 	}
 
 	if (!ext_filter_mask)
@@ -4081,8 +4116,7 @@ struct sk_buff *rtmsg_ifinfo_build_skb(int type, struct net_device *dev,
 	}
 	return skb;
 errout:
-	if (err < 0)
-		rtnl_set_sk_err(net, RTNLGRP_LINK, err);
+	rtnl_set_sk_err(net, RTNLGRP_LINK, err);
 	return NULL;
 }
 
@@ -6486,6 +6520,7 @@ static int rtnl_mdb_del(struct sk_buff *skb, struct nlmsghdr *nlh,
 
 static int rtnl_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 {
+	const bool needs_lock = !(cb->flags & RTNL_FLAG_DUMP_UNLOCKED);
 	rtnl_dumpit_func dumpit = cb->data;
 	int err;
 
@@ -6495,7 +6530,11 @@ static int rtnl_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 	if (!dumpit)
 		return 0;
 
+	if (needs_lock)
+		rtnl_lock();
 	err = dumpit(skb, cb);
+	if (needs_lock)
+		rtnl_unlock();
 
 	/* Old dump handlers used to send NLM_DONE as in a separate recvmsg().
 	 * Some applications which parse netlink manually depend on this.
@@ -6515,7 +6554,8 @@ static int rtnetlink_dump_start(struct sock *ssk, struct sk_buff *skb,
 				const struct nlmsghdr *nlh,
 				struct netlink_dump_control *control)
 {
-	if (control->flags & RTNL_FLAG_DUMP_SPLIT_NLM_DONE) {
+	if (control->flags & RTNL_FLAG_DUMP_SPLIT_NLM_DONE ||
+	    !(control->flags & RTNL_FLAG_DUMP_UNLOCKED)) {
 		WARN_ON(control->data);
 		control->data = control->dump;
 		control->dump = rtnl_dumpit;
@@ -6703,7 +6743,6 @@ static int __net_init rtnetlink_net_init(struct net *net)
 	struct netlink_kernel_cfg cfg = {
 		.groups		= RTNLGRP_MAX,
 		.input		= rtnetlink_rcv,
-		.cb_mutex	= &rtnl_mutex,
 		.flags		= NL_CFG_F_NONROOT_RECV,
 		.bind		= rtnetlink_bind,
 	};

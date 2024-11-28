@@ -13,6 +13,7 @@
 #include <linux/cpumask.h>
 #include <linux/init.h>
 #include <linux/interrupt.h>
+#include <linux/irq_work.h>
 #include <linux/profile.h>
 #include <linux/seq_file.h>
 #include <linux/smp.h>
@@ -70,6 +71,8 @@ static DEFINE_PER_CPU(int, cpu_state);
 static const char *ipi_types[NR_IPI] __tracepoint_string = {
 	[IPI_RESCHEDULE] = "Rescheduling interrupts",
 	[IPI_CALL_FUNCTION] = "Function call interrupts",
+	[IPI_IRQ_WORK] = "IRQ work interrupts",
+	[IPI_CLEAR_VECTOR] = "Clear vector interrupts",
 };
 
 void show_ipi_list(struct seq_file *p, int prec)
@@ -217,6 +220,13 @@ void arch_smp_send_reschedule(int cpu)
 }
 EXPORT_SYMBOL_GPL(arch_smp_send_reschedule);
 
+#ifdef CONFIG_IRQ_WORK
+void arch_irq_work_raise(void)
+{
+	mp_ops.send_ipi_single(smp_processor_id(), ACTION_IRQ_WORK);
+}
+#endif
+
 static irqreturn_t loongson_ipi_interrupt(int irq, void *dev)
 {
 	unsigned int action;
@@ -232,6 +242,16 @@ static irqreturn_t loongson_ipi_interrupt(int irq, void *dev)
 	if (action & SMP_CALL_FUNCTION) {
 		generic_smp_call_function_interrupt();
 		per_cpu(irq_stat, cpu).ipi_irqs[IPI_CALL_FUNCTION]++;
+	}
+
+	if (action & SMP_IRQ_WORK) {
+		irq_work_run();
+		per_cpu(irq_stat, cpu).ipi_irqs[IPI_IRQ_WORK]++;
+	}
+
+	if (action & SMP_CLEAR_VECTOR) {
+		complete_irq_moving();
+		per_cpu(irq_stat, cpu).ipi_irqs[IPI_CLEAR_VECTOR]++;
 	}
 
 	return IRQ_HANDLED;
@@ -271,11 +291,10 @@ static void __init fdt_smp_setup(void)
 		if (cpuid >= nr_cpu_ids)
 			continue;
 
-		if (cpuid == loongson_sysconf.boot_cpu_id) {
+		if (cpuid == loongson_sysconf.boot_cpu_id)
 			cpu = 0;
-		} else {
-			cpu = cpumask_next_zero(-1, cpu_present_mask);
-		}
+		else
+			cpu = find_first_zero_bit(cpumask_bits(cpu_present_mask), NR_CPUS);
 
 		num_processors++;
 		set_cpu_possible(cpu, true);
@@ -283,7 +302,7 @@ static void __init fdt_smp_setup(void)
 		__cpu_number_map[cpuid] = cpu;
 		__cpu_logical_map[cpu] = cpuid;
 
-		early_numa_add_cpu(cpu, 0);
+		early_numa_add_cpu(cpuid, 0);
 		set_cpuid_to_node(cpuid, 0);
 	}
 
@@ -312,11 +331,11 @@ void __init loongson_prepare_cpus(unsigned int max_cpus)
 	int i = 0;
 
 	parse_acpi_topology();
+	cpu_data[0].global_id = cpu_logical_map(0);
 
 	for (i = 0; i < loongson_sysconf.nr_cpus; i++) {
 		set_cpu_present(i, true);
 		csr_mail_send(0, __cpu_logical_map[i], 0);
-		cpu_data[i].global_id = __cpu_logical_map[i];
 	}
 
 	per_cpu(cpu_state, smp_processor_id()) = CPU_ONLINE;
@@ -361,6 +380,7 @@ void loongson_init_secondary(void)
 		     cpu_logical_map(cpu) / loongson_sysconf.cores_per_package;
 	cpu_data[cpu].core = pptt_enabled ? cpu_data[cpu].core :
 		     cpu_logical_map(cpu) % loongson_sysconf.cores_per_package;
+	cpu_data[cpu].global_id = cpu_logical_map(cpu);
 }
 
 void loongson_smp_finish(void)
@@ -463,7 +483,7 @@ core_initcall(ipi_pm_init);
 #endif
 
 /* Preload SMP state for boot cpu */
-void smp_prepare_boot_cpu(void)
+void __init smp_prepare_boot_cpu(void)
 {
 	unsigned int cpu, node, rr_node;
 
@@ -496,6 +516,8 @@ void smp_prepare_boot_cpu(void)
 			rr_node = next_node_in(rr_node, node_online_map);
 		}
 	}
+
+	pv_spinlock_init();
 }
 
 /* called from main before smp_init() */

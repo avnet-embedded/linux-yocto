@@ -294,13 +294,8 @@ int hda_cl_copy_fw(struct snd_sof_dev *sdev, struct hdac_ext_stream *hext_stream
 {
 	struct sof_intel_hda_dev *hda = sdev->pdata->hw_pdata;
 	const struct sof_intel_dsp_desc *chip = hda->desc;
-	struct sof_intel_hda_stream *hda_stream;
-	unsigned long time_left;
 	unsigned int reg;
 	int ret, status;
-
-	hda_stream = container_of(hext_stream, struct sof_intel_hda_stream,
-				  hext_stream);
 
 	dev_dbg(sdev->dev, "Code loader DMA starting\n");
 
@@ -310,15 +305,7 @@ int hda_cl_copy_fw(struct snd_sof_dev *sdev, struct hdac_ext_stream *hext_stream
 		return ret;
 	}
 
-	/* Wait for completion of transfer */
-	time_left = wait_for_completion_timeout(&hda_stream->ioc,
-						msecs_to_jiffies(HDA_CL_DMA_IOC_TIMEOUT_MS));
-
-	if (!time_left) {
-		dev_err(sdev->dev, "Code loader DMA did not complete\n");
-		return -ETIMEDOUT;
-	}
-	dev_dbg(sdev->dev, "Code loader DMA done, waiting for FW_ENTERED status\n");
+	dev_dbg(sdev->dev, "waiting for FW_ENTERED status\n");
 
 	status = snd_sof_dsp_read_poll_timeout(sdev, HDA_DSP_BAR,
 					chip->rom_status_reg, reg,
