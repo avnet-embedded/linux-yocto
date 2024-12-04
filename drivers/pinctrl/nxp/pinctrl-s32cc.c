@@ -1001,15 +1001,19 @@ static int s32_pinctrl_probe(struct platform_device *pdev)
 	return 0;
 }
 
+#ifdef CONFIG_PM_SLEEP
 static const struct dev_pm_ops s32_pinctrl_pm_ops = {
 	LATE_SYSTEM_SLEEP_PM_OPS(s32_pinctrl_suspend, s32_pinctrl_resume)
 };
+#endif
 
 static struct platform_driver s32cc_pinctrl_driver = {
 	.driver = {
 		.name = "s32cc-siul2-pinctrl",
 		.of_match_table = s32_pinctrl_of_match,
+#ifdef CONFIG_PM_SLEEP
 		.pm = pm_sleep_ptr(&s32_pinctrl_pm_ops),
+#endif
 		.suppress_bind_attrs = true,
 	},
 	.probe = s32_pinctrl_probe,
