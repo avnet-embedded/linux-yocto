@@ -79,7 +79,8 @@ struct spansion_nor_params {
  */
 static void spansion_nor_clear_sr(struct spi_nor *nor)
 {
-	const struct spansion_nor_params *priv_params = nor->params->priv;
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
+	const struct spansion_nor_params *priv_params = params->priv;
 	int ret;
 
 	if (nor->spimem) {
@@ -99,7 +100,7 @@ static void spansion_nor_clear_sr(struct spi_nor *nor)
 
 static int cypress_nor_sr_ready_and_clear_reg(struct spi_nor *nor, u64 addr)
 {
-	struct spi_nor_flash_parameter *params = nor->params;
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 	struct spi_mem_op op =
 		CYPRESS_NOR_RD_ANY_REG_OP(params->addr_mode_nbytes, addr,
 					  0, nor->bouncebuf);
@@ -142,7 +143,7 @@ static int cypress_nor_sr_ready_and_clear_reg(struct spi_nor *nor, u64 addr)
  */
 static int cypress_nor_sr_ready_and_clear(struct spi_nor *nor)
 {
-	struct spi_nor_flash_parameter *params = nor->params;
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 	u64 addr;
 	int ret;
 	u8 i;
@@ -161,10 +162,11 @@ static int cypress_nor_sr_ready_and_clear(struct spi_nor *nor)
 
 static int cypress_nor_set_memlat(struct spi_nor *nor, u64 addr)
 {
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 	struct spi_mem_op op;
 	u8 *buf = nor->bouncebuf;
 	int ret;
-	u8 addr_mode_nbytes = nor->params->addr_mode_nbytes;
+	u8 addr_mode_nbytes = params->addr_mode_nbytes;
 
 	op = (struct spi_mem_op)
 		CYPRESS_NOR_RD_ANY_REG_OP(addr_mode_nbytes, addr, 0, buf);
@@ -191,13 +193,14 @@ static int cypress_nor_set_memlat(struct spi_nor *nor, u64 addr)
 
 static int cypress_nor_set_octal_dtr_bits(struct spi_nor *nor, u64 addr)
 {
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 	struct spi_mem_op op;
 	u8 *buf = nor->bouncebuf;
 
 	/* Set the octal and DTR enable bits. */
 	buf[0] = SPINOR_REG_CYPRESS_CFR5_OCT_DTR_EN;
 	op = (struct spi_mem_op)
-		CYPRESS_NOR_WR_ANY_REG_OP(nor->params->addr_mode_nbytes,
+		CYPRESS_NOR_WR_ANY_REG_OP(params->addr_mode_nbytes,
 					  addr, 1, buf);
 
 	return spi_nor_write_any_volatile_reg(nor, &op, nor->reg_proto);
@@ -205,7 +208,7 @@ static int cypress_nor_set_octal_dtr_bits(struct spi_nor *nor, u64 addr)
 
 static int cypress_nor_octal_dtr_en(struct spi_nor *nor)
 {
-	const struct spi_nor_flash_parameter *params = nor->params;
+	const struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 	u8 *buf = nor->bouncebuf;
 	u64 addr;
 	int i, ret;
@@ -255,7 +258,7 @@ static int cypress_nor_set_single_spi_bits(struct spi_nor *nor, u64 addr)
 
 static int cypress_nor_octal_dtr_dis(struct spi_nor *nor)
 {
-	const struct spi_nor_flash_parameter *params = nor->params;
+	const struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 	u8 *buf = nor->bouncebuf;
 	u64 addr;
 	int i, ret;
@@ -282,8 +285,9 @@ static int cypress_nor_octal_dtr_dis(struct spi_nor *nor)
 
 static int cypress_nor_quad_enable_volatile_reg(struct spi_nor *nor, u64 addr)
 {
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 	struct spi_mem_op op;
-	u8 addr_mode_nbytes = nor->params->addr_mode_nbytes;
+	u8 addr_mode_nbytes = params->addr_mode_nbytes;
 	u8 cfr1v_written;
 	int ret;
 
@@ -341,7 +345,7 @@ static int cypress_nor_quad_enable_volatile_reg(struct spi_nor *nor, u64 addr)
  */
 static int cypress_nor_quad_enable_volatile(struct spi_nor *nor)
 {
-	struct spi_nor_flash_parameter *params = nor->params;
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 	u64 addr;
 	u8 i;
 	int ret;
@@ -420,6 +424,7 @@ static int cypress_nor_determine_addr_mode_by_sr1(struct spi_nor *nor,
  */
 static int cypress_nor_set_addr_mode_nbytes(struct spi_nor *nor)
 {
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 	struct spi_mem_op op;
 	u8 addr_mode;
 	int ret;
@@ -461,8 +466,8 @@ static int cypress_nor_set_addr_mode_nbytes(struct spi_nor *nor)
 			return spi_nor_set_4byte_addr_mode(nor, true);
 	}
 
-	nor->params->addr_nbytes = addr_mode;
-	nor->params->addr_mode_nbytes = addr_mode;
+	params->addr_nbytes = addr_mode;
+	params->addr_mode_nbytes = addr_mode;
 
 	return 0;
 }
@@ -479,10 +484,10 @@ static int cypress_nor_set_addr_mode_nbytes(struct spi_nor *nor)
  */
 static int cypress_nor_get_page_size(struct spi_nor *nor)
 {
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 	struct spi_mem_op op =
-		CYPRESS_NOR_RD_ANY_REG_OP(nor->params->addr_mode_nbytes,
+		CYPRESS_NOR_RD_ANY_REG_OP(params->addr_mode_nbytes,
 					  0, 0, nor->bouncebuf);
-	struct spi_nor_flash_parameter *params = nor->params;
 	int ret;
 	u8 i;
 
@@ -509,12 +514,14 @@ static int cypress_nor_get_page_size(struct spi_nor *nor)
 
 static void cypress_nor_ecc_init(struct spi_nor *nor)
 {
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
+
 	/*
 	 * Programming is supported only in 16-byte ECC data unit granularity.
 	 * Byte-programming, bit-walking, or multiple program operations to the
 	 * same ECC data unit without an erase are not allowed.
 	 */
-	nor->params->writesize = 16;
+	params->writesize = 16;
 	nor->flags |= SNOR_F_ECC;
 }
 
@@ -523,6 +530,7 @@ s25fs256t_post_bfpt_fixup(struct spi_nor *nor,
 			  const struct sfdp_parameter_header *bfpt_header,
 			  const struct sfdp_bfpt *bfpt)
 {
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 	struct spi_mem_op op;
 	int ret;
 
@@ -532,7 +540,7 @@ s25fs256t_post_bfpt_fixup(struct spi_nor *nor,
 
 	/* Read Architecture Configuration Register (ARCFN) */
 	op = (struct spi_mem_op)
-		CYPRESS_NOR_RD_ANY_REG_OP(nor->params->addr_mode_nbytes,
+		CYPRESS_NOR_RD_ANY_REG_OP(params->addr_mode_nbytes,
 					  SPINOR_REG_CYPRESS_ARCFN, 1,
 					  nor->bouncebuf);
 	ret = spi_nor_read_any_reg(nor, &op, nor->reg_proto);
@@ -548,7 +556,7 @@ s25fs256t_post_bfpt_fixup(struct spi_nor *nor,
 
 static int s25fs256t_post_sfdp_fixup(struct spi_nor *nor)
 {
-	struct spi_nor_flash_parameter *params = nor->params;
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 
 	/*
 	 * S25FS256T does not define the SCCR map, but we would like to use the
@@ -590,20 +598,21 @@ s25hx_t_post_bfpt_fixup(struct spi_nor *nor,
 			const struct sfdp_bfpt *bfpt)
 {
 	int ret;
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 
 	ret = cypress_nor_set_addr_mode_nbytes(nor);
 	if (ret)
 		return ret;
 
 	/* Replace Quad Enable with volatile version */
-	nor->params->quad_enable = cypress_nor_quad_enable_volatile;
+	params->quad_enable = cypress_nor_quad_enable_volatile;
 
 	return 0;
 }
 
 static int s25hx_t_post_sfdp_fixup(struct spi_nor *nor)
 {
-	struct spi_nor_flash_parameter *params = nor->params;
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 	struct spi_nor_erase_type *erase_type = params->erase_map.erase_type;
 	unsigned int i;
 
@@ -639,7 +648,7 @@ static int s25hx_t_post_sfdp_fixup(struct spi_nor *nor)
 
 static int s25hx_t_late_init(struct spi_nor *nor)
 {
-	struct spi_nor_flash_parameter *params = nor->params;
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 
 	/* Fast Read 4B requires mode cycles */
 	params->reads[SNOR_CMD_READ_FAST].num_mode_clocks = 8;
@@ -674,7 +683,7 @@ static int cypress_nor_set_octal_dtr(struct spi_nor *nor, bool enable)
 
 static int s28hx_t_post_sfdp_fixup(struct spi_nor *nor)
 {
-	struct spi_nor_flash_parameter *params = nor->params;
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 
 	if (!params->n_dice || !params->vreg_offset) {
 		dev_err(nor->dev, "%s failed. The volatile register offset could not be retrieved from SFDP.\n",
@@ -723,7 +732,7 @@ static int s28hx_t_post_bfpt_fixup(struct spi_nor *nor,
 
 static int s28hx_t_late_init(struct spi_nor *nor)
 {
-	struct spi_nor_flash_parameter *params = nor->params;
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 
 	params->set_octal_dtr = cypress_nor_set_octal_dtr;
 	params->ready = cypress_nor_sr_ready_and_clear;
@@ -743,13 +752,15 @@ s25fs_s_nor_post_bfpt_fixups(struct spi_nor *nor,
 			     const struct sfdp_parameter_header *bfpt_header,
 			     const struct sfdp_bfpt *bfpt)
 {
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
+
 	/*
 	 * The S25FS-S chip family reports 512-byte pages in BFPT but
 	 * in reality the write buffer still wraps at the safe default
 	 * of 256 bytes.  Overwrite the page size advertised by BFPT
 	 * to get the writes working.
 	 */
-	nor->params->page_size = 256;
+	params->page_size = 256;
 
 	return 0;
 }
@@ -1050,7 +1061,7 @@ static int spansion_nor_sr_ready_and_clear(struct spi_nor *nor)
 
 static int spansion_nor_late_init(struct spi_nor *nor)
 {
-	struct spi_nor_flash_parameter *params = nor->params;
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 	struct spansion_nor_params *priv_params;
 	u8 mfr_flags = nor->info->mfr_flags;
 
