@@ -58,6 +58,7 @@ config DRM_XLNX_BRIDGE_DEBUG_FS
 config DRM_XLNX_DPTX
 	tristate "Xilinx DRM DisplayPort Subsystem Driver"
 	depends on DRM_XLNX
+	depends on SND
 	select DRM_DISPLAY_HELPER
 	select DRM_DISPLAY_HDMI_HELPER
 	select DRM_DISPLAY_DP_HELPER
