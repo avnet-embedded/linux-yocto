@@ -169,7 +169,7 @@ static const struct imx_info_list imx93_info = {
 	},
 };
 
-static const struct imx_info_list imx8dxl_info = {
+static struct imx_info_list imx8dxl_info = {
 	.num_mu = 7,
 	.soc_id = SOC_ID_OF_IMX8DXL,
 	.board_type = 0,
