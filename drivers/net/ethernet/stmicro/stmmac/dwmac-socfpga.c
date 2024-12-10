@@ -577,6 +577,7 @@ static int socfpga_dwmac_probe(struct platform_device *pdev)
 		plat_dat->int_snapshot_num = AUX_SNAPSHOT0;
 		plat_dat->crosststamp = smtg_crosststamp;
 	}
+	plat_dat->riwt_off = 1;
 
 	ret = stmmac_dvr_probe(&pdev->dev, plat_dat, &stmmac_res);
 	if (ret)
