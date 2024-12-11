@@ -73,8 +73,8 @@
  * both need to have an interrupt handler registered.
  */
 #define FLEXCAN_QUIRK_SECONDARY_MB_IRQ	BIT(18)
-/* S32CC platforms have different bittiming */
-#define FLEXCAN_S32CC_BITTIMING		BIT(19)
+/* S32 platforms have different bittiming */
+#define FLEXCAN_S32_BITTIMING		BIT(19)
 
 /* Flags identifying interrupt handlers associated to each IRQ number */
 #define FLEXCAN_HANDLER_STATE	BIT(0) /* Bus Off, Tx Warning, Rx Warning */
