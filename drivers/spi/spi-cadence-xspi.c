@@ -411,13 +411,13 @@ struct cdns_xspi_dev {
 };
 
 #if IS_ENABLED(CONFIG_SPI_CADENCE_MRVL_XSPI)
-int xspi_unlock(atomic_t *lock)
+static int xspi_unlock(atomic_t *lock)
 {
 	atomic_fetch_dec(lock);
 	return 0;
 }
 
-int xspi_trylock(atomic_t *lock)
+static int xspi_trylock(atomic_t *lock)
 {
 	int timeout = 0xFF;
 
@@ -823,7 +823,7 @@ static void marvell_xspi_sdma_handle(struct cdns_xspi_dev *cdns_xspi)
 	}
 }
 
-bool cdns_xspi_stig_ready(struct cdns_xspi_dev *cdns_xspi, bool sleep)
+static bool cdns_xspi_stig_ready(struct cdns_xspi_dev *cdns_xspi, bool sleep)
 {
 	u32 ctrl_stat;
 
@@ -835,7 +835,7 @@ bool cdns_xspi_stig_ready(struct cdns_xspi_dev *cdns_xspi, bool sleep)
 		sleep ? CDNS_XSPI_POLL_TIMEOUT_US : 0);
 }
 
-bool cdns_xspi_sdma_ready(struct cdns_xspi_dev *cdns_xspi, bool sleep)
+static bool cdns_xspi_sdma_ready(struct cdns_xspi_dev *cdns_xspi, bool sleep)
 {
 	u32 ctrl_stat;
 
