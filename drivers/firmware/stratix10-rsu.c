@@ -316,8 +316,12 @@ static void rsu_get_device_info_callback(struct stratix10_svc_client *client,
 			FIELD_GET(RSU_ERASE_SIZE_MASK, res->a4);
 
 	} else {
-		dev_err(client->dev, "COMMAND_RSU_GET_DEVICE_INFO returned 0x%lX\n",
-			res->a0);
+		if (data->status == BIT(SVC_STATUS_NO_SUPPORT))
+			dev_warn(client->dev, "Secure FW doesn't support get device info\n");
+		else
+			dev_err(client->dev, "COMMAND_RSU_GET_DEVICE_INFO returned 0x%lX\n",
+				res->a0);
+
 		priv->device_info[0].size = INVALID_DEVICE_INFO;
 		priv->device_info[1].size = INVALID_DEVICE_INFO;
 		priv->device_info[2].size = INVALID_DEVICE_INFO;
