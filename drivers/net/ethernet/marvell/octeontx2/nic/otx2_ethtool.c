@@ -269,6 +269,7 @@ static int otx2_get_sset_count(struct net_device *netdev, int sset)
 
 	qstats_count = otx2_n_queue_stats *
 		       (pfvf->hw.rx_queues + pfvf->hw.tx_queues);
+	otx2_update_lmac_fec_stats(pfvf);
 
 	otx2_update_lmac_fec_stats(pfvf);
 	return otx2_n_dev_stats + otx2_n_drv_stats + qstats_count +
@@ -340,6 +341,11 @@ static void otx2_get_pauseparam(struct net_device *netdev,
 	if (!otx2_sync_mbox_msg(&pfvf->mbox)) {
 		rsp = (struct cgx_pause_frm_cfg *)
 		       otx2_mbox_get_rsp(&pfvf->mbox.mbox, 0, &req->hdr);
+		if (IS_ERR(rsp)) {
+			mutex_unlock(&pfvf->mbox.lock);
+			return;
+		}
+
 		pause->rx_pause = rsp->rx_pause;
 		pause->tx_pause = rsp->tx_pause;
 	}

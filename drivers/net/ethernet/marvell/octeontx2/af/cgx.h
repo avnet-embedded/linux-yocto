@@ -173,6 +173,9 @@ int cgx_set_link_state(void *cgxd, int lmac_id, bool enable);
 int cgx_set_phy_mod_type(int mod, void *cgxd, int lmac_id);
 int cgx_get_phy_mod_type(void *cgxd, int lmac_id);
 u8 cgx_lmac_get_p2x(int cgx_id, int lmac_id);
+int cgx_set_fec(u64 fec, int cgx_id, int lmac_id);
+int cgx_get_fec_stats(void *cgxd, int lmac_id, struct cgx_fec_stats_rsp *rsp);
+int cgx_get_phy_fec_stats(void *cgxd, int lmac_id);
 
 void cgx_lmac_enadis_higig2(void *cgxd, int lmac_id, bool enable);
 bool is_higig2_enabled(void *cgxd, int lmac_id);
