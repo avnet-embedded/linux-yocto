@@ -236,15 +236,13 @@ static int pwm_imx27_apply(struct pwm_chip *chip, struct pwm_device *pwm,
 {
 	unsigned long period_cycles, duty_cycles, prescale, period_us, tmp;
 	struct pwm_imx27_chip *imx = to_pwm_imx27_chip(chip);
-	void __iomem *reg_sar = imx->mmio_base + MX3_PWMSAR;
-	__force u32 sar_last, sar_current;
 	struct pwm_state cstate;
 	unsigned long long c;
 	unsigned long long clkrate;
 	unsigned long flags;
 	int val;
 	int ret;
-	u32 cr, timeout = 1000;
+	u32 cr;
 
 	pwm_get_state(pwm, &cstate);
 
