@@ -1030,6 +1030,9 @@ void fec_ptp_init(struct platform_device *pdev, int irq_idx)
 	fep->ptp_caps.owner = THIS_MODULE;
 	strscpy(fep->ptp_caps.name, "fec ptp", sizeof(fep->ptp_caps.name));
 
+	fep->pps_channel = DEFAULT_PPS_CHANNEL;
+	of_property_read_u32(np, "fsl,pps-channel", &fep->pps_channel);
+
 	fep->cycle_speed = clk_get_rate(fep->clk_ptp);
 	if (!fep->cycle_speed) {
 		fep->cycle_speed = NSEC_PER_SEC;
@@ -1040,9 +1043,6 @@ void fec_ptp_init(struct platform_device *pdev, int irq_idx)
 #ifdef CONFIG_AVB_SUPPORT
 	fep->ptp_caps.max_adj = fep->cycle_speed / 2;
 #else
-	fep->pps_channel = DEFAULT_PPS_CHANNEL;
-	of_property_read_u32(np, "fsl,pps-channel", &fep->pps_channel);
-
 	fep->ptp_caps.max_adj = 250000000;
 #endif
 	fep->ptp_caps.n_alarm = 0;
