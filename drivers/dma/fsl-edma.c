@@ -320,74 +320,6 @@ static const struct of_device_id fsl_edma_dt_ids[] = {
 };
 MODULE_DEVICE_TABLE(of, fsl_edma_dt_ids);
 
-static void fsl_edma3_detach_pd(struct fsl_edma_engine *fsl_edma)
-{
-	struct fsl_edma_chan *fsl_chan;
-	int i;
-
-	for (i = 0; i < fsl_edma->n_chans; i++) {
-		if (fsl_edma->chan_masked & BIT(i))
-			continue;
-		fsl_chan = &fsl_edma->chans[i];
-		if (fsl_chan->pd_dev_link)
-			device_link_del(fsl_chan->pd_dev_link);
-		if (fsl_chan->pd_dev) {
-			dev_pm_domain_detach(fsl_chan->pd_dev, false);
-			pm_runtime_dont_use_autosuspend(fsl_chan->pd_dev);
-			pm_runtime_set_suspended(fsl_chan->pd_dev);
-		}
-	}
-}
-
-static void devm_fsl_edma3_detach_pd(void *data)
-{
-	fsl_edma3_detach_pd(data);
-}
-
-static int fsl_edma3_attach_pd(struct platform_device *pdev, struct fsl_edma_engine *fsl_edma)
-{
-	struct fsl_edma_chan *fsl_chan;
-	struct device *pd_chan;
-	struct device *dev;
-	int i;
-
-	dev = &pdev->dev;
-
-	for (i = 0; i < fsl_edma->n_chans; i++) {
-		if (fsl_edma->chan_masked & BIT(i))
-			continue;
-
-		fsl_chan = &fsl_edma->chans[i];
-
-		pd_chan = dev_pm_domain_attach_by_id(dev, i);
-		if (IS_ERR_OR_NULL(pd_chan)) {
-			dev_err(dev, "Failed attach pd %d\n", i);
-			goto detach;
-		}
-
-		fsl_chan->pd_dev_link = device_link_add(dev, pd_chan, DL_FLAG_STATELESS |
-					     DL_FLAG_PM_RUNTIME |
-					     DL_FLAG_RPM_ACTIVE);
-		if (!fsl_chan->pd_dev_link) {
-			dev_err(dev, "Failed to add device_link to %d\n", i);
-			dev_pm_domain_detach(pd_chan, false);
-			goto detach;
-		}
-
-		fsl_chan->pd_dev = pd_chan;
-
-		pm_runtime_use_autosuspend(fsl_chan->pd_dev);
-		pm_runtime_set_autosuspend_delay(fsl_chan->pd_dev, 200);
-		pm_runtime_set_active(fsl_chan->pd_dev);
-	}
-
-	return 0;
-
-detach:
-	fsl_edma3_detach_pd(fsl_edma);
-	return -EINVAL;
-}
-
 static int fsl_edma_probe(struct platform_device *pdev)
 {
 	const struct of_device_id *of_id =
@@ -470,15 +402,6 @@ static int fsl_edma_probe(struct platform_device *pdev)
 	}
 
 	fsl_edma->big_endian = of_property_read_bool(np, "big-endian");
-
-	if (drvdata->flags & FSL_EDMA_DRV_HAS_PD) {
-		ret = fsl_edma3_attach_pd(pdev, fsl_edma);
-		if (ret)
-			return ret;
-		ret = devm_add_action_or_reset(&pdev->dev, devm_fsl_edma3_detach_pd, fsl_edma);
-		if (ret)
-			return ret;
-	}
 
 	INIT_LIST_HEAD(&fsl_edma->dma_dev.channels);
 	for (i = 0; i < fsl_edma->n_chans; i++) {
