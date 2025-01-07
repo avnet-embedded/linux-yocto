@@ -596,6 +596,7 @@ dtb-$(CONFIG_ARCH_MXC) += imx95-15x15-evk.dtb
 dtb-$(CONFIG_ARCH_MXC) += imx95-15x15-evk-flexspi-m2.dtb
 dtb-$(CONFIG_ARCH_MXC) += imx95-15x15-evk-mqs.dtb
 dtb-$(CONFIG_ARCH_MXC) += imx95-15x15-evk-aud-hat.dtb
+dtb-$(CONFIG_ARCH_MXC) += imx95-15x15-evk-8mic-reve.dtb
 dtb-$(CONFIG_ARCH_MXC) += imx95-15x15-ab2.dtb
 DTC_FLAGS_imx95-15x15-evk-boe-wxga-lvds0-panel := -@
 DTC_FLAGS_imx95-15x15-evk-boe-wxga-lvds1-panel := -@
