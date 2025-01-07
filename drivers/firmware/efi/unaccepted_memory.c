@@ -3,6 +3,7 @@
 #include <linux/efi.h>
 #include <linux/memblock.h>
 #include <linux/spinlock.h>
+#include <linux/crash_dump.h>
 #include <linux/nmi.h>
 #include <asm/unaccepted_memory.h>
 
