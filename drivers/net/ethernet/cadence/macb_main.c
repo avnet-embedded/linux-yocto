@@ -771,7 +771,7 @@ static int macb_mdiobus_register(struct macb *bp)
 
 static int macb_mii_init(struct macb *bp)
 {
-	struct *mdio_np;
+	struct device_node *mdio_np;
 	struct device_node *child, *np = bp->pdev->dev.of_node;
 	int err = -ENXIO;
 
