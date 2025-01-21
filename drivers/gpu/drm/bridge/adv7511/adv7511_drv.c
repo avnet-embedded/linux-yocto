@@ -1306,8 +1306,8 @@ static int adv7511_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 
 	ret = adv7511_init_regulators(adv7511);
 	if (ret) {
-		dev_err(dev, "failed to init regulators\n");
-		return ret;
+		dev_err_probe(dev, ret, "failed to init regulators\n");
+		goto err_of_node_put;
 	}
 
 	if (adv7511->addr_cec != 0)
@@ -1473,6 +1473,8 @@ uninit_regulators:
 			 remote_node->full_name);
 	}
 #endif
+err_of_node_put:
+	of_node_put(adv7511->host_node);
 
 	return ret;
 }
@@ -1480,6 +1482,8 @@ uninit_regulators:
 static void adv7511_remove(struct i2c_client *i2c)
 {
 	struct adv7511 *adv7511 = i2c_get_clientdata(i2c);
+
+	of_node_put(adv7511->host_node);
 
 	adv7511_uninit_regulators(adv7511);
 
