@@ -280,6 +280,7 @@ static int dwc3_ti_remove(struct platform_device *pdev)
 	pm_runtime_put_sync(dev);
 	clk_disable_unprepare(data->usb2_refclk);
 	pm_runtime_disable(dev);
+	pm_runtime_dont_use_autosuspend(dev);
 	pm_runtime_set_suspended(dev);
 
 	platform_set_drvdata(pdev, NULL);
