@@ -16,6 +16,7 @@
 #include <linux/types.h>
 
 #include <linux/err.h>
+#include <linux/firmware/xlnx-zynqmp-fpga.h>
 #include <linux/firmware/xlnx-zynqmp-pdi.h>
 #include <linux/firmware/xlnx-zynqmp-ufs.h>
 
@@ -95,18 +96,6 @@
 #define	ZYNQMP_PM_CAPABILITY_CONTEXT	0x2U
 #define	ZYNQMP_PM_CAPABILITY_WAKEUP	0x4U
 #define	ZYNQMP_PM_CAPABILITY_UNUSABLE	0x8U
-
-/*
- * Firmware FPGA Manager flags
- * XILINX_ZYNQMP_PM_FPGA_FULL:	FPGA full reconfiguration
- * XILINX_ZYNQMP_PM_FPGA_PARTIAL: FPGA partial reconfiguration
- */
-#define XILINX_ZYNQMP_PM_FPGA_FULL	0x0U
-#define XILINX_ZYNQMP_PM_FPGA_PARTIAL	BIT(0)
-
-/* FPGA Status Reg */
-#define XILINX_ZYNQMP_PM_FPGA_CONFIG_STAT_OFFSET	7U
-#define XILINX_ZYNQMP_PM_FPGA_READ_CONFIG_REG		0U
 
 /*
  * Node IDs for the Error Events.
@@ -589,9 +578,6 @@ int zynqmp_pm_set_requirement(const u32 node, const u32 capabilities,
 int zynqmp_pm_aes_engine(const u64 address, u32 *out);
 int zynqmp_pm_efuse_access(const u64 address, u32 *out);
 int zynqmp_pm_sha_hash(const u64 address, const u32 size, const u32 flags);
-int zynqmp_pm_fpga_load(const u64 address, const u32 size, const u32 flags);
-int zynqmp_pm_fpga_get_status(u32 *value);
-int zynqmp_pm_fpga_get_config_status(u32 *value);
 int zynqmp_pm_write_ggs(u32 index, u32 value);
 int zynqmp_pm_read_ggs(u32 index, u32 *value);
 int zynqmp_pm_write_pggs(u32 index, u32 value);
@@ -780,22 +766,6 @@ static inline int zynqmp_pm_efuse_access(const u64 address, u32 *out)
 
 static inline int zynqmp_pm_sha_hash(const u64 address, const u32 size,
 				     const u32 flags)
-{
-	return -ENODEV;
-}
-
-static inline int zynqmp_pm_fpga_load(const u64 address, const u32 size,
-				      const u32 flags)
-{
-	return -ENODEV;
-}
-
-static inline int zynqmp_pm_fpga_get_status(u32 *value)
-{
-	return -ENODEV;
-}
-
-static inline int zynqmp_pm_fpga_get_config_status(u32 *value)
 {
 	return -ENODEV;
 }
