@@ -1,0 +1,27 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/*
+ * Firmware layer for XilPDI APIs.
+ *
+ * Copyright (C), 2025 Advanced Micro Devices, Inc.
+ */
+
+#ifndef __FIRMWARE_ZYNQMP_PDI_H__
+#define __FIRMWARE_ZYNQMP_PDI_H__
+
+#include <linux/platform_device.h>
+
+/* Loader commands */
+#define PM_LOAD_PDI			0x701
+
+#define PDI_SRC_DDR	0xF
+
+#if IS_REACHABLE(CONFIG_ZYNQMP_FIRMWARE)
+int zynqmp_pm_load_pdi(const u32 src, const u64 address);
+#else
+static inline int zynqmp_pm_load_pdi(const u32 src, const u64 address)
+{
+	return -ENODEV;
+}
+#endif
+
+#endif /* __FIRMWARE_ZYNQMP_PDI_H__ */
