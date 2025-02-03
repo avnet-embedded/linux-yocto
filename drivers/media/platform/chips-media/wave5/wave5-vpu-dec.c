@@ -1600,6 +1600,7 @@ static int streamoff_output(struct vb2_queue *q)
 	struct vb2_v4l2_buffer *buf;
 	int ret;
 	dma_addr_t new_rd_ptr;
+	struct vpu_src_buffer *vpu_buf, *tmp;
 	struct dec_output_info dec_info;
 	unsigned int i;
 
@@ -1610,6 +1611,12 @@ static int streamoff_output(struct vb2_queue *q)
 				"%s: Setting display flag of buf index: %u, fail: %d\n",
 				__func__, i, ret);
 	}
+
+	inst->retry = false;
+	inst->queuing_num = 0;
+
+	list_for_each_entry_safe(vpu_buf, tmp, &inst->avail_src_bufs, list)
+		list_del_init(&vpu_buf->list);
 
 	while ((buf = v4l2_m2m_src_buf_remove(m2m_ctx))) {
 		dev_dbg(inst->dev->dev, "%s: (Multiplanar) buf type %4u | index %4u\n",
@@ -1695,12 +1702,16 @@ static void wave5_vpu_dec_stop_streaming(struct vb2_queue *q)
 
 	while (check_cmd) {
 		struct queue_status_info q_status;
+		struct dec_output_info dec_output_info;
 
 		wave5_vpu_dec_give_command(inst, DEC_GET_QUEUE_STATUS, &q_status);
 
 		if ((inst->state == VPU_INST_STATE_STOP || q_status.instance_queue_count == 0) &&
 			q_status.report_queue_count == 0)
 			break;
+
+		if (wave5_vpu_dec_get_output_info(inst, &dec_output_info))
+			dev_dbg(inst->dev->dev, "there is no output info\n");
 
 	}
 
