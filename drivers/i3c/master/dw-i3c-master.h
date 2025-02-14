@@ -59,6 +59,7 @@ struct dw_i3c_master {
 	const struct dw_i3c_platform_ops *platform_ops;
 
 	bool first_broadcast;
+	struct work_struct hj_work;
 };
 
 struct dw_i3c_platform_ops {
