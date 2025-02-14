@@ -1896,8 +1896,8 @@ out:
 	return addr;
 
 unmap_and_free_file_vma:
-	vma->vm_file = NULL;
 	vma_fput(vma);
+	vma->vm_file = NULL;
 
 	/* Undo any partial mapping done by a device driver. */
 	unmap_region(mm, vma, prev, vma->vm_start, vma->vm_end);
