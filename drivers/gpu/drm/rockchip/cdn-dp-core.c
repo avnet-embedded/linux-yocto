@@ -23,7 +23,6 @@
 #include <drm/drm_simple_kms_helper.h>
 
 #include "cdn-dp-core.h"
-#include "rockchip_drm_vop.h"
 
 static inline struct cdn_dp_device *connector_to_dp(struct drm_connector *connector)
 {
