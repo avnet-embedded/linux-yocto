@@ -969,9 +969,7 @@ static int scmi_pinctrl_parse_groups(struct scmi_device *sdev,
 				     struct scmi_pinctrl_pin_group *grp,
 				     u32 index)
 {
-	const __be32 *p;
 	struct device *dev = &sdev->dev;
-	struct property *prop;
 	int i, npins;
 	u32 pinmux = 0U;
 
@@ -1006,7 +1004,7 @@ static int scmi_pinctrl_parse_groups(struct scmi_device *sdev,
 	}
 
 	i = 0;
-	of_property_for_each_u32(np, "pinmux", prop, p, pinmux) {
+	of_property_for_each_u32(np, "pinmux", pinmux) {
 		grp->pin_ids[i] = get_pin_no(pinmux);
 		grp->pin_funcs[i] = get_pin_func(pinmux);
 
