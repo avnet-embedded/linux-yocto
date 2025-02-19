@@ -2280,8 +2280,12 @@ static int printk_kthread_func(void *data)
 		if (!(con->flags & CON_ENABLED))
 			continue;
 
-		if (suppress_message_printing(r.info->level))
+		if (suppress_message_printing(r.info->level)) {
+			console_lock();
+			latched_seq_write(&con->printk_seq, seq);
+			console_unlock();
 			continue;
+		}
 
 		if (con->flags & CON_EXTENDED) {
 			len = info_print_ext_header(ext_text,
