@@ -90,13 +90,17 @@
 		#address-cells = <2>;
 		#size-cells =<2>;
 		interrupt-controller;
+		interrupt-parent = <&intc>;
 		#redistributor-regions = <1>;
 		redistributor-stride = <0x0 0x20000>;
+		/* VGIC maintenance interrupt */
+		interrupts = <GIC_PPI 25 IRQ_TYPE_LEVEL_HIGH>;
 
 		its: msi-controller@1d040000 {
 			compatible = "arm,gic-v3-its";
 			reg = <0x0 0x1d040000 0x0 0x20000>;
 			msi-controller;
+			dma-32bit-quirk;
 			#msi-cells = <1>;
 		};
 	};
@@ -232,6 +236,159 @@
 			#clock-cells = <1>;
 		};
 
+		gmac2: ethernet@10830000 {
+			compatible = "altr,socfpga-stmmac-a10-s10",
+				     "snps,dwxgmac-2.10",
+				     "snps,dwxgmac";
+			reg = <0x10830000 0x3500>;
+			interrupts = <GIC_SPI 224 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 225 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 226 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 227 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 228 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 229 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 230 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 231 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 232 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 233 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 234 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 235 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 236 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 237 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 238 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 239 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 240 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "macirq",
+					  "macirq_tx0",
+					  "macirq_tx1",
+					  "macirq_tx2",
+					  "macirq_tx3",
+					  "macirq_tx4",
+					  "macirq_tx5",
+					  "macirq_tx6",
+					  "macirq_tx7",
+					  "macirq_rx0",
+					  "macirq_rx1",
+					  "macirq_rx2",
+					  "macirq_rx3",
+					  "macirq_rx4",
+					  "macirq_rx5",
+					  "macirq_rx6",
+					  "macirq_rx7";
+			resets = <&rst EMAC2_RESET>, <&rst EMAC2_OCP_RESET>;
+			reset-names = "stmmaceth", "stmmaceth-ocp";
+			clocks = <&clkmgr AGILEX5_EMAC2_CLK>,
+				 <&clkmgr AGILEX5_EMAC_PTP_CLK>;
+			clock-names = "stmmaceth", "ptp_ref";
+			mac-address = [00 00 00 00 00 00];
+			tx-fifo-depth = <32768>;
+			rx-fifo-depth = <16384>;
+			snps,multicast-filter-bins = <64>;
+			snps,perfect-filter-entries = <64>;
+			snps,axi-config = <&stmmac_axi_emac2_setup>;
+			snps,mtl-rx-config = <&mtl_rx_emac2_setup>;
+			snps,mtl-tx-config = <&mtl_tx_emac2_setup>;
+			snps,pbl = <32>;
+			snps,pblx8;
+			snps,multi-irq-en;
+			snps,tso;
+			snps,rx-vlan-offload;
+			altr,sysmgr-syscon = <&sysmgr 0x4c 0>;
+			altr,smtg-hub;
+			iommus = <&smmu 3>;
+			dma-coherent;
+			snps,clk-csr = <0>;
+			status = "disabled";
+
+			stmmac_axi_emac2_setup: stmmac-axi-config {
+				snps,wr_osr_lmt = <31>;
+				snps,rd_osr_lmt = <31>;
+				snps,blen = <0 0 0 32 16 8 4>;
+			};
+
+			mtl_rx_emac2_setup: rx-queues-config {
+				snps,rx-queues-to-use = <8>;
+				snps,rx-sched-sp;
+				queue0 {
+					snps,dcb-algorithm;
+					snps,map-to-dma-channel = <0x0>;
+				};
+				queue1 {
+					snps,dcb-algorithm;
+					snps,map-to-dma-channel = <0x1>;
+				};
+				queue2 {
+					snps,dcb-algorithm;
+					snps,map-to-dma-channel = <0x2>;
+				};
+				queue3 {
+					snps,dcb-algorithm;
+					snps,map-to-dma-channel = <0x3>;
+				};
+				queue4 {
+					snps,dcb-algorithm;
+					snps,map-to-dma-channel = <0x4>;
+				};
+				queue5 {
+					snps,dcb-algorithm;
+					snps,map-to-dma-channel = <0x5>;
+				};
+				queue6 {
+					snps,dcb-algorithm;
+					snps,map-to-dma-channel = <0x6>;
+				};
+				queue7 {
+					snps,dcb-algorithm;
+					snps,map-to-dma-channel = <0x7>;
+				};
+			};
+
+			mtl_tx_emac2_setup: tx-queues-config {
+				snps,tx-queues-to-use = <8>;
+				snps,tx-sched-wrr;
+				queue0 {
+					snps,weight = <0x09>;
+					snps,dcb-algorithm;
+				};
+				queue1 {
+					snps,weight = <0x0A>;
+					snps,dcb-algorithm;
+				};
+				queue2 {
+					snps,weight = <0x0B>;
+					snps,coe-unsupported;
+					snps,dcb-algorithm;
+				};
+				queue3 {
+					snps,weight = <0x0C>;
+					snps,coe-unsupported;
+					snps,dcb-algorithm;
+				};
+				queue4 {
+					snps,weight = <0x0D>;
+					snps,coe-unsupported;
+					snps,dcb-algorithm;
+				};
+				queue5 {
+					snps,weight = <0x0E>;
+					snps,coe-unsupported;
+					snps,dcb-algorithm;
+				};
+				queue6 {
+					snps,weight = <0x0F>;
+					snps,coe-unsupported;
+					snps,dcb-algorithm;
+					snps,tbs-enable;
+				};
+				queue7 {
+					snps,weight = <0x10>;
+					snps,coe-unsupported;
+					snps,dcb-algorithm;
+					snps,tbs-enable;
+				};
+			};
+		};
+
 		gmac0: ethernet@10810000 {
 			compatible = "altr,socfpga-stmmac-a10-s10",
 				     "snps,dwxgmac-2.10",
@@ -293,7 +450,7 @@
 			altr,smtg-hub;
 			iommus = <&smmu 1>;
 			dma-coherent;
-
+			snps,clk-csr = <0>;
 			status = "disabled";
 
 			stmmac_axi_emac0_setup: stmmac-axi-config {
@@ -446,7 +603,7 @@
 			altr,smtg-hub;
 			iommus = <&smmu 2>;
 			dma-coherent;
-
+			snps,clk-csr = <0>;
 			status = "disabled";
 
 			stmmac_axi_emac1_setup: stmmac-axi-config {
@@ -493,159 +650,6 @@
 			};
 
 			mtl_tx_emac1_setup: tx-queues-config {
-				snps,tx-queues-to-use = <8>;
-				snps,tx-sched-wrr;
-				queue0 {
-					snps,weight = <0x09>;
-					snps,dcb-algorithm;
-				};
-				queue1 {
-					snps,weight = <0x0A>;
-					snps,dcb-algorithm;
-				};
-				queue2 {
-					snps,weight = <0x0B>;
-					snps,coe-unsupported;
-					snps,dcb-algorithm;
-				};
-				queue3 {
-					snps,weight = <0x0C>;
-					snps,coe-unsupported;
-					snps,dcb-algorithm;
-				};
-				queue4 {
-					snps,weight = <0x0D>;
-					snps,coe-unsupported;
-					snps,dcb-algorithm;
-				};
-				queue5 {
-					snps,weight = <0x0E>;
-					snps,coe-unsupported;
-					snps,dcb-algorithm;
-				};
-				queue6 {
-					snps,weight = <0x0F>;
-					snps,coe-unsupported;
-					snps,dcb-algorithm;
-					snps,tbs-enable;
-				};
-				queue7 {
-					snps,weight = <0x10>;
-					snps,coe-unsupported;
-					snps,dcb-algorithm;
-					snps,tbs-enable;
-				};
-			};
-		};
-
-		gmac2: ethernet@10830000 {
-			compatible = "altr,socfpga-stmmac-a10-s10",
-				     "snps,dwxgmac-2.10",
-				     "snps,dwxgmac";
-			reg = <0x10830000 0x3500>;
-			interrupts = <GIC_SPI 224 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 225 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 226 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 227 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 228 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 229 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 230 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 231 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 232 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 233 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 234 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 235 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 236 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 237 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 238 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 239 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 240 IRQ_TYPE_LEVEL_HIGH>;
-			interrupt-names = "macirq",
-					  "macirq_tx0",
-					  "macirq_tx1",
-					  "macirq_tx2",
-					  "macirq_tx3",
-					  "macirq_tx4",
-					  "macirq_tx5",
-					  "macirq_tx6",
-					  "macirq_tx7",
-					  "macirq_rx0",
-					  "macirq_rx1",
-					  "macirq_rx2",
-					  "macirq_rx3",
-					  "macirq_rx4",
-					  "macirq_rx5",
-					  "macirq_rx6",
-					  "macirq_rx7";
-			resets = <&rst EMAC2_RESET>, <&rst EMAC2_OCP_RESET>;
-			reset-names = "stmmaceth", "stmmaceth-ocp";
-			clocks = <&clkmgr AGILEX5_EMAC2_CLK>,
-				 <&clkmgr AGILEX5_EMAC_PTP_CLK>;
-			clock-names = "stmmaceth", "ptp_ref";
-			mac-address = [00 00 00 00 00 00];
-			tx-fifo-depth = <32768>;
-			rx-fifo-depth = <16384>;
-			snps,multicast-filter-bins = <64>;
-			snps,perfect-filter-entries = <64>;
-			snps,axi-config = <&stmmac_axi_emac2_setup>;
-			snps,mtl-rx-config = <&mtl_rx_emac2_setup>;
-			snps,mtl-tx-config = <&mtl_tx_emac2_setup>;
-			snps,pbl = <32>;
-			snps,pblx8;
-			snps,multi-irq-en;
-			snps,tso;
-			snps,rx-vlan-offload;
-			altr,sysmgr-syscon = <&sysmgr 0x4c 0>;
-			altr,smtg-hub;
-			iommus = <&smmu 3>;
-			dma-coherent;
-
-			status = "disabled";
-
-			stmmac_axi_emac2_setup: stmmac-axi-config {
-				snps,wr_osr_lmt = <31>;
-				snps,rd_osr_lmt = <31>;
-				snps,blen = <0 0 0 32 16 8 4>;
-			};
-
-			mtl_rx_emac2_setup: rx-queues-config {
-				snps,rx-queues-to-use = <8>;
-				snps,rx-sched-sp;
-				queue0 {
-					snps,dcb-algorithm;
-					snps,map-to-dma-channel = <0x0>;
-				};
-				queue1 {
-					snps,dcb-algorithm;
-					snps,map-to-dma-channel = <0x1>;
-				};
-				queue2 {
-					snps,dcb-algorithm;
-					snps,map-to-dma-channel = <0x2>;
-				};
-				queue3 {
-					snps,dcb-algorithm;
-					snps,map-to-dma-channel = <0x3>;
-				};
-				queue4 {
-					snps,dcb-algorithm;
-					snps,map-to-dma-channel = <0x4>;
-				};
-				queue5 {
-					snps,dcb-algorithm;
-					snps,map-to-dma-channel = <0x5>;
-				};
-				queue6 {
-					snps,dcb-algorithm;
-					snps,map-to-dma-channel = <0x6>;
-				};
-				queue7 {
-					snps,dcb-algorithm;
-					snps,map-to-dma-channel = <0x7>;
-				};
-			};
-
-			mtl_tx_emac2_setup: tx-queues-config {
 				snps,tx-queues-to-use = <8>;
 				snps,tx-sched-wrr;
 				queue0 {
@@ -818,6 +822,7 @@
 			clocks = <&clkmgr AGILEX5_L4_MP_CLK>, <&clkmgr AGILEX5_SDMCLK>;
 			clock-names = "biu", "ciu";
 			iommus = <&smmu 5>;
+			dma-coherent;
 			status = "disabled";
 		};
 
@@ -834,6 +839,7 @@
 			clock-names = "nf_clk";
 			iommus = <&smmu 4>;
 			status = "disabled";
+			dma-coherent;
 		};
 
 		ocram: sram@0 {
@@ -862,6 +868,7 @@
 			snps,dma-40-bit-mask;
 			iommus = <&smmu 8>;
 			status = "okay";
+			dma-coherent;
 		};
 
 		dmac1: dma-controller@10dc0000 {
@@ -882,6 +889,7 @@
 			snps,dma-40-bit-mask;
 			iommus = <&smmu 9>;
 			status = "okay";
+			dma-coherent;
 		};
 
 		rst: rstmgr@10d11000 {
@@ -1008,28 +1016,24 @@
 		};
 
 		usb31: usb1@11000000 {
-			compatible = "intel,agilex5-dwc3";
+			compatible = "intel,agilex5-dwc3", "snps,dwc3";
 			reg = <0x11000000 0x100000>;
 			ranges;
 			#address-cells = <1>;
 			#size-cells = <1>;
+			interrupts = <GIC_SPI 94 IRQ_TYPE_LEVEL_HIGH>;
 			clocks = <&clkmgr AGILEX5_USB31_SUSPEND_CLK>,
 				 <&clkmgr AGILEX5_USB31_BUS_CLK_EARLY>;
 			resets = <&rst USB1_RESET>, <&rst USB1_OCP_RESET>;
 			reset-names = "dwc3", "dwc3-ecc";
+			iommus = <&smmu 7>;
+			phys = <&usbphy0>, <&usbphy0>;
+			phy-names = "usb2-phy", "usb3-phy";
+			maximum-speed = "super-speed";
+			snps,dis_u2_susphy_quirk;
+			snps,dis_u3_susphy_quirk;
+			snps,dma_set_40_bit_mask_quirk;
 			status = "disabled";
-
-			dwc3_0: usb@11000000{
-				compatible = "snps,dwc3";
-				reg = <0x11000000 0x100000>;
-				interrupts = <GIC_SPI 94 IRQ_TYPE_LEVEL_HIGH>;
-				iommus = <&smmu 7>;
-				phys = <&usbphy0>, <&usbphy0>;
-				phy-names = "usb2-phy", "usb3-phy";
-				maximum-speed = "super-speed-plus";
-				snps,dis_u2_sysphy-quirk;
-				snps,dma_set_40_bit_mask_quirk;
-			};
 		};
 
 		eccmgr {

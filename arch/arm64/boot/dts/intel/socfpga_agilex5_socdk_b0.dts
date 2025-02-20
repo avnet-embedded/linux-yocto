@@ -43,9 +43,13 @@
 	status = "okay";
 };
 
+&gpio1 {
+	status = "okay";
+};
+
 &gmac0 {
 	status = "disabled";
-	phy-mode = "rgmii-id";
+	phy-mode = "rgmii";
 	phy-handle = <&emac0_phy0>;
 
 	max-frame-size = <9000>;
@@ -62,7 +66,7 @@
 
 &gmac2 {
 	status = "okay";
-	phy-mode = "rgmii-id";
+	phy-mode = "rgmii";
 	phy-handle = <&emac2_phy0>;
 
 	max-frame-size = <9000>;
@@ -147,9 +151,6 @@
 
 &usb31 {
 	status = "okay";
-};
-
-&dwc3_0 {
 	dr_mode = "host";
 };
 
@@ -257,17 +258,17 @@
 
 		input@10001 {
 			label = "Main Die corner bottom left max";
-			reg = <0x10001>;
+			reg = <0x10000>;
 		};
 
 		input@30001 {
 			label = "Main Die corner bottom right max";
-			reg = <0x30001>;
+			reg = <0x30000>;
 		};
 
 		input@40001 {
 			label = "Main Die corner top right max";
-			reg = <0x40001>;
+			reg = <0x40000>;
 		};
 	};
 };

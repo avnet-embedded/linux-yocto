@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2017-2018, Intel Corporation
+ * Copyright (C) 2017-2024, Intel Corporation
  */
 
 #include <linux/completion.h>
@@ -55,6 +55,8 @@
 #define BYTE_TO_WORD_SIZE				4
 #define IOMMU_LIMIT_ADDR			0x20000000
 #define IOMMU_STARTING_ADDR			0x0
+#define ENABLE_REMAPPER				false
+#define DISABLE_REMAPPER			true
 
 /* stratix10 service layer clients */
 #define STRATIX10_RSU				"stratix10-rsu"
@@ -206,6 +208,7 @@ struct stratix10_svc_chan {
 
 static LIST_HEAD(svc_ctrl);
 static LIST_HEAD(svc_data_mem);
+static DEFINE_MUTEX(svc_mem_lock);
 
 /**
  * svc_pa_to_va() - translate physical address to virtual address
@@ -219,11 +222,15 @@ static void *svc_pa_to_va(unsigned long addr)
 	struct stratix10_svc_data_mem *pmem;
 
 	pr_debug("claim back P-addr=0x%016x\n", (unsigned int)addr);
+	mutex_lock(&svc_mem_lock);
 	list_for_each_entry(pmem, &svc_data_mem, node)
-		if (pmem->paddr == addr)
+		if (pmem->paddr == addr) {
+			mutex_unlock(&svc_mem_lock);
 			return pmem->vaddr;
+		}
 
 	/* physical address is not found */
+	mutex_unlock(&svc_mem_lock);
 	return NULL;
 }
 
@@ -1637,15 +1644,13 @@ int stratix10_svc_send(struct stratix10_svc_chan *chan, void *msg)
 		 chan->name, p_msg->payload, p_msg->command,
 		 (unsigned int)p_msg->payload_length);
 
-	if (list_empty(&svc_data_mem)) {
+	if (!list_empty(&svc_data_mem)) {
 		if (p_msg->command == COMMAND_RECONFIG) {
 			struct stratix10_svc_command_config_type *ct =
 				(struct stratix10_svc_command_config_type *)
 				p_msg->payload;
 			p_data->flag = ct->flags;
-		}
-	} else {
-		if (p_msg->command == COMMAND_FCS_CRYPTO_AES_CRYPT_UPDATE_SMMU ||
+		} else if (p_msg->command == COMMAND_FCS_CRYPTO_AES_CRYPT_UPDATE_SMMU ||
 				p_msg->command == COMMAND_FCS_CRYPTO_AES_CRYPT_FINALIZE_SMMU){
 			src_addr = (phys_addr_t *)p_msg->payload;
 			p_data->paddr = *src_addr;
@@ -1673,13 +1678,16 @@ int stratix10_svc_send(struct stratix10_svc_chan *chan, void *msg)
 			src_addr = (phys_addr_t *)p_msg->payload;
 			p_data->paddr = *src_addr;
 			p_data->size = p_msg->payload_length;
+			mutex_lock(&svc_mem_lock);
 			list_for_each_entry(p_mem, &svc_data_mem, node)
 				if (p_mem->vaddr == p_msg->payload_output) {
 					p_data->paddr_output = p_mem->paddr;
 					p_data->size_output = p_msg->payload_length_output;
 					break;
 				}
+			mutex_unlock(&svc_mem_lock);
 		} else {
+			mutex_lock(&svc_mem_lock);
 			list_for_each_entry(p_mem, &svc_data_mem, node)
 				if (p_mem->vaddr == p_msg->payload) {
 					p_data->paddr = p_mem->paddr;
@@ -1687,7 +1695,9 @@ int stratix10_svc_send(struct stratix10_svc_chan *chan, void *msg)
 					if(p_msg->command == COMMAND_RECONFIG_DATA_SUBMIT && chan->ctrl->is_smmu_enabled)
 						p_data->paddr += chan->ctrl->sdm_dma_addr_offset;
 				}
+			mutex_unlock(&svc_mem_lock);
 			if (p_msg->payload_output) {
+				mutex_lock(&svc_mem_lock);
 				list_for_each_entry(p_mem, &svc_data_mem, node)
 					if (p_mem->vaddr == p_msg->payload_output) {
 						p_data->paddr_output =
@@ -1698,6 +1708,7 @@ int stratix10_svc_send(struct stratix10_svc_chan *chan, void *msg)
 							p_msg->payload_length_output;
 						break;
 					}
+				mutex_unlock(&svc_mem_lock);
 			}
 		}
 	}
@@ -1787,11 +1798,14 @@ void *stratix10_svc_allocate_memory(struct stratix10_svc_chan *chan,
 	if (!pmem)
 		return ERR_PTR(-ENOMEM);
 
+	mutex_lock(&svc_mem_lock);
+
 	if (chan->ctrl->is_smmu_enabled == true) {
 		s = PAGE_ALIGN(size);
 		va = (void *)__get_free_pages(GFP_KERNEL | __GFP_ZERO | __GFP_DMA, get_order(s));
 		if (!va) {
 			pr_debug("%s get_free_pages_failes\n", __func__);
+			mutex_unlock(&svc_mem_lock);
 			return ERR_PTR(-ENOMEM);
 		}
 
@@ -1811,6 +1825,7 @@ void *stratix10_svc_allocate_memory(struct stratix10_svc_chan *chan,
 						iova_pfn(&chan->ctrl->carveout.domain,
 									dma_addr));
 			free_pages((unsigned long)va, get_order(size));
+			mutex_unlock(&svc_mem_lock);
 			return ERR_PTR(-ENOMEM);
 		}
 
@@ -1836,6 +1851,7 @@ void *stratix10_svc_allocate_memory(struct stratix10_svc_chan *chan,
 	pr_debug("%s: %s: va=%p, pa=0x%016x\n", __func__,
 		chan->name, pmem->vaddr, (unsigned int)pmem->paddr);
 
+	mutex_unlock(&svc_mem_lock);
 	return (void *)va;
 }
 EXPORT_SYMBOL_GPL(stratix10_svc_allocate_memory);
@@ -1850,6 +1866,7 @@ EXPORT_SYMBOL_GPL(stratix10_svc_allocate_memory);
 void stratix10_svc_free_memory(struct stratix10_svc_chan *chan, void *kaddr)
 {
 	struct stratix10_svc_data_mem *pmem;
+	mutex_lock(&svc_mem_lock);
 
 	list_for_each_entry(pmem, &svc_data_mem, node)
 		if (pmem->vaddr == kaddr) {
@@ -1865,9 +1882,10 @@ void stratix10_svc_free_memory(struct stratix10_svc_chan *chan, void *kaddr)
 				pmem->vaddr = NULL;
 			}
 			list_del(&pmem->node);
+			mutex_unlock(&svc_mem_lock);
 			return;
 		}
-
+	mutex_unlock(&svc_mem_lock);
 	list_del(&svc_data_mem);
 }
 EXPORT_SYMBOL_GPL(stratix10_svc_free_memory);
@@ -1890,6 +1908,7 @@ static int stratix10_svc_drv_probe(struct platform_device *pdev)
 	struct stratix10_svc_sh_memory *sh_memory;
 	struct stratix10_svc *svc;
 	struct device_node *node = pdev->dev.of_node;
+	struct arm_smccc_res res;
 
 	svc_invoke_fn *invoke_fn;
 	size_t fifo_size;
@@ -1934,6 +1953,7 @@ static int stratix10_svc_drv_probe(struct platform_device *pdev)
 	controller->chans = chans;
 	controller->genpool = genpool;
 	controller->invoke_fn = invoke_fn;
+	controller->is_smmu_enabled = false;
 	controller->sdm_dma_addr_offset = 0x0;
 	init_completion(&controller->complete_status);
 
@@ -1975,6 +1995,15 @@ static int stratix10_svc_drv_probe(struct platform_device *pdev)
 			controller->carveout.limit = IOMMU_LIMIT_ADDR - PAGE_SIZE;
 		} else {
 			pr_debug("Intel Service Layer Driver: IOMMU Not Present\n");
+			ret = -ENODEV;
+			goto err_destroy_pool;
+		}
+
+		/* when controller->is_smmu_enabled is set to true the SDM remapper will be bypassed*/
+		controller->invoke_fn(INTEL_SIP_SMC_SDM_REMAPPER_CONFIG,
+				controller->is_smmu_enabled? DISABLE_REMAPPER: ENABLE_REMAPPER, 0, 0, 0, 0, 0, 0, &res);
+		if (res.a0 != INTEL_SIP_SMC_STATUS_OK) {
+			pr_info("Failed to configure remapper!\n");
 			ret = -ENODEV;
 			goto err_destroy_pool;
 		}
