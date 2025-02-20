@@ -1783,7 +1783,7 @@ static int dwxgmac3_est_configure(void __iomem *ioaddr, struct stmmac_est *cfg,
 	ctrl &= ~XGMAC_PTOV;
 	ctrl |= ((1000000000 / ptp_rate) * 9) << XGMAC_PTOV_SHIFT;
 	if (cfg->enable)
-		ctrl |= XGMAC_EEST | XGMAC_SSWL;
+		ctrl |= XGMAC_EEST | XGMAC_SSWL | XGMAC_DFBS;
 	else
 		ctrl &= ~XGMAC_EEST;
 
@@ -1829,6 +1829,11 @@ static void dwxgmac3_est_irq_status(void __iomem *ioaddr,
 
 		x->mtl_est_hlbs++;
 
+		for (i = 0; i < txqcnt; i++) {
+			if (value & BIT(i))
+				x->mtl_est_txq_hlbs[i]++;
+		}
+
 		/* Clear Interrupt */
 		writel(value, ioaddr + XGMAC_MTL_EST_SCH_ERR);
 
@@ -1844,17 +1849,17 @@ static void dwxgmac3_est_irq_status(void __iomem *ioaddr,
 		value = readl(ioaddr + XGMAC_MTL_EST_FRM_SZ_ERR);
 		feqn = value & txqcnt_mask;
 
-		for (i = 0; i < txqcnt; i++) {
-			if (feqn & BIT(i))
-				x->mtl_est_txq_hlbf[i]++;
-		}
-
 		value = readl(ioaddr + XGMAC_MTL_EST_FRM_SZ_CAP);
 		hbfq = (value & XGMAC_SZ_CAP_HBFQ_MASK(txqcnt))
 			>> XGMAC_SZ_CAP_HBFQ_SHIFT;
 		hbfs = value & XGMAC_SZ_CAP_HBFS_MASK;
 
 		x->mtl_est_hlbf++;
+
+		for (i = 0; i < txqcnt; i++) {
+			if (feqn & BIT(i))
+				x->mtl_est_txq_hlbf[i]++;
+		}
 
 		/* Clear Interrupt */
 		writel(feqn, ioaddr + XGMAC_MTL_EST_FRM_SZ_ERR);
@@ -1886,28 +1891,26 @@ static void dwxgmac3_est_irq_status(void __iomem *ioaddr,
 }
 
 static void dwxgmac3_fpe_configure(void __iomem *ioaddr, struct stmmac_fpe_cfg *cfg,
-				   u32 num_txq,
-				   u32 num_rxq, bool enable)
+				   u32 num_txq, u32 num_rxq, bool enable)
 {
 	u32 value;
 
-	if (!enable) {
-		value = readl(ioaddr + XGMAC_FPE_CTRL_STS);
+	if (enable) {
+		cfg->fpe_csr = XGMAC_EFPE;
 
-		value &= ~XGMAC_EFPE;
+		value = readl(ioaddr + XGMAC_MTL_FPE_CTRL_STS);
+		value |= FIELD_PREP(XGMAC_AFSZ, cfg->add_frag_size);
+		writel(value, ioaddr + XGMAC_MTL_FPE_CTRL_STS);
 
-		writel(value, ioaddr + XGMAC_FPE_CTRL_STS);
-		return;
+		value = readl(ioaddr + XGMAC_RXQ_CTRL1);
+		value &= ~XGMAC_RQ;
+		value |= (num_rxq - 1) << XGMAC_RQ_SHIFT;
+		writel(value, ioaddr + XGMAC_RXQ_CTRL1);
+	} else {
+		cfg->fpe_csr = 0;
 	}
 
-	value = readl(ioaddr + XGMAC_RXQ_CTRL1);
-	value &= ~XGMAC_RQ;
-	value |= (num_rxq - 1) << XGMAC_RQ_SHIFT;
-	writel(value, ioaddr + XGMAC_RXQ_CTRL1);
-
-	value = readl(ioaddr + XGMAC_FPE_CTRL_STS);
-	value |= XGMAC_EFPE;
-	writel(value, ioaddr + XGMAC_FPE_CTRL_STS);
+	writel(cfg->fpe_csr, ioaddr + XGMAC_FPE_CTRL_STS);
 }
 
 static void dwxgmac3_fpe_send_mpacket(void __iomem *ioaddr,
@@ -1931,6 +1934,9 @@ static int dwxgmac3_fpe_irq_status(void __iomem *ioaddr, struct net_device *dev)
 
 	status = FPE_EVENT_UNKNOWN;
 
+	/* Reads from the MAC_FPE_CTRL_STS register should only be performed
+	 * here, since the status flags of MAC_FPE_CTRL_STS are "clear on read"
+	 */
 	value = readl(ioaddr + XGMAC_FPE_CTRL_STS);
 
 	if (value & XGMAC_TRSP) {
@@ -1954,6 +1960,18 @@ static int dwxgmac3_fpe_irq_status(void __iomem *ioaddr, struct net_device *dev)
 	}
 
 	return status;
+}
+
+static void dwxgmac3_fpe_tcs_setup(void __iomem *ioaddr, u32 preemptible_tcs,
+				   u32 num_txq)
+{
+	u32 txqmask = (1 << num_txq) - 1;
+	u32 value;
+
+	value = readl(ioaddr + XGMAC_MTL_FPE_CTRL_STS);
+	value &= ~(txqmask << XGMAC_PEC_SHIFT);
+	value |= (preemptible_tcs & txqmask) << XGMAC_PEC_SHIFT;
+	writel(value, ioaddr + XGMAC_MTL_FPE_CTRL_STS);
 }
 
 const struct stmmac_ops dwxgmac210_ops = {
@@ -2007,6 +2025,7 @@ const struct stmmac_ops dwxgmac210_ops = {
 	.fpe_configure = dwxgmac3_fpe_configure,
 	.fpe_send_mpacket = dwxgmac3_fpe_send_mpacket,
 	.fpe_irq_status = dwxgmac3_fpe_irq_status,
+	.fpe_tcs_setup = dwxgmac3_fpe_tcs_setup,
 	.rx_hw_vlan = dwxgmac2_rx_hw_vlan,
 	.set_hw_vlan_mode = dwxgmac2_set_hw_vlan_mode,
 };
@@ -2129,7 +2148,8 @@ int dwxgmac2_setup(struct stmmac_priv *priv)
 		mac->mcast_bits_log2 = ilog2(mac->multicast_filter_bins);
 
 	mac->link.caps = MAC_ASYM_PAUSE | MAC_SYM_PAUSE |
-			 MAC_1000FD | MAC_2500FD | MAC_5000FD |
+			 MAC_10 | MAC_100 | MAC_1000FD |
+			 MAC_2500FD | MAC_5000FD |
 			 MAC_10000FD;
 	mac->link.duplex = 0;
 	mac->link.speed10 = XGMAC_CONFIG_SS_10_MII;

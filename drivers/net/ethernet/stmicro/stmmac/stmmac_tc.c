@@ -293,6 +293,7 @@ static int tc_init(struct stmmac_priv *priv)
 	} else {
 		memset(priv->plat->fpe_cfg, 0, sizeof(*priv->plat->fpe_cfg));
 	}
+	mutex_init(&priv->plat->fpe_cfg->lock);
 
 	/* Fail silently as we can still use remaining features, e.g. CBS */
 	if (!dma_cap->frpsel)
@@ -991,15 +992,62 @@ struct timespec64 stmmac_calc_tas_basetime(ktime_t old_base_time,
 	return time;
 }
 
-static int tc_setup_taprio(struct stmmac_priv *priv,
-			   struct tc_taprio_qopt_offload *qopt)
+static void tc_taprio_map_maxsdu_txq(struct stmmac_priv *priv,
+				     struct tc_taprio_qopt_offload *qopt)
+{
+	struct plat_stmmacenet_data *plat = priv->plat;
+	u32 num_tc = qopt->mqprio.qopt.num_tc;
+	u32 offset, count, i, j;
+
+	/* QueueMaxSDU received from the driver corresponds to the Linux traffic
+	 * class. Map queueMaxSDU per Linux traffic class to DWMAC Tx queues.
+	 */
+	for (i = 0; i < num_tc; i++) {
+		if (!qopt->max_sdu[i])
+			continue;
+
+		offset = qopt->mqprio.qopt.offset[i];
+		count = qopt->mqprio.qopt.count[i];
+
+		for (j = offset; j < offset + count; j++)
+			plat->est->max_sdu[j] = qopt->max_sdu[i] + ETH_HLEN - ETH_TLEN;
+	}
+}
+
+static u32 tc_mqprio_map_preempt_txq(struct tc_mqprio_qopt *qopt, u32 preempt_tcs)
+{
+	u32 preempt_txq = 0, offset, count, i, j;
+	u32 num_tc = qopt->num_tc;
+
+	/* preempt tcs received from the n/w stack corresponds to the Linux traffic
+	 * class. Map preempt mask per Linux traffic class to DWMAC Tx queues.
+	 */
+	for (i = 0; i < num_tc; i++) {
+		if (!(preempt_tcs & (1 << i)))
+			continue;
+
+		offset = qopt->offset[i];
+		count = qopt->count[i];
+
+		for (j = offset; j < offset + count; j++)
+			preempt_txq |= 1 << j;
+	}
+
+	return preempt_txq;
+}
+
+static int tc_taprio_configure(struct stmmac_priv *priv,
+			       struct tc_taprio_qopt_offload *qopt)
 {
 	u32 size, wid = priv->dma_cap.estwid, dep = priv->dma_cap.estdep;
-	struct plat_stmmacenet_data *plat = priv->plat;
+	u32 txqmask = (1 << priv->dma_cap.number_tx_queues) - 1;
 	struct timespec64 time, current_time, qopt_time;
+	struct plat_stmmacenet_data *plat = priv->plat;
+	struct stmmac_fpe_cfg *fpe_cfg = plat->fpe_cfg;
 	ktime_t current_time_ns;
 	bool fpe = false;
 	int i, ret = 0;
+	u32 txqpec;
 	u64 ctr;
 
 	if (qopt->base_time < 0)
@@ -1044,10 +1092,8 @@ static int tc_setup_taprio(struct stmmac_priv *priv,
 
 	if (qopt->cmd == TAPRIO_CMD_DESTROY)
 		goto disable;
-	else if (qopt->cmd != TAPRIO_CMD_REPLACE)
-		return -EOPNOTSUPP;
 
-	if (qopt->num_entries >= dep)
+	if (qopt->num_entries > dep)
 		return -EINVAL;
 	if (!qopt->cycle_time)
 		return -ERANGE;
@@ -1078,7 +1124,7 @@ static int tc_setup_taprio(struct stmmac_priv *priv,
 		s64 delta_ns = qopt->entries[i].interval;
 		u32 gates = qopt->entries[i].gate_mask;
 
-		if (delta_ns > GENMASK(wid, 0))
+		if (delta_ns >= BIT(wid))
 			return -ERANGE;
 		if (gates > GENMASK(31 - wid, 0))
 			return -ERANGE;
@@ -1105,6 +1151,37 @@ static int tc_setup_taprio(struct stmmac_priv *priv,
 		priv->plat->est->gates[i] = gates;
 	}
 
+	if (fpe) {
+		if (!priv->dma_cap.fpesel || !fpe_cfg) {
+			netdev_err(priv->dev, "Couldn't support premptible TxQ\n");
+			return -EINVAL;
+		}
+
+		txqpec = tc_mqprio_map_preempt_txq(&qopt->mqprio.qopt,
+						   qopt->mqprio.preemptible_tcs);
+
+		if (!txqpec) {
+			netdev_err(priv->dev, "FPE preemptible TxQ must not be 0\n");
+			return -EINVAL;
+		}
+
+		if (txqpec & ~txqmask) {
+			netdev_err(priv->dev, "FPE preemptible TxQ is out-of-bound\n");
+			return -EINVAL;
+		}
+
+		if (!(txqpec & BIT(0))) {
+			netdev_warn(priv->dev,
+				    "When EST and FPE ON, TxQ0 must not be express\n");
+			txqpec |= BIT(0);
+		}
+
+		netdev_info(priv->dev, "FPE: premptible TxQ = 0x%X\n", txqpec);
+	} else {
+		/* TxQs set as preemptive only if gates configured for Hold/Release */
+		txqpec = 0;
+	}
+
 	mutex_lock(&priv->est_lock);
 	/* Adjust for real system time */
 	priv->ptp_clock_ops.gettime64(&priv->ptp_clock_ops, &current_time);
@@ -1125,24 +1202,7 @@ static int tc_setup_taprio(struct stmmac_priv *priv,
 
 	priv->plat->est->ter = qopt->cycle_time_extension;
 
-	for (i = 0; i < plat->tx_queues_to_use; i++) {
-		if (qopt->max_sdu[i])
-			plat->est->max_sdu[i] = qopt->max_sdu[i] +
-						priv->dev->hard_header_len -
-						ETH_TLEN;
-		else
-			plat->est->max_sdu[i] = 0;
-	}
-
-	if (fpe && !priv->dma_cap.fpesel) {
-		mutex_unlock(&priv->est_lock);
-		return -EOPNOTSUPP;
-	}
-
-	/* Actual FPE register configuration will be done after FPE handshake
-	 * is success.
-	 */
-	priv->plat->fpe_cfg->enable = fpe;
+	tc_taprio_map_maxsdu_txq(priv, qopt);
 
 	ret = stmmac_est_configure(priv, priv->ioaddr, priv->plat->est,
 				   priv->plat->clk_ptp_rate);
@@ -1154,11 +1214,15 @@ static int tc_setup_taprio(struct stmmac_priv *priv,
 
 	netdev_info(priv->dev, "configured EST\n");
 
-	if (fpe) {
-		stmmac_fpe_handshake(priv, true);
-		netdev_info(priv->dev, "start FPE handshake\n");
+	if (priv->dma_cap.fpesel && fpe_cfg) {
+		mutex_lock(&fpe_cfg->lock);
+		fpe_cfg->premptibe_txq = txqpec;
+		/* FPE is active. Enable preemptible TxQs*/
+		if (priv->plat->fpe_cfg->tx_active)
+			stmmac_fpe_tcs_setup(priv, priv->ioaddr, txqpec,
+					     priv->plat->tx_queues_to_use);
+		mutex_unlock(&fpe_cfg->lock);
 	}
-
 	return 0;
 
 disable:
@@ -1167,21 +1231,132 @@ disable:
 		priv->plat->est->enable = false;
 		stmmac_est_configure(priv, priv->ioaddr, priv->plat->est,
 				     priv->plat->clk_ptp_rate);
+		/* Reset taprio status */
+		for (i = 0; i < priv->plat->tx_queues_to_use; i++) {
+			priv->xstats.max_sdu_txq_drop[i] = 0;
+			priv->xstats.mtl_est_txq_hlbf[i] = 0;
+			priv->xstats.mtl_est_txq_hlbs[i] = 0;
+		}
 		mutex_unlock(&priv->est_lock);
 	}
 
-	priv->plat->fpe_cfg->enable = false;
-	stmmac_fpe_configure(priv, priv->ioaddr,
-			     priv->plat->fpe_cfg,
-			     priv->plat->tx_queues_to_use,
-			     priv->plat->rx_queues_to_use,
-			     false);
-	netdev_info(priv->dev, "disabled FPE\n");
-
-	stmmac_fpe_handshake(priv, false);
-	netdev_info(priv->dev, "stop FPE handshake\n");
+	if (priv->dma_cap.fpesel && fpe_cfg) {
+		mutex_lock(&fpe_cfg->lock);
+		fpe_cfg->premptibe_txq = 0;
+		stmmac_fpe_tcs_setup(priv, priv->ioaddr, 0,
+				     priv->plat->tx_queues_to_use);
+		mutex_unlock(&fpe_cfg->lock);
+	}
 
 	return ret;
+}
+
+static void tc_taprio_stats(struct stmmac_priv *priv,
+			    struct tc_taprio_qopt_offload *qopt)
+{
+	u64 window_drops = 0;
+	int i = 0;
+
+	for (i = 0; i < priv->plat->tx_queues_to_use; i++)
+		window_drops += priv->xstats.max_sdu_txq_drop[i] +
+				priv->xstats.mtl_est_txq_hlbf[i] +
+				priv->xstats.mtl_est_txq_hlbs[i];
+	qopt->stats.window_drops = window_drops;
+
+	/* Transmission overrun doesn't happen for stmmac, hence always 0 */
+	qopt->stats.tx_overruns = 0;
+}
+
+static void tc_taprio_queue_stats(struct stmmac_priv *priv,
+				  struct tc_taprio_qopt_offload *qopt)
+{
+	struct tc_taprio_qopt_queue_stats *q_stats = &qopt->queue_stats;
+	int queue = qopt->queue_stats.queue;
+
+	q_stats->stats.window_drops = priv->xstats.max_sdu_txq_drop[queue] +
+				      priv->xstats.mtl_est_txq_hlbf[queue] +
+				      priv->xstats.mtl_est_txq_hlbs[queue];
+
+	/* Transmission overrun doesn't happen for stmmac, hence always 0 */
+	q_stats->stats.tx_overruns = 0;
+}
+
+static int tc_setup_taprio(struct stmmac_priv *priv,
+			   struct tc_taprio_qopt_offload *qopt)
+{
+	int err = 0;
+
+	switch (qopt->cmd) {
+	case TAPRIO_CMD_REPLACE:
+	case TAPRIO_CMD_DESTROY:
+		err = tc_taprio_configure(priv, qopt);
+		break;
+	case TAPRIO_CMD_STATS:
+		tc_taprio_stats(priv, qopt);
+		break;
+	case TAPRIO_CMD_QUEUE_STATS:
+		tc_taprio_queue_stats(priv, qopt);
+		break;
+	default:
+		err = -EOPNOTSUPP;
+	}
+
+	return err;
+}
+
+static int tc_setup_mqprio(struct stmmac_priv *priv,
+			   struct tc_mqprio_qopt_offload *qopt)
+{
+	struct stmmac_fpe_cfg *fpe_cfg = priv->plat->fpe_cfg;
+	struct tc_mqprio_qopt *mq_qopt = &qopt->qopt;
+	struct net_device *dev = priv->dev;
+	int num_tc = mq_qopt->num_tc;
+	int tc, err;
+	u32 txqpec;
+
+	if (!num_tc) {
+		netdev_reset_tc(dev);
+		if (priv->dma_cap.fpesel && fpe_cfg) {
+			mutex_lock(&fpe_cfg->lock);
+			fpe_cfg->premptibe_txq = 0;
+			stmmac_fpe_tcs_setup(priv, priv->ioaddr, 0,
+					     priv->plat->tx_queues_to_use);
+			mutex_unlock(&fpe_cfg->lock);
+		}
+		return 0;
+	}
+
+	err = netdev_set_num_tc(dev, num_tc);
+	if (err)
+		return err;
+
+	for (tc = 0; tc < num_tc; tc++) {
+		err = netdev_set_tc_queue(dev, tc, mq_qopt->count[tc],
+					  mq_qopt->offset[tc]);
+		if (err)
+			goto err_mqprio;
+	}
+
+	err = netif_set_real_num_tx_queues(dev, priv->plat->tx_queues_to_use);
+	if (err)
+		goto err_mqprio;
+
+	if (priv->dma_cap.fpesel && fpe_cfg) {
+		txqpec = tc_mqprio_map_preempt_txq(&qopt->qopt,
+						   qopt->preemptible_tcs);
+		mutex_lock(&fpe_cfg->lock);
+		fpe_cfg->premptibe_txq = txqpec;
+		if (fpe_cfg->tx_active)
+			stmmac_fpe_tcs_setup(priv, priv->ioaddr, txqpec,
+					     priv->plat->tx_queues_to_use);
+		mutex_unlock(&fpe_cfg->lock);
+	}
+
+	return 0;
+
+err_mqprio:
+	netdev_reset_tc(dev);
+	return err;
 }
 
 static int tc_setup_etf(struct stmmac_priv *priv,
@@ -1219,6 +1394,13 @@ static int tc_query_caps(struct stmmac_priv *priv,
 
 		return 0;
 	}
+	case TC_SETUP_QDISC_MQPRIO: {
+		struct tc_mqprio_caps *caps = base->caps;
+
+		caps->validate_queue_counts = true;
+
+		return 0;
+	}
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -1232,4 +1414,5 @@ const struct stmmac_tc_ops dwmac510_tc_ops = {
 	.setup_taprio = tc_setup_taprio,
 	.setup_etf = tc_setup_etf,
 	.query_caps = tc_query_caps,
+	.setup_mqprio = tc_setup_mqprio,
 };

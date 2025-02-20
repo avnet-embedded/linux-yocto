@@ -156,10 +156,11 @@ struct stmmac_txq_cfg {
 
 /* FPE link state */
 enum stmmac_fpe_state {
-	FPE_STATE_OFF = 0,
-	FPE_STATE_CAPABLE = 1,
-	FPE_STATE_ENTERING_ON = 2,
-	FPE_STATE_ON = 3,
+	FPE_VER_STATE_INITIAL = 0,
+	FPE_VER_STATE_VERIFYING = 1,
+	FPE_VER_STATE_SUCCEEDED = 2,
+	FPE_VER_STATE_FAILED = 3,
+	FPE_VER_STATE_DISABLED = 4,
 };
 
 /* FPE link-partner hand-shaking mPacket type */
@@ -174,11 +175,15 @@ enum stmmac_fpe_task_state_t {
 };
 
 struct stmmac_fpe_cfg {
-	bool enable;				/* FPE enable */
-	bool hs_enable;				/* FPE handshake enable */
-	enum stmmac_fpe_state lp_fpe_state;	/* Link Partner FPE state */
-	enum stmmac_fpe_state lo_fpe_state;	/* Local station FPE state */
+	bool tx_enable;				/* FPE tx enable */
+	bool verify_enable;			/* FPE verify enable*/
+	u32 add_frag_size;			/* FPE additional frag size */
+	u32 verify_time;			/* FPE verify time */
+	bool tx_active;				/* FPE tx active */
+	u32 premptibe_txq;			/* FPE preemptible TxQs */
+	enum stmmac_fpe_state fpe_state;	/* Local station FPE verify state */
 	u32 fpe_csr;				/* MAC_FPE_CTRL_STS reg cache */
+	struct mutex lock;			/* FPE lock */
 };
 
 struct stmmac_safety_feature_cfg {
@@ -287,6 +292,8 @@ struct plat_stmmacenet_data {
 	int (*crosststamp)(ktime_t *device, struct system_counterval_t *system,
 			   void *ctx);
 	void (*dump_debug_regs)(void *priv);
+	int (*pcs_init)(struct stmmac_priv *priv);
+	void (*pcs_exit)(struct stmmac_priv *priv);
 	void *bsp_priv;
 	struct clk *stmmac_clk;
 	struct clk *pclk;
