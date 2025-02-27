@@ -35,6 +35,14 @@
 	status = "disabled";
 };
 
+&serdes0 {
+	status = "okay";
+};
+
+&serdes1 {
+	status = "okay";
+};
+
 &gmac0 {
 	/* Before enabling SJA1110, set it to be "disabled" */
 	status = "okay";
