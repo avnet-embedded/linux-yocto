@@ -244,6 +244,54 @@ static int do_feature_check_for_tfa_apis(const u32 api_id, u32 *ret_payload)
 }
 
 /**
+ * do_feature_check_extended - Perform feature check for an API ID
+ *				 using extended SMCCC format.
+ * @api_id: API ID to be checked.
+ * @ret_payload: Pointer to store the firmware's response payload.
+ *
+ * Determines the appropriate API (PM_FEATURE_CHECK or PM_API_FEATURES) based on
+ * the module ID in the given API ID. Frames the arguments in the extended
+ * SMCCC format, executes the firmware call, and processes the result.
+ *
+ * Return:
+ * - 0 on success
+ * - -EOPNOTSUPP if the firmware call fails.
+ */
+static int do_feature_check_extended(const u32 api_id, u32 *ret_payload)
+{
+	int ret;
+	u64 smc_arg[2];
+	u32 module_id;
+	u32 feature_check_api_id;
+
+	module_id = FIELD_GET(MODULE_ID_MASK, api_id);
+
+	/*
+	 * Feature check of APIs belonging to PM and XSEM are handled by calling
+	 * PM_FEATURE_CHECK API. For other modules, call PM_API_FEATURES API.
+	 */
+	if (module_id == PM_MODULE_ID || module_id == XSEM_MODULE_ID)
+		feature_check_api_id = PM_FEATURE_CHECK;
+	else
+		feature_check_api_id = PM_API_FEATURES;
+
+	if (module_id == PM_MODULE_ID)
+		module_id = XPM_MODULE_ID;
+
+	/* Frame extended SMC format */
+	smc_arg[0] = PM_SIP_SVC | PASS_THROUGH_FW_CMD_ID;
+	smc_arg[1] = ((api_id & API_ID_MASK)  << 32) |
+		      FIELD_PREP(MODULE_ID_MASK, module_id) |
+		      feature_check_api_id;
+
+	ret = do_fw_call(ret_payload, 2, smc_arg[0], smc_arg[1]);
+	if (ret)
+		return -EOPNOTSUPP;
+
+	return ret_payload[1];
+}
+
+/**
  * do_feature_check_basic - Perform feature check for an API ID with
  *			    basic SMC format.
  * @api_id: API ID to be checked.
@@ -416,6 +464,8 @@ EXPORT_SYMBOL_GPL(zynqmp_pm_is_function_supported);
  * @pm_api_id:		Requested PM-API call
  * @ret_payload:	Returned value array
  * @num_args:		Number of arguments to requested PM-API call
+ * @arg_list:		va_list initialized with va_start, containing arguments passed
+ *			to the firmware.
  *
  * Invoke platform management function for SMC or HVC call, depending on
  * configuration.
@@ -432,7 +482,8 @@ EXPORT_SYMBOL_GPL(zynqmp_pm_is_function_supported);
  *
  * Return: Returns status, either success or error+reason
  */
-int __zynqmp_pm_fw_call_extended(u32 pm_api_id, u32 *ret_payload, u32 num_args, ...)
+static int __zynqmp_pm_fw_call_extended(u32 pm_api_id, u32 *ret_payload,
+					u32 num_args, va_list *arg_list)
 {
 	/*
 	 * Added SIP service call Function Identifier
@@ -440,7 +491,6 @@ int __zynqmp_pm_fw_call_extended(u32 pm_api_id, u32 *ret_payload, u32 num_args, 
 	 */
 	u64 smc_arg[SMC_ARG_CNT_64];
 	int ret, i;
-	va_list arg_list;
 	u32 args[SMC_ARG_CNT_32] = {0};
 	u32 module_id;
 
@@ -459,12 +509,8 @@ int __zynqmp_pm_fw_call_extended(u32 pm_api_id, u32 *ret_payload, u32 num_args, 
 	if (ret < 0)
 		return ret;
 
-	va_start(arg_list, num_args);
-
 	for (i = 0; i < num_args; i++)
-		args[i] = va_arg(arg_list, u32);
-
-	va_end(arg_list);
+		args[i] = va_arg(*arg_list, u32);
 
 	module_id = FIELD_GET(PLM_MODULE_ID_MASK, pm_api_id);
 
@@ -479,6 +525,33 @@ int __zynqmp_pm_fw_call_extended(u32 pm_api_id, u32 *ret_payload, u32 num_args, 
 
 	return do_fw_call(ret_payload, 8, smc_arg[0], smc_arg[1], smc_arg[2], smc_arg[3],
 			  smc_arg[4], smc_arg[5], smc_arg[6], smc_arg[7]);
+}
+
+/**
+ * zynqmp_pm_fw_call_extended - Invoke a PM function with variable arguments
+ * @pm_api_id: ID of the PM API to be called
+ * @ret_payload: Pointer to the buffer for storing the return payload
+ * @num_args: Number of arguments to pass to the PM API function
+ *
+ * This function serves as a wrapper around zynqmp_pm_invoke_fn_extended(),
+ * facilitating the invocation of platform management (PM) functions that
+ * require an extended SMC (Secure Monitor Call) format with variable
+ * arguments. Specifically, the PM_QUERY_DATA API necessitates this extended
+ * payload format, making it essential to retain zynqmp_pm_fw_call_extended
+ * with variable arguments.
+ *
+ * Return: 0 on success; a negative error code on failure.
+ */
+int zynqmp_pm_fw_call_extended(u32 pm_api_id, u32 *ret_payload, u32 num_args, ...)
+{
+	va_list arg_list;
+	int ret;
+
+	va_start(arg_list, num_args);
+	ret = __zynqmp_pm_fw_call_extended(pm_api_id, ret_payload,
+					   num_args, &arg_list);
+	va_end(arg_list);
+	return ret;
 }
 
 /**
@@ -804,6 +877,12 @@ static void zynqmp_firmware_sync_state(struct device *dev)
 		dev_warn(dev, "failed to release power management to firmware\n");
 }
 
+static const struct platform_fw_data platform_fw_data_versal2 = {
+	.do_feature_check = do_feature_check_extended,
+	.zynqmp_pm_fw_call = __zynqmp_pm_fw_call_extended,
+	.family_code = PM_VERSAL2_FAMILY_CODE,
+};
+
 static const struct platform_fw_data platform_fw_data_versal = {
 	.do_feature_check = do_feature_check_basic,
 	.zynqmp_pm_fw_call = __zynqmp_pm_fw_call_basic,
@@ -826,6 +905,7 @@ static const struct of_device_id zynqmp_firmware_of_match[] = {
 	{.compatible = "xlnx,zynqmp-firmware", .data = &platform_fw_data_zynqmp},
 	{.compatible = "xlnx,versal-firmware", .data = &platform_fw_data_versal},
 	{.compatible = "xlnx,versal-net-firmware", .data = &platform_fw_data_versal_net},
+	{.compatible = "xlnx,versal2-firmware",	.data = &platform_fw_data_versal2},
 	{},
 };
 MODULE_DEVICE_TABLE(of, zynqmp_firmware_of_match);

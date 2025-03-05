@@ -58,6 +58,7 @@
 #define PM_ZYNQMP_FAMILY_CODE 0x1 /* ZynqMP family code */
 #define PM_VERSAL_FAMILY_CODE 0x2 /* Versal family code */
 #define PM_VERSAL_NET_FAMILY_CODE 0x3 /* Versal NET family code */
+#define PM_VERSAL2_FAMILY_CODE 0x4 /* Versal Gen 2 family code */
 
 #define API_ID_MASK		GENMASK(7, 0)
 #define MODULE_ID_MASK		GENMASK(11, 8)
@@ -555,7 +556,7 @@ struct zynqmp_devinfo {
 };
 
 int zynqmp_pm_invoke_fn(u32 pm_api_id, u32 *ret_payload, u32 num_args, ...);
-int __zynqmp_pm_fw_call_extended(u32 pm_api_id, u32 *ret_payload, u32 num_args, ...);
+int zynqmp_pm_fw_call_extended(u32 pm_api_id, u32 *ret_payload, u32 num_args, ...);
 int zynqmp_firmware_pm_sysfs_entry(struct platform_device *pdev);
 
 #if IS_REACHABLE(CONFIG_ZYNQMP_FIRMWARE)
