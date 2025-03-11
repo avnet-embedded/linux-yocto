@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-only OR MIT
 /*
  * Device Tree Source for J721S2 SoC Family MCU/WAKEUP Domain peripherals
  *
- * Copyright (C) 2021 Texas Instruments Incorporated - https://www.ti.com/
+ * Copyright (C) 2021-2024 Texas Instruments Incorporated - https://www.ti.com/
  */
 
 &cbass_mcu_wakeup {
@@ -631,6 +631,7 @@
 			cdns,fifo-depth = <256>;
 			cdns,fifo-width = <4>;
 			cdns,trigger-address = <0x0>;
+			cdns,phase-detect-selector = <2>;
 			clocks = <&k3_clks 109 5>;
 			assigned-clocks = <&k3_clks 109 5>;
 			assigned-clock-parents = <&k3_clks 109 7>;
@@ -650,6 +651,7 @@
 			cdns,fifo-depth = <256>;
 			cdns,fifo-width = <4>;
 			cdns,trigger-address = <0x0>;
+			cdns,phase-detect-selector = <2>;
 			clocks = <&k3_clks 110 5>;
 			power-domains = <&k3_pds 110 TI_SCI_PD_EXCLUSIVE>;
 			#address-cells = <1>;
