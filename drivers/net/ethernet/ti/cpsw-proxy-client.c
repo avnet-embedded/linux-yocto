@@ -15,7 +15,9 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/rpmsg.h>
+#include <linux/sys_soc.h>
 #include <linux/dma/k3-udma-glue.h>
+#include <linux/netdevice.h>
 
 #include "ethfw_abi.h"
 #include "k3-cppi-desc-pool.h"
@@ -31,6 +33,8 @@
 
 #define MIN_PACKET_SIZE	ETH_ZLEN
 #define MAX_PACKET_SIZE	(VLAN_ETH_FRAME_LEN + ETH_FCS_LEN)
+
+#define MAX_VLAN_ID	4096
 
 #define CHAN_NAME_LEN	128
 
@@ -109,6 +113,7 @@ struct virtual_port {
 	struct rx_dma_chan		*rx_chans;
 	struct tx_dma_chan		*tx_chans;
 	struct netdev_hw_addr_list	mcast_list;
+	struct netdev_hw_addr_list	vlan_mcast_list[MAX_VLAN_ID];
 	struct workqueue_struct		*vport_wq;
 	struct work_struct		rx_mode_work;
 	struct completion		tdown_complete;
@@ -305,6 +310,7 @@ static int create_request_message(struct cpsw_proxy_req_params *req_params)
 	struct rx_flow_alloc_request *rx_alloc_req;
 	struct message *msg = &req_params->req_msg;
 	struct mac_release_request *mac_free_req;
+	struct vlan_join_leave_request *vlan_req;
 	struct attach_request *attach_req;
 	u32 req_type;
 
@@ -393,6 +399,17 @@ static int create_request_message(struct cpsw_proxy_req_params *req_params)
 		req_msg_hdr = &mcast_del_req->request_msg_hdr;
 		ether_addr_copy(mcast_del_req->mac_addr, req_params->mac_addr);
 		mcast_del_req->vlan_id = req_params->vlan_id;
+		break;
+
+	case ETHFW_JOIN_VLAN:
+	case ETHFW_LEAVE_VLAN:
+		vlan_req = (struct vlan_join_leave_request *)msg;
+		req_msg_hdr = &vlan_req->request_msg_hdr;
+
+		vlan_req->vid = req_params->vlan_id;
+		ether_addr_copy(vlan_req->mac_addr, req_params->mac_addr);
+		vlan_req->rx_flow_idx_base = req_params->rx_flow_base;
+		vlan_req->rx_flow_idx_offset = req_params->rx_flow_offset;
 		break;
 
 	case ETHFW_ALLOC_MAC:
@@ -1554,18 +1571,28 @@ static void vport_rx_cleanup(void *data, dma_addr_t desc_dma)
 
 static int vport_add_mcast(struct net_device *ndev, const u8 *addr)
 {
-	struct virtual_port *vport = vport_ndev_to_vport(ndev);
-	struct cpsw_proxy_priv *proxy_priv = vport->proxy_priv;
-	struct rx_dma_chan *rx_chn = &vport->rx_chans[0];
 	struct cpsw_proxy_req_params *req_p;
+	struct cpsw_proxy_priv *proxy_priv;
+	struct net_device *vport_ndev;
+	struct rx_dma_chan *rx_chn;
+	struct virtual_port *vport;
 	struct message resp_msg;
 	int ret;
+
+	if (is_vlan_dev(ndev))
+		vport_ndev = vlan_dev_real_dev(ndev);
+	else
+		vport_ndev = ndev;
+
+	vport = vport_ndev_to_vport(vport_ndev);
+	proxy_priv = vport->proxy_priv;
+	rx_chn = &vport->rx_chans[0];
 
 	mutex_lock(&proxy_priv->req_params_mutex);
 	req_p = &proxy_priv->req_params;
 	req_p->request_type = ETHFW_MCAST_FILTER_ADD;
 	req_p->token = vport->port_token;
-	req_p->vlan_id = ETHFW_DFLT_VLAN;
+	req_p->vlan_id = is_vlan_dev(ndev) ? vlan_dev_vlan_id(ndev) : ETHFW_DFLT_VLAN;
 	req_p->rx_flow_base = rx_chn->flow_base;
 	req_p->rx_flow_offset = rx_chn->flow_offset;
 	ether_addr_copy(req_p->mac_addr, addr);
@@ -1588,17 +1615,26 @@ static int vport_add_mcast(struct net_device *ndev, const u8 *addr)
 
 static int vport_del_mcast(struct net_device *ndev, const u8 *addr)
 {
-	struct virtual_port *vport = vport_ndev_to_vport(ndev);
-	struct cpsw_proxy_priv *proxy_priv = vport->proxy_priv;
 	struct cpsw_proxy_req_params *req_p;
+	struct cpsw_proxy_priv *proxy_priv;
+	struct net_device *vport_ndev;
+	struct virtual_port *vport;
 	struct message resp_msg;
 	int ret;
+
+	if (is_vlan_dev(ndev))
+		vport_ndev = vlan_dev_real_dev(ndev);
+	else
+		vport_ndev = ndev;
+
+	vport = vport_ndev_to_vport(vport_ndev);
+	proxy_priv = vport->proxy_priv;
 
 	mutex_lock(&proxy_priv->req_params_mutex);
 	req_p = &proxy_priv->req_params;
 	req_p->request_type = ETHFW_MCAST_FILTER_DEL;
 	req_p->token = vport->port_token;
-	req_p->vlan_id = ETHFW_DFLT_VLAN;
+	req_p->vlan_id = is_vlan_dev(ndev) ? vlan_dev_vlan_id(ndev) : ETHFW_DFLT_VLAN;
 	ether_addr_copy(req_p->mac_addr, addr);
 	ret = send_request_get_response(proxy_priv, &resp_msg);
 	mutex_unlock(&proxy_priv->req_params_mutex);
@@ -1616,6 +1652,27 @@ static int vport_del_mcast(struct net_device *ndev, const u8 *addr)
 	return 0;
 }
 
+static int vport_update_vlan_mcast(struct net_device *vdev, int vid,
+				   void *args)
+{
+	struct net_device *vport_ndev;
+	struct virtual_port *vport;
+
+	if (!vdev || !vid)
+		return 0;
+
+	vport_ndev = vlan_dev_real_dev(vdev);
+	vport = vport_ndev_to_vport(vport_ndev);
+
+	netif_addr_lock_bh(vdev);
+	__hw_addr_sync_multiple(&vport->vlan_mcast_list[vid], &vdev->mc, vdev->addr_len);
+	netif_addr_unlock_bh(vdev);
+
+	__hw_addr_sync_dev(&vport->vlan_mcast_list[vid], vdev,
+			   vport_add_mcast, vport_del_mcast);
+
+	return 0;
+}
 static void vport_stop(struct virtual_port *vport)
 {
 	struct cpsw_proxy_priv *proxy_priv = vport->proxy_priv;
@@ -1982,17 +2039,25 @@ static void vport_ndo_tx_timeout(struct net_device *ndev, unsigned int txqueue)
 static void vport_set_rx_mode_work(struct work_struct *work)
 {
 	struct virtual_port *vport = container_of(work, struct virtual_port, rx_mode_work);
-	struct net_device *ndev;
+	struct net_device *ndev = vport->ndev;
+
+	if (unlikely(ndev->flags & IFF_PROMISC)) {
+		netdev_err(ndev, "promiscuous mode is not supported\n");
+		return;
+	}
 
 	if (likely(vport->port_features & ETHFW_MCAST_FILTERING)) {
-		ndev = vport->ndev;
-
 		netif_addr_lock_bh(ndev);
 		__hw_addr_sync(&vport->mcast_list, &ndev->mc, ndev->addr_len);
 		netif_addr_unlock_bh(ndev);
 
 		__hw_addr_sync_dev(&vport->mcast_list, ndev,
 				   vport_add_mcast, vport_del_mcast);
+
+		if (rtnl_trylock()) {
+			vlan_for_each(ndev, vport_update_vlan_mcast, NULL);
+			rtnl_unlock();
+		}
 	}
 }
 
@@ -2004,6 +2069,94 @@ static void vport_set_rx_mode(struct net_device *ndev)
 		queue_work(vport->vport_wq, &vport->rx_mode_work);
 }
 
+static int vport_add_vid(struct net_device *ndev, __be16 proto, u16 vid)
+{
+	struct virtual_port *vport = vport_ndev_to_vport(ndev);
+	struct cpsw_proxy_priv *proxy_priv = vport->proxy_priv;
+	struct rx_dma_chan *rx_chn = &vport->rx_chans[0];
+	struct cpsw_proxy_req_params *req_p;
+	struct message resp_msg;
+	int ret;
+
+	if (!netif_running(ndev) || !vid)
+		return 0;
+
+	mutex_lock(&proxy_priv->req_params_mutex);
+	req_p = &proxy_priv->req_params;
+	req_p->request_type = ETHFW_JOIN_VLAN;
+	req_p->token = vport->port_token;
+	req_p->vlan_id = vid;
+	req_p->rx_flow_base = rx_chn->flow_base;
+	req_p->rx_flow_offset = rx_chn->flow_offset;
+	ether_addr_copy(req_p->mac_addr, vport->mac_addr);
+	ret = send_request_get_response(proxy_priv, &resp_msg);
+	mutex_unlock(&proxy_priv->req_params_mutex);
+
+	if (ret) {
+		ret = -EINVAL;
+		dev_err(proxy_priv->dev, "failed to add VLAN: %u err: %d\n", vid, ret);
+	}
+
+	__hw_addr_init(&vport->vlan_mcast_list[vid]);
+
+	return ret;
+}
+
+static int vport_free_vlan_mcast(struct net_device *vdev, int vid,
+				 void *args)
+{
+	struct net_device *vport_ndev;
+	struct virtual_port *vport;
+	u16 *target_vid = args;
+
+	if (vid != *target_vid)
+		return 0;
+
+	vport_ndev = vlan_dev_real_dev(vdev);
+	vport = vport_ndev_to_vport(vport_ndev);
+
+	__hw_addr_unsync_dev(&vport->vlan_mcast_list[vid], vdev,
+			     vport_del_mcast);
+
+	return 0;
+}
+
+static int vport_del_vid(struct net_device *ndev, __be16 proto, u16 vid)
+{
+	struct virtual_port *vport = vport_ndev_to_vport(ndev);
+	struct cpsw_proxy_priv *proxy_priv = vport->proxy_priv;
+	struct rx_dma_chan *rx_chn = &vport->rx_chans[0];
+	struct cpsw_proxy_req_params *req_p;
+	struct message resp_msg;
+	int ret;
+
+	if (!netif_running(ndev) || !vid)
+		return 0;
+
+	if (rtnl_trylock()) {
+		vlan_for_each(ndev, vport_free_vlan_mcast, &vid);
+		rtnl_unlock();
+	}
+
+	mutex_lock(&proxy_priv->req_params_mutex);
+	req_p = &proxy_priv->req_params;
+	req_p->request_type = ETHFW_LEAVE_VLAN;
+	req_p->token = vport->port_token;
+	req_p->vlan_id = vid;
+	req_p->rx_flow_base = rx_chn->flow_base;
+	req_p->rx_flow_offset = rx_chn->flow_offset;
+	ether_addr_copy(req_p->mac_addr, vport->mac_addr);
+	ret = send_request_get_response(proxy_priv, &resp_msg);
+	mutex_unlock(&proxy_priv->req_params_mutex);
+
+	if (ret) {
+		ret = -EINVAL;
+		dev_err(proxy_priv->dev, "failed to delete VLAN: %u err: %d\n", vid, ret);
+	}
+
+	return ret;
+}
+
 static const struct net_device_ops cpsw_proxy_client_netdev_ops = {
 	.ndo_open		= vport_ndo_open,
 	.ndo_stop		= vport_ndo_stop,
@@ -2013,6 +2166,8 @@ static const struct net_device_ops cpsw_proxy_client_netdev_ops = {
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_set_mac_address	= eth_mac_addr,
 	.ndo_set_rx_mode	= vport_set_rx_mode,
+	.ndo_vlan_rx_add_vid	= vport_add_vid,
+	.ndo_vlan_rx_kill_vid	= vport_del_vid,
 };
 
 static int init_netdev(struct cpsw_proxy_priv *proxy_priv, struct virtual_port *vport)
@@ -2042,7 +2197,7 @@ static int init_netdev(struct cpsw_proxy_priv *proxy_priv, struct virtual_port *
 	vport->ndev->min_mtu = MIN_PACKET_SIZE;
 	vport->ndev->max_mtu = MAX_PACKET_SIZE;
 	vport->ndev->hw_features = NETIF_F_SG | NETIF_F_RXCSUM;
-	vport->ndev->features = vport->ndev->hw_features;
+	vport->ndev->features = vport->ndev->hw_features | NETIF_F_HW_VLAN_CTAG_FILTER;
 	vport->ndev->vlan_features |= NETIF_F_SG;
 	vport->ndev->netdev_ops = &cpsw_proxy_client_netdev_ops;
 	vport->ndev->ethtool_ops = &cpsw_proxy_client_ethtool_ops;
@@ -2361,8 +2516,28 @@ static void show_info(struct cpsw_proxy_priv *proxy_priv)
 	}
 }
 
+struct client_soc_data {
+	const char	*dma_compatible;
+};
+
+static const struct client_soc_data j721e_soc_data = {
+	.dma_compatible = "ti,j721e-navss-main-udmap",
+};
+
+static const struct client_soc_data am62px_soc_data = {
+	.dma_compatible = "ti,am64-dmss-pktdma",
+};
+
+static const struct soc_device_attribute soc_dma_type[] = {
+	{ .family = "J7200", .data = &j721e_soc_data },
+	{ .family = "J721E", .data = &j721e_soc_data },
+	{ .family = "J784S4", .data = &j721e_soc_data },
+	{ .family = "AM62PX", .data = &am62px_soc_data },
+};
+
 static int cpsw_proxy_client_probe(struct rpmsg_device *rpdev)
 {
+	const struct soc_device_attribute *soc_match_data;
 	struct cpsw_proxy_priv *proxy_priv;
 	int ret;
 
@@ -2372,8 +2547,18 @@ static int cpsw_proxy_client_probe(struct rpmsg_device *rpdev)
 
 	proxy_priv->rpdev = rpdev;
 	proxy_priv->dev = &rpdev->dev;
-	proxy_priv->dma_node = of_find_compatible_node(NULL, NULL,
-						       (const char *)rpdev->id.driver_data);
+	soc_match_data = soc_device_match(soc_dma_type);
+	if (soc_match_data && soc_match_data->data) {
+		const struct client_soc_data *socdata = soc_match_data->data;
+
+		proxy_priv->dma_node =
+			of_find_compatible_node(NULL, NULL,
+						socdata->dma_compatible);
+	} else {
+		dev_err(proxy_priv->dev, "SoC not supported\n");
+		return -ENODEV;
+	}
+
 	dev_set_drvdata(proxy_priv->dev, proxy_priv);
 	dev_dbg(proxy_priv->dev, "driver probed\n");
 
@@ -2444,7 +2629,6 @@ static void cpsw_proxy_client_remove(struct rpmsg_device *rpdev)
 static struct rpmsg_device_id cpsw_proxy_client_id_table[] = {
 	{
 		.name = ETHFW_SERVICE_EP_NAME,
-		.driver_data = (kernel_ulong_t)"ti,j721e-navss-main-udmap",
 	},
 	{},
 };

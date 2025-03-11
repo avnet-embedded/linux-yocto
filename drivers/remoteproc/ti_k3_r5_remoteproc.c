@@ -266,10 +266,6 @@ static void k3_r5_rproc_mbox_callback(struct mbox_client *client, void *data)
 	const char *name = kproc->rproc->name;
 	u32 msg = omap_mbox_message(data);
 
-	/* Do not forward message from a detached core */
-	if (kproc->rproc->state == RPROC_DETACHED)
-		return;
-
 	dev_dbg(dev, "mbox msg: 0x%x\n", msg);
 
 	switch (msg) {
@@ -320,10 +316,6 @@ static void k3_r5_rproc_kick(struct rproc *rproc, int vqid)
 	mbox_msg_t msg = (mbox_msg_t)vqid;
 	int ret;
 
-	/* Do not forward message to a detached core */
-	if (kproc->rproc->state == RPROC_DETACHED)
-		return;
-
 	/* send the index of the triggered virtqueue in the mailbox payload */
 	ret = mbox_send_message(kproc->mbox, (void *)msg);
 	if (ret < 0)
@@ -340,15 +332,6 @@ static int k3_r5_split_reset(struct k3_r5_core *core)
 		dev_err(core->dev, "local-reset assert failed, ret = %d\n",
 			ret);
 		return ret;
-	}
-
-	ret = core->ti_sci->ops.dev_ops.put_device(core->ti_sci,
-						   core->ti_sci_id);
-	if (ret) {
-		dev_err(core->dev, "module-reset assert failed, ret = %d\n",
-			ret);
-		if (reset_control_deassert(core->reset))
-			dev_warn(core->dev, "local-reset deassert back failed\n");
 	}
 
 	return ret;
@@ -842,7 +825,7 @@ static int k3_r5_rproc_stop(struct rproc *rproc)
 	struct k3_r5_rproc *kproc = rproc->priv;
 	struct k3_r5_cluster *cluster = kproc->cluster;
 	struct device *dev = kproc->dev;
-	struct k3_r5_core *core1, *core = kproc->core;
+	struct k3_r5_core *core = kproc->core;
 	unsigned long msg = RP_MBOX_SHUTDOWN;
 	int ret;
 	u32 stat = 0;
@@ -863,15 +846,6 @@ static int k3_r5_rproc_stop(struct rproc *rproc)
 			return 0;
 		}
 
-		/* do not allow core 0 to stop before core 1 */
-		core1 = list_last_entry(&cluster->cores, struct k3_r5_core,
-					elem);
-		if (core != core1 && core1->rproc->state != RPROC_OFFLINE) {
-			dev_err(dev, "%s: can not stop core 0 before core 1\n",
-				__func__);
-			ret = -EPERM;
-			goto out;
-		}
 		reinit_completion(&kproc->shut_comp);
 		ret = mbox_send_message(kproc->mbox, (void *)msg);
 		if (ret < 0) {
@@ -1474,8 +1448,8 @@ static int k3_r5_cluster_rproc_init(struct platform_device *pdev)
 			goto out;
 		}
 
-		rproc = rproc_alloc(cdev, dev_name(cdev), &k3_r5_rproc_ops,
-				    fw_name, sizeof(*kproc));
+		rproc = devm_rproc_alloc(cdev, dev_name(cdev), &k3_r5_rproc_ops,
+					 fw_name, sizeof(*kproc));
 		if (!rproc) {
 			ret = -ENOMEM;
 			goto out;
@@ -1505,7 +1479,7 @@ static int k3_r5_cluster_rproc_init(struct platform_device *pdev)
 
 		ret = k3_r5_rproc_configure_mode(kproc);
 		if (ret < 0)
-			goto err_config;
+			goto out;
 		if (ret)
 			goto init_rmem;
 
@@ -1513,7 +1487,7 @@ static int k3_r5_cluster_rproc_init(struct platform_device *pdev)
 		if (ret) {
 			dev_err(dev, "initial configure failed, ret = %d\n",
 				ret);
-			goto err_config;
+			goto out;
 		}
 
 		init_completion(&kproc->shut_comp);
@@ -1525,7 +1499,7 @@ init_rmem:
 		if (ret) {
 			dev_err(dev, "reserved memory init failed, ret = %d\n",
 				ret);
-			goto err_config;
+			goto out;
 		}
 
 		ret = rproc_add(rproc);
@@ -1579,9 +1553,6 @@ err_powerup:
 	rproc_del(rproc);
 err_add:
 	k3_r5_reserved_mem_exit(kproc);
-err_config:
-	rproc_free(rproc);
-	core->rproc = NULL;
 out:
 	/* undo core0 upon any failures on core1 in split-mode */
 	if (cluster->mode == CLUSTER_MODE_SPLIT && core == core1) {
@@ -1629,8 +1600,6 @@ static void k3_r5_cluster_rproc_exit(void *data)
 
 		k3_r5_reserved_mem_exit(kproc);
 		unregister_pm_notifier(&kproc->pm_notifier);
-		rproc_free(rproc);
-		core->rproc = NULL;
 	}
 }
 

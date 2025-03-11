@@ -334,10 +334,6 @@ static int csi2rx_start(struct csi2rx_priv *csi2rx)
 
 	reset_control_deassert(csi2rx->sys_rst);
 
-	ret = v4l2_subdev_call(csi2rx->source_subdev, video, s_stream, true);
-	if (ret)
-		goto err_disable_pixclk;
-
 	clk_disable_unprepare(csi2rx->p_clk);
 
 	return 0;
@@ -679,6 +675,8 @@ static int csi2rx_get_frame_desc(struct v4l2_subdev *subdev, unsigned int pad,
 	ret = csi2rx_get_frame_desc_from_source(csi2rx, &source_fd);
 	if (ret)
 		return ret;
+
+	memset(fd, 0, sizeof(*fd));
 
 	fd->type = V4L2_MBUS_FRAME_DESC_TYPE_CSI2;
 
