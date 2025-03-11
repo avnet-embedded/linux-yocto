@@ -1296,8 +1296,8 @@ static int adv7511_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 
 	ret = adv7511_init_regulators(adv7511);
 	if (ret) {
-		dev_err(dev, "failed to init regulators\n");
-		return ret;
+		dev_err_probe(dev, ret, "failed to init regulators\n");
+		goto err_of_node_put;
 	}
 
 	if (adv7511->addr_cec != 0)
@@ -1417,8 +1417,7 @@ static int adv7511_probe(struct i2c_client *i2c, const struct i2c_device_id *id)
 err_unregister_cec:
 	cec_unregister_adapter(adv7511->cec_adap);
 	i2c_unregister_device(adv7511->i2c_cec);
-	if (adv7511->cec_clk)
-		clk_disable_unprepare(adv7511->cec_clk);
+	clk_disable_unprepare(adv7511->cec_clk);
 err_i2c_unregister_packet:
 	i2c_unregister_device(adv7511->i2c_packet);
 err_i2c_unregister_edid:
@@ -1458,6 +1457,8 @@ uninit_regulators:
 			 remote_node->full_name);
 	}
 #endif
+err_of_node_put:
+	of_node_put(adv7511->host_node);
 
 	return ret;
 }
@@ -1469,6 +1470,7 @@ static int adv7511_remove(struct i2c_client *i2c)
 	i2c_unregister_device(adv7511->i2c_cec);
 	if (adv7511->cec_clk)
 		clk_disable_unprepare(adv7511->cec_clk);
+	of_node_put(adv7511->host_node);
 
 	adv7511_uninit_regulators(adv7511);
 
@@ -1477,6 +1479,8 @@ static int adv7511_remove(struct i2c_client *i2c)
 	adv7511_audio_exit(adv7511);
 
 	cec_unregister_adapter(adv7511->cec_adap);
+	i2c_unregister_device(adv7511->i2c_cec);
+	clk_disable_unprepare(adv7511->cec_clk);
 
 	i2c_unregister_device(adv7511->i2c_packet);
 	i2c_unregister_device(adv7511->i2c_edid);
