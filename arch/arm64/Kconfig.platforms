@@ -410,7 +410,6 @@ config SOC_S32CC
 	select MULTIPLEXER
 	select NXP_GLOBAL_TIME_STM
 	select MUX_MMIO
-	select NXP_ERRATUM_ERR050543
 	select PHY_S32CC_SERDES
 
 menu "STM timer used as system timer"
