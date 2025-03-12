@@ -261,7 +261,8 @@ config ARCH_LAYERSCAPE
 
 config HAVE_IMX_BUSFREQ
 	bool "i.MX8 busfreq"
-	default ARCH_MXC
+	depends on ARCH_MXC
+	default y
 
 config ARCH_MXC
 	bool "NXP i.MX SoC family"
