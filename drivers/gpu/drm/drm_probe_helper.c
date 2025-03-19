@@ -810,7 +810,6 @@ static bool check_connector_changed(struct drm_connector *connector)
 	struct drm_device *dev = connector->dev;
 	enum drm_connector_status old_status;
 	u64 old_epoch_counter;
-	bool changed = false;
 
 	/* Only handle HPD capable connectors. */
 	drm_WARN_ON(dev, !(connector->polled & DRM_CONNECTOR_POLL_HPD));
@@ -819,32 +818,30 @@ static bool check_connector_changed(struct drm_connector *connector)
 
 	old_status = connector->status;
 	old_epoch_counter = connector->epoch_counter;
-
-	drm_dbg_kms(dev, "[CONNECTOR:%d:%s] Old epoch counter %llu\n",
-		    connector->base.id,
-		    connector->name,
-		    old_epoch_counter);
-
 	connector->status = drm_helper_probe_detect(connector, NULL, false);
+
+	if (old_epoch_counter == connector->epoch_counter) {
+		drm_dbg_kms(dev, "[CONNECTOR:%d:%s] Same epoch counter %llu\n",
+			    connector->base.id,
+			    connector->name,
+			    connector->epoch_counter);
+
+		return false;
+	}
+
 	drm_dbg_kms(dev, "[CONNECTOR:%d:%s] status updated from %s to %s\n",
 		    connector->base.id,
 		    connector->name,
 		    drm_get_connector_status_name(old_status),
 		    drm_get_connector_status_name(connector->status));
 
-	drm_dbg_kms(dev, "[CONNECTOR:%d:%s] New epoch counter %llu\n",
+	drm_dbg_kms(dev, "[CONNECTOR:%d:%s] Changed epoch counter %llu => %llu\n",
 		    connector->base.id,
 		    connector->name,
+		    old_epoch_counter,
 		    connector->epoch_counter);
 
-	/*
-	 * Check if epoch counter had changed, meaning that we need
-	 * to send a uevent.
-	 */
-	if (old_epoch_counter != connector->epoch_counter)
-		changed = true;
-
-	return changed;
+	return true;
 }
 
 /**
@@ -864,6 +861,9 @@ static bool check_connector_changed(struct drm_connector *connector)
  *
  * Note that a connector can be both polled and probed from the hotplug
  * handler, in case the hotplug interrupt is known to be unreliable.
+ *
+ * Returns:
+ * A boolean indicating whether the connector status changed or not
  */
 bool drm_connector_helper_hpd_irq_event(struct drm_connector *connector)
 {
@@ -921,6 +921,10 @@ bool drm_helper_hpd_irq_event(struct drm_device *dev)
 	mutex_lock(&dev->mode_config.mutex);
 	drm_connector_list_iter_begin(dev, &conn_iter);
 	drm_for_each_connector_iter(connector, &conn_iter) {
+		/* Only handle HPD capable connectors. */
+		if (!(connector->polled & DRM_CONNECTOR_POLL_HPD))
+			continue;
+
 		if (check_connector_changed(connector))
 			changed = true;
 	}
