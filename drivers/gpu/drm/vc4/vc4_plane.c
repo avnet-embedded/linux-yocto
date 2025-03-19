@@ -1454,7 +1454,7 @@ static int vc4_plane_mode_set(struct drm_plane *plane,
 
 			tile = src_x / pix_per_tile;
 
-			offsets[i] += pitch[i] * tile;
+			offsets[i] += pitch[i] * tile * tile_width;
 			offsets[i] += src_y / (i ? v_subsample : 1) * tile_width;
 			offsets[i] += x_off & ~(i ? 1 : 0);
 		}
@@ -1930,7 +1930,7 @@ static int vc6_plane_mode_set(struct drm_plane *plane,
 
 			tile = src_x / pix_per_tile;
 
-			offsets[i] += pitch[i] * tile;
+			offsets[i] += pitch[i] * tile * tile_width;
 			offsets[i] += src_y / (i ? v_subsample : 1) * tile_width;
 			offsets[i] += x_off & ~(i ? 1 : 0);
 
