@@ -3683,8 +3683,9 @@ static int enetc_hwtstamp_set(struct net_device *ndev, struct ifreq *ifr)
 		/* When preemption is enabled on a port, IEEE 1588 PTP
 		 * one-step timestamping is not supported.
 		 */
-		if (!!(priv->active_offloads & ENETC_F_QBU) &&
-		    is_enetc_rev4(priv->si))
+		if (!enetc_si_is_pf(priv->si) ||
+		    (!!(priv->active_offloads & ENETC_F_QBU) &&
+		    is_enetc_rev4(priv->si)))
 			return -EOPNOTSUPP;
 
 		new_offloads &= ~ENETC_F_TX_TSTAMP_MASK;

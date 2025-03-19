@@ -1457,8 +1457,6 @@ static int enetc_get_ts_info(struct net_device *ndev,
 		if (phc_idx) {
 			info->phc_index = *phc_idx;
 			symbol_put(enetc_phc_index);
-		} else {
-			info->phc_index = -1;
 		}
 	} else {
 		int domain;
@@ -1472,19 +1470,18 @@ static int enetc_get_ts_info(struct net_device *ndev,
 		info->so_timestamping = SOF_TIMESTAMPING_TX_HARDWARE |
 					SOF_TIMESTAMPING_RX_HARDWARE |
 					SOF_TIMESTAMPING_RAW_HARDWARE |
-					SOF_TIMESTAMPING_TX_SOFTWARE |
-					SOF_TIMESTAMPING_RX_SOFTWARE |
-					SOF_TIMESTAMPING_SOFTWARE;
+					SOF_TIMESTAMPING_TX_SOFTWARE;
 
 		info->tx_types = (1 << HWTSTAMP_TX_OFF) |
-				 (1 << HWTSTAMP_TX_ON) |
-				 (1 << HWTSTAMP_TX_ONESTEP_SYNC);
+				 (1 << HWTSTAMP_TX_ON);
+
+		if (enetc_si_is_pf(priv->si))
+			info->tx_types |= (1 << HWTSTAMP_TX_ONESTEP_SYNC);
+
 		info->rx_filters = (1 << HWTSTAMP_FILTER_NONE) |
 				   (1 << HWTSTAMP_FILTER_ALL);
 	} else {
-		info->so_timestamping = SOF_TIMESTAMPING_RX_SOFTWARE |
-					SOF_TIMESTAMPING_TX_SOFTWARE |
-					SOF_TIMESTAMPING_SOFTWARE;
+		info->so_timestamping = SOF_TIMESTAMPING_TX_SOFTWARE;
 	}
 
 	return 0;
