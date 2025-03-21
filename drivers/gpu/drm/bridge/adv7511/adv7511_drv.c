@@ -1032,8 +1032,10 @@ static void adv7511_bridge_detach(struct drm_bridge *bridge)
 	if (adv->i2c_main->irq)
 		regmap_write(adv->regmap, ADV7511_REG_INT_ENABLE(0), 0);
 
-	if (adv->type == ADV7533 || adv->type == ADV7535)
-		adv7533_detach_dsi(adv);
+	if (adv->type == ADV7533 || adv->type == ADV7535) {
+		mipi_dsi_detach(adv->dsi);
+		mipi_dsi_device_unregister(adv->dsi);
+	}
 
 	drm_connector_cleanup(&adv->connector);
 }
