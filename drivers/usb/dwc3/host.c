@@ -17,10 +17,6 @@
 
 #include "core.h"
 
-static const struct xhci_plat_priv dwc3_xhci_plat_priv = {
-	.quirks = XHCI_SKIP_PHY_INIT,
-};
-
 #define XHCI_HCSPARAMS1		0x4
 #define XHCI_PORTSC_BASE	0x400
 
@@ -72,7 +68,7 @@ static void dwc3_xhci_plat_start(struct usb_hcd *hcd)
 	dwc3_enable_susphy(dwc, true);
 }
 
-static const struct xhci_plat_priv dwc3_xhci_plat_quirk = {
+static struct xhci_plat_priv dwc3_xhci_plat_quirk = {
 	.plat_start = dwc3_xhci_plat_start,
 };
 
@@ -190,12 +186,8 @@ int dwc3_host_init(struct dwc3 *dwc)
 	}
 
 	dwc3_pdata = (struct dwc3_platform_data *)dev_get_platdata(dwc->dev);
-	if (dwc3_pdata && dwc3_pdata->xhci_priv) {
-		ret = platform_device_add_data(xhci, dwc3_pdata->xhci_priv,
-					       sizeof(struct xhci_plat_priv));
-		if (ret)
-			goto err;
-	}
+	if (dwc3_pdata && dwc3_pdata->xhci_priv)
+		dwc3_xhci_plat_quirk.quirks = dwc3_pdata->xhci_priv->quirks;
 
 	ret = platform_device_add_data(xhci, &dwc3_xhci_plat_quirk,
 				       sizeof(struct xhci_plat_priv));
