@@ -1352,6 +1352,8 @@ static int vxd_dec_release(struct file *file)
 
 	idr_remove(vxd->streams, ctx->stream.id);
 
+	v4l2_ctrl_handler_free(&ctx->v4l2_ctrl_hdl);
+
 	v4l2_fh_del(&ctx->fh);
 
 	v4l2_fh_exit(&ctx->fh);
@@ -1361,6 +1363,10 @@ static int vxd_dec_release(struct file *file)
 	mutex_destroy(ctx->mutex);
 	kfree(ctx->mutex);
 	ctx->mutex = NULL;
+
+	mutex_destroy(ctx->mutex2);
+	kfree(ctx->mutex2);
+	ctx->mutex2 = NULL;
 
 	get_work_buff(ctx->work, TRUE);
 	kfree(ctx->work);
