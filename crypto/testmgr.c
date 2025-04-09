@@ -57,7 +57,7 @@ module_param(fuzz_iterations, uint, 0644);
 MODULE_PARM_DESC(fuzz_iterations, "number of fuzz test iterations");
 #endif
 
-#ifdef CONFIG_CRYPTO_MANAGER_DISABLE_TESTS
+#if defined(CONFIG_CRYPTO_MANAGER_DISABLE_TESTS) && !defined(CONFIG_CRYPTO_SUPPORT_TEGRA_TESTS)
 
 /* a perfect nop */
 int alg_test(const char *driver, const char *alg, u32 type, u32 mask)
@@ -4585,12 +4585,14 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.suite = {
 			.hash = __VECS(aes_cbcmac_tv_template)
 		}
+#if !defined(CONFIG_CRYPTO_SUPPORT_TEGRA_TESTS)
 	}, {
 		.alg = "cbcmac(sm4)",
 		.test = alg_test_hash,
 		.suite = {
 			.hash = __VECS(sm4_cbcmac_tv_template)
 		}
+#endif
 	}, {
 		.alg = "ccm(aes)",
 		.generic_driver = "ccm_base(ctr(aes-generic),cbcmac(aes-generic))",
@@ -4602,6 +4604,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 				.einval_allowed = 1,
 			}
 		}
+#if !defined(CONFIG_CRYPTO_SUPPORT_TEGRA_TESTS)
 	}, {
 		.alg = "ccm(sm4)",
 		.generic_driver = "ccm_base(ctr(sm4-generic),cbcmac(sm4-generic))",
@@ -4612,6 +4615,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 				.einval_allowed = 1,
 			}
 		}
+#endif
 	}, {
 		.alg = "cfb(aes)",
 		.test = alg_test_skcipher,
@@ -4656,12 +4660,14 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.suite = {
 			.hash = __VECS(des3_ede_cmac64_tv_template)
 		}
+#if !defined(CONFIG_CRYPTO_SUPPORT_TEGRA_TESTS)
 	}, {
 		.alg = "cmac(sm4)",
 		.test = alg_test_hash,
 		.suite = {
 			.hash = __VECS(sm4_cmac128_tv_template)
 		}
+#endif
 	}, {
 		.alg = "compress_null",
 		.test = alg_test_null,
@@ -4857,6 +4863,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.alg = "drbg_nopr_hmac_sha1",
 		.fips_allowed = 1,
 		.test = alg_test_null,
+#if !defined(CONFIG_CRYPTO_SUPPORT_TEGRA_TESTS)
 	}, {
 		.alg = "drbg_nopr_hmac_sha256",
 		.test = alg_test_drbg,
@@ -4875,6 +4882,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.suite = {
 			.drbg = __VECS(drbg_nopr_hmac_sha512_tv_template)
 		}
+#endif
 	}, {
 		.alg = "drbg_nopr_sha1",
 		.fips_allowed = 1,
@@ -5088,6 +5096,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 		}
 	}, {
 #endif
+#if !defined(CONFIG_CRYPTO_SUPPORT_TEGRA_TESTS)
 		.alg = "ecdh-nist-p192",
 		.test = alg_test_kpp,
 		.suite = {
@@ -5128,6 +5137,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 			.akcipher = __VECS(ecdsa_nist_p384_tv_template)
 		}
 	}, {
+#endif
 		.alg = "ecrdsa",
 		.test = alg_test_akcipher,
 		.suite = {
@@ -5155,6 +5165,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.suite = {
 			.kpp = __VECS(ffdhe2048_dh_tv_template)
 		}
+#if !defined(CONFIG_CRYPTO_SUPPORT_TEGRA_TESTS)
 	}, {
 		.alg = "ffdhe3072(dh)",
 		.test = alg_test_kpp,
@@ -5206,6 +5217,7 @@ static const struct alg_test_desc alg_test_descs[] = {
 		.suite = {
 			.aead = __VECS(sm4_gcm_tv_template)
 		}
+#endif
 	}, {
 		.alg = "ghash",
 		.test = alg_test_hash,

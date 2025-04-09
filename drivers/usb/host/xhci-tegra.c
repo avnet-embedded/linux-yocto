@@ -2,7 +2,7 @@
 /*
  * NVIDIA Tegra xHCI host controller driver
  *
- * Copyright (c) 2014-2020, NVIDIA CORPORATION. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2014-2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * Copyright (C) 2014 Google, Inc.
  */
 
@@ -227,6 +227,7 @@ struct tegra_xusb_soc {
 	unsigned int num_supplies;
 	const struct tegra_xusb_phy_type *phy_types;
 	unsigned int num_types;
+	unsigned int num_wakes;
 	const struct tegra_xusb_context_soc *context;
 
 	struct {
@@ -262,6 +263,7 @@ struct tegra_xusb {
 	int xhci_irq;
 	int mbox_irq;
 	int padctl_irq;
+	int *wake_irqs;
 
 	void __iomem *ipfs_base;
 	void __iomem *fpci_base;
@@ -312,6 +314,7 @@ struct tegra_xusb {
 	bool suspended;
 	struct tegra_xusb_context context;
 	u8 lp0_utmi_pad_mask;
+	atomic_t hub_ctrl_use_cnt;
 };
 
 static struct hc_driver __read_mostly tegra_xhci_hc_driver;
@@ -1363,6 +1366,7 @@ static void tegra_xhci_id_work(struct work_struct *work)
 	tegra->otg_usb3_port = tegra_xusb_padctl_get_usb3_companion(tegra->padctl,
 								    tegra->otg_usb2_port);
 
+	pm_runtime_get_sync(tegra->dev);
 	if (tegra->host_mode) {
 		/* switch to host mode */
 		if (tegra->otg_usb3_port >= 0) {
@@ -1392,6 +1396,7 @@ static void tegra_xhci_id_work(struct work_struct *work)
 		}
 
 		tegra_xhci_set_port_power(tegra, true, true);
+		pm_runtime_mark_last_busy(tegra->dev);
 
 	} else {
 		if (tegra->otg_usb3_port >= 0)
@@ -1399,6 +1404,7 @@ static void tegra_xhci_id_work(struct work_struct *work)
 
 		tegra_xhci_set_port_power(tegra, true, false);
 	}
+	pm_runtime_put_autosuspend(tegra->dev);
 }
 
 #if IS_ENABLED(CONFIG_PM) || IS_ENABLED(CONFIG_PM_SLEEP)
@@ -1508,10 +1514,9 @@ static int tegra_xusb_init_usb_phy(struct tegra_xusb *tegra)
 		tegra->usbphy[i] = devm_usb_get_phy_by_node(tegra->dev,
 							phy->dev.of_node,
 							&tegra->id_nb);
-		if (!IS_ERR(tegra->usbphy[i])) {
+		if (!IS_ERR(tegra->usbphy[i]))
 			dev_dbg(tegra->dev, "usbphy-%d registered", i);
-			otg_set_host(tegra->usbphy[i]->otg, &tegra->hcd->self);
-		} else {
+		else {
 			/*
 			 * usb-phy is optional, continue if its not available.
 			 */
@@ -1531,6 +1536,38 @@ static void tegra_xusb_deinit_usb_phy(struct tegra_xusb *tegra)
 	for (i = 0; i < tegra->num_usb_phys; i++)
 		if (tegra->usbphy[i])
 			otg_set_host(tegra->usbphy[i]->otg, NULL);
+}
+
+static void tegra_xusb_setup_wakeup(struct platform_device *pdev, struct tegra_xusb *tegra)
+{
+	int i;
+
+	tegra->wake_irqs = devm_kcalloc(tegra->dev,
+				tegra->soc->num_wakes,
+				sizeof(*tegra->wake_irqs), GFP_KERNEL);
+	if (!tegra->wake_irqs)
+		return;
+
+	for (i = 0; i < tegra->soc->num_wakes; i++) {
+		char irq_name[] = "wakeX";
+		struct irq_data *data;
+
+		snprintf(irq_name, sizeof(irq_name), "wake%d", i);
+		tegra->wake_irqs[i] = platform_get_irq_byname(pdev, irq_name);
+		if (tegra->wake_irqs[i] < 0)
+			goto error;
+		data = irq_get_irq_data(tegra->wake_irqs[i]);
+		if (!data)
+			goto error;
+		irq_set_irq_type(tegra->wake_irqs[i], irqd_get_trigger_type(data));
+	}
+	return;
+
+error:
+	for (i = 0; i < tegra->soc->num_wakes && tegra->wake_irqs[i] >= 0; i++)
+		irq_dispose_mapping(tegra->wake_irqs[i]);
+	devm_kfree(tegra->dev, tegra->wake_irqs);
+	tegra->wake_irqs = NULL;
 }
 
 static int tegra_xusb_probe(struct platform_device *pdev)
@@ -1586,6 +1623,9 @@ static int tegra_xusb_probe(struct platform_device *pdev)
 	tegra->padctl = tegra_xusb_padctl_get(&pdev->dev);
 	if (IS_ERR(tegra->padctl))
 		return PTR_ERR(tegra->padctl);
+
+	if (tegra->soc->num_wakes)
+		tegra_xusb_setup_wakeup(pdev, tegra);
 
 	np = of_parse_phandle(pdev->dev.of_node, "nvidia,xusb-padctl", 0);
 	if (!np) {
@@ -1925,6 +1965,7 @@ static void tegra_xusb_remove(struct platform_device *pdev)
 {
 	struct tegra_xusb *tegra = platform_get_drvdata(pdev);
 	struct xhci_hcd *xhci = hcd_to_xhci(tegra->hcd);
+	unsigned int i;
 
 	tegra_xusb_deinit_usb_phy(tegra);
 
@@ -1941,6 +1982,9 @@ static void tegra_xusb_remove(struct platform_device *pdev)
 	if (tegra->padctl_irq)
 		pm_runtime_disable(&pdev->dev);
 
+	for (i = 0; i < tegra->soc->num_wakes && tegra->wake_irqs; i++)
+		irq_dispose_mapping(tegra->wake_irqs[i]);
+
 	pm_runtime_put(&pdev->dev);
 
 	tegra_xusb_disable(tegra);
@@ -1950,10 +1994,21 @@ static void tegra_xusb_remove(struct platform_device *pdev)
 static void tegra_xusb_shutdown(struct platform_device *pdev)
 {
 	struct tegra_xusb *tegra = platform_get_drvdata(pdev);
+	struct xhci_hcd *xhci = hcd_to_xhci(tegra->hcd);
+	unsigned long flags;
 
 	pm_runtime_get_sync(&pdev->dev);
 	disable_irq(tegra->xhci_irq);
 	xhci_shutdown(tegra->hcd);
+	/* avoid any further access to XHCI registers */
+	spin_lock_irqsave(&xhci->lock, flags);
+	xhci->xhc_state |= XHCI_STATE_DYING;
+	spin_unlock_irqrestore(&xhci->lock, flags);
+	
+	/* wait until all current access are done if any */
+	while (atomic_read(&tegra->hub_ctrl_use_cnt) != 0)
+	        msleep(20);
+	
 	tegra_xusb_disable(tegra);
 }
 
@@ -2323,6 +2378,7 @@ static __maybe_unused int tegra_xusb_suspend(struct device *dev)
 {
 	struct tegra_xusb *tegra = dev_get_drvdata(dev);
 	int err;
+	unsigned int i;
 
 	synchronize_irq(tegra->mbox_irq);
 
@@ -2353,6 +2409,8 @@ out:
 		if (device_may_wakeup(dev)) {
 			if (enable_irq_wake(tegra->padctl_irq))
 				dev_err(dev, "failed to enable padctl wakes\n");
+			for (i = 0; i < tegra->soc->num_wakes && tegra->wake_irqs; i++)
+				enable_irq_wake(tegra->wake_irqs[i]);
 		}
 	}
 
@@ -2365,6 +2423,7 @@ static __maybe_unused int tegra_xusb_resume(struct device *dev)
 {
 	struct tegra_xusb *tegra = dev_get_drvdata(dev);
 	int err;
+	unsigned int i;
 
 	mutex_lock(&tegra->lock);
 
@@ -2382,6 +2441,8 @@ static __maybe_unused int tegra_xusb_resume(struct device *dev)
 	if (device_may_wakeup(dev)) {
 		if (disable_irq_wake(tegra->padctl_irq))
 			dev_err(dev, "failed to disable padctl wakes\n");
+		for (i = 0; i < tegra->soc->num_wakes && tegra->wake_irqs; i++)
+			disable_irq_wake(tegra->wake_irqs[i]);
 	}
 	tegra->suspended = false;
 	mutex_unlock(&tegra->lock);
@@ -2632,6 +2693,7 @@ static const struct tegra_xusb_soc tegra234_soc = {
 	.num_supplies = ARRAY_SIZE(tegra194_supply_names),
 	.phy_types = tegra194_phy_types,
 	.num_types = ARRAY_SIZE(tegra194_phy_types),
+	.num_wakes = 7,
 	.context = &tegra186_xusb_context,
 	.ports = {
 		.usb3 = { .offset = 0, .count = 4, },
@@ -2700,6 +2762,13 @@ static int tegra_xhci_hub_control(struct usb_hcd *hcd, u16 type_req, u16 value, 
 	int ret;
 	struct phy *phy;
 
+	if (xhci->xhc_state & XHCI_STATE_DYING) {
+		dev_info(hcd->self.controller, "HCD shut down\n");
+		return -ENODEV;
+	}
+
+	atomic_inc(&tegra->hub_ctrl_use_cnt);
+
 	rhub = &xhci->usb2_rhub;
 	bus_state = &rhub->bus_state;
 	if (bus_state->resuming_ports && hcd->speed == HCD_USB2) {
@@ -2718,13 +2787,17 @@ static int tegra_xhci_hub_control(struct usb_hcd *hcd, u16 type_req, u16 value, 
 	if (hcd->speed == HCD_USB2) {
 		phy = tegra_xusb_get_phy(tegra, "usb2", port);
 		if ((type_req == ClearPortFeature) && (value == USB_PORT_FEAT_SUSPEND)) {
-			if (!index || index > rhub->num_ports)
-				return -EPIPE;
+			if (!index || index > rhub->num_ports) {
+				ret = -EPIPE;
+				goto out;
+			}
 			tegra_phy_xusb_utmi_pad_power_on(phy);
 		}
 		if ((type_req == SetPortFeature) && (value == USB_PORT_FEAT_RESET)) {
-			if (!index || index > rhub->num_ports)
-				return -EPIPE;
+			if (!index || index > rhub->num_ports) {
+				ret = -EPIPE;
+				goto out;
+			}
 			ports = rhub->ports;
 			portsc = readl(ports[port]->addr);
 			if (portsc & PORT_CONNECT)
@@ -2734,7 +2807,7 @@ static int tegra_xhci_hub_control(struct usb_hcd *hcd, u16 type_req, u16 value, 
 
 	ret = xhci_hub_control(hcd, type_req, value, index, buf, length);
 	if (ret < 0)
-		return ret;
+		goto out;
 
 	if (hcd->speed == HCD_USB2) {
 		/* Use phy where we set previously */
@@ -2757,6 +2830,9 @@ static int tegra_xhci_hub_control(struct usb_hcd *hcd, u16 type_req, u16 value, 
 		if ((type_req == SetPortFeature) && (value == USB_PORT_FEAT_TEST))
 			tegra_phy_xusb_utmi_pad_power_on(phy);
 	}
+
+out:
+	atomic_dec(&tegra->hub_ctrl_use_cnt);
 
 	return ret;
 }

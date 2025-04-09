@@ -9,6 +9,7 @@
 #include <dt-bindings/power/tegra234-powergate.h>
 #include <dt-bindings/reset/tegra234-reset.h>
 #include <dt-bindings/thermal/tegra234-bpmp-thermal.h>
+#include <dt-bindings/thermal/thermal.h>
 
 / {
 	compatible = "nvidia,tegra234";
@@ -1240,6 +1241,11 @@
 			reg = <0x0 0x03e00000 0x0 0x10000>;
 			reg-names = "ctl";
 
+			interrupts = <GIC_SPI 336 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 0>;
+
 			#phy-cells = <0>;
 		};
 
@@ -1247,6 +1253,11 @@
 			compatible = "nvidia,tegra234-p2u";
 			reg = <0x0 0x03e10000 0x0 0x10000>;
 			reg-names = "ctl";
+
+			interrupts = <GIC_SPI 337 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 1>;
 
 			#phy-cells = <0>;
 		};
@@ -1256,6 +1267,11 @@
 			reg = <0x0 0x03e20000 0x0 0x10000>;
 			reg-names = "ctl";
 
+			interrupts = <GIC_SPI 338 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 2>;
+
 			#phy-cells = <0>;
 		};
 
@@ -1263,6 +1279,11 @@
 			compatible = "nvidia,tegra234-p2u";
 			reg = <0x0 0x03e30000 0x0 0x10000>;
 			reg-names = "ctl";
+
+			interrupts = <GIC_SPI 339 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 3>;
 
 			#phy-cells = <0>;
 		};
@@ -1272,6 +1293,11 @@
 			reg = <0x0 0x03e40000 0x0 0x10000>;
 			reg-names = "ctl";
 
+			interrupts = <GIC_SPI 340 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 4>;
+
 			#phy-cells = <0>;
 		};
 
@@ -1279,6 +1305,11 @@
 			compatible = "nvidia,tegra234-p2u";
 			reg = <0x0 0x03e50000 0x0 0x10000>;
 			reg-names = "ctl";
+
+			interrupts = <GIC_SPI 341 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 5>;
 
 			#phy-cells = <0>;
 		};
@@ -1288,6 +1319,11 @@
 			reg = <0x0 0x03e60000 0x0 0x10000>;
 			reg-names = "ctl";
 
+			interrupts = <GIC_SPI 342 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 6>;
+
 			#phy-cells = <0>;
 		};
 
@@ -1295,6 +1331,11 @@
 			compatible = "nvidia,tegra234-p2u";
 			reg = <0x0 0x03e70000 0x0 0x10000>;
 			reg-names = "ctl";
+
+			interrupts = <GIC_SPI 343 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 7>;
 
 			#phy-cells = <0>;
 		};
@@ -1304,6 +1345,11 @@
 			reg = <0x0 0x03e90000 0x0 0x10000>;
 			reg-names = "ctl";
 
+			interrupts = <GIC_SPI 344 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 8>;
+
 			#phy-cells = <0>;
 		};
 
@@ -1311,6 +1357,11 @@
 			compatible = "nvidia,tegra234-p2u";
 			reg = <0x0 0x03ea0000 0x0 0x10000>;
 			reg-names = "ctl";
+
+			interrupts = <GIC_SPI 345 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 9>;
 
 			#phy-cells = <0>;
 		};
@@ -1320,6 +1371,11 @@
 			reg = <0x0 0x03eb0000 0x0 0x10000>;
 			reg-names = "ctl";
 
+			interrupts = <GIC_SPI 346 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 10>;
+
 			#phy-cells = <0>;
 		};
 
@@ -1327,6 +1383,11 @@
 			compatible = "nvidia,tegra234-p2u";
 			reg = <0x0 0x03ec0000 0x0 0x10000>;
 			reg-names = "ctl";
+
+			interrupts = <GIC_SPI 347 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 11>;
 
 			#phy-cells = <0>;
 		};
@@ -1336,6 +1397,11 @@
 			reg = <0x0 0x03ed0000 0x0 0x10000>;
 			reg-names = "ctl";
 
+			interrupts = <GIC_SPI 348 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 12>;
+
 			#phy-cells = <0>;
 		};
 
@@ -1343,6 +1409,11 @@
 			compatible = "nvidia,tegra234-p2u";
 			reg = <0x0 0x03ee0000 0x0 0x10000>;
 			reg-names = "ctl";
+
+			interrupts = <GIC_SPI 349 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 13>;
 
 			#phy-cells = <0>;
 		};
@@ -1352,6 +1423,11 @@
 			reg = <0x0 0x03ef0000 0x0 0x10000>;
 			reg-names = "ctl";
 
+			interrupts = <GIC_SPI 350 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 14>;
+
 			#phy-cells = <0>;
 		};
 
@@ -1359,6 +1435,11 @@
 			compatible = "nvidia,tegra234-p2u";
 			reg = <0x0 0x03f00000 0x0 0x10000>;
 			reg-names = "ctl";
+
+			interrupts = <GIC_SPI 351 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 15>;
 
 			#phy-cells = <0>;
 		};
@@ -1368,6 +1449,11 @@
 			reg = <0x0 0x03f20000 0x0 0x10000>;
 			reg-names = "ctl";
 
+			interrupts = <GIC_SPI 203 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 16>;
+
 			#phy-cells = <0>;
 		};
 
@@ -1375,6 +1461,11 @@
 			compatible = "nvidia,tegra234-p2u";
 			reg = <0x0 0x03f30000 0x0 0x10000>;
 			reg-names = "ctl";
+
+			interrupts = <GIC_SPI 220 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 17>;
 
 			#phy-cells = <0>;
 		};
@@ -1384,6 +1475,11 @@
 			reg = <0x0 0x03f40000 0x0 0x10000>;
 			reg-names = "ctl";
 
+			interrupts = <GIC_SPI 221 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 18>;
+
 			#phy-cells = <0>;
 		};
 
@@ -1391,6 +1487,11 @@
 			compatible = "nvidia,tegra234-p2u";
 			reg = <0x0 0x03f50000 0x0 0x10000>;
 			reg-names = "ctl";
+
+			interrupts = <GIC_SPI 222 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 19>;
 
 			#phy-cells = <0>;
 		};
@@ -1400,6 +1501,11 @@
 			reg = <0x0 0x03f60000 0x0 0x10000>;
 			reg-names = "ctl";
 
+			interrupts = <GIC_SPI 108 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 20>;
+
 			#phy-cells = <0>;
 		};
 
@@ -1407,6 +1513,11 @@
 			compatible = "nvidia,tegra234-p2u";
 			reg = <0x0 0x03f70000 0x0 0x10000>;
 			reg-names = "ctl";
+
+			interrupts = <GIC_SPI 109 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 21>;
 
 			#phy-cells = <0>;
 		};
@@ -1416,6 +1527,11 @@
 			reg = <0x0 0x03f80000 0x0 0x10000>;
 			reg-names = "ctl";
 
+			interrupts = <GIC_SPI 110 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 22>;
+
 			#phy-cells = <0>;
 		};
 
@@ -1423,6 +1539,11 @@
 			compatible = "nvidia,tegra234-p2u";
 			reg = <0x0 0x03f90000 0x0 0x10000>;
 			reg-names = "ctl";
+
+			interrupts = <GIC_SPI 111 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "intr";
+
+			nvidia,bpmp = <&bpmp 23>;
 
 			#phy-cells = <0>;
 		};
@@ -1458,6 +1579,7 @@
 			interconnect-names = "dma-mem", "write";
 			iommus = <&smmu_niso0 TEGRA234_SID_MGBE>;
 			power-domains = <&bpmp TEGRA234_POWER_DOMAIN_MGBEA>;
+			nvidia,vm-irq-config = <&mgbe_vm_irq_config>;
 			status = "disabled";
 		};
 
@@ -1561,6 +1683,35 @@
 			iommus = <&smmu_niso0 TEGRA234_SID_MGBE_VF3>;
 			power-domains = <&bpmp TEGRA234_POWER_DOMAIN_MGBED>;
 			status = "disabled";
+		};
+
+		mgbe_vm_irq_config: mgbe-vm-irq-config {
+			nvidia,num-vm-irqs = <5>;
+			vm_irq1 {
+				nvidia,num-vm-channels = <2>;
+				nvidia,vm-channels = <0 1>;
+				nvidia,vm-num = <0>;
+			};
+			vm_irq2 {
+				nvidia,num-vm-channels = <2>;
+				nvidia,vm-channels = <2 3>;
+				nvidia,vm-num = <1>;
+			};
+			vm_irq3 {
+				nvidia,num-vm-channels = <2>;
+				nvidia,vm-channels = <4 5>;
+				nvidia,vm-num = <2>;
+			};
+			vm_irq4 {
+				nvidia,num-vm-channels = <2>;
+				nvidia,vm-channels = <6 7>;
+				nvidia,vm-num = <3>;
+			};
+			vm_irq5 {
+				nvidia,num-vm-channels = <2>;
+				nvidia,vm-channels = <8 9>;
+				nvidia,vm-num = <4>;
+			};
 		};
 
 		smmu_niso1: iommu@8000000 {
@@ -2353,6 +2504,7 @@
 			interconnects = <&mc TEGRA234_MEMORY_CLIENT_PCIE8AR &emc>,
 					<&mc TEGRA234_MEMORY_CLIENT_PCIE8AW &emc>;
 			interconnect-names = "dma-mem", "write";
+			iommus = <&smmu_niso1 TEGRA234_SID_PCIE8>;
 			iommu-map = <0x0 &smmu_niso1 TEGRA234_SID_PCIE8 0x1000>;
 			iommu-map-mask = <0x0>;
 			dma-coherent;
@@ -2407,6 +2559,7 @@
 			interconnects = <&mc TEGRA234_MEMORY_CLIENT_PCIE9AR &emc>,
 					<&mc TEGRA234_MEMORY_CLIENT_PCIE9AW &emc>;
 			interconnect-names = "dma-mem", "write";
+			iommus = <&smmu_niso0 TEGRA234_SID_PCIE9>;
 			iommu-map = <0x0 &smmu_niso0 TEGRA234_SID_PCIE9 0x1000>;
 			iommu-map-mask = <0x0>;
 			dma-coherent;
@@ -2461,6 +2614,7 @@
 			interconnects = <&mc TEGRA234_MEMORY_CLIENT_PCIE10AR &emc>,
 					<&mc TEGRA234_MEMORY_CLIENT_PCIE10AW &emc>;
 			interconnect-names = "dma-mem", "write";
+			iommus = <&smmu_niso1 TEGRA234_SID_PCIE10>;
 			iommu-map = <0x0 &smmu_niso1 TEGRA234_SID_PCIE10 0x1000>;
 			iommu-map-mask = <0x0>;
 			dma-coherent;
@@ -2499,6 +2653,7 @@
 			interconnects = <&mc TEGRA234_MEMORY_CLIENT_PCIE10AR &emc>,
 					<&mc TEGRA234_MEMORY_CLIENT_PCIE10AW &emc>;
 			interconnect-names = "dma-mem", "write";
+			iommus = <&smmu_niso1 TEGRA234_SID_PCIE10>;
 			iommu-map = <0x0 &smmu_niso1 TEGRA234_SID_PCIE10 0x1000>;
 			iommu-map-mask = <0x0>;
 			dma-coherent;
@@ -2553,6 +2708,7 @@
 			interconnects = <&mc TEGRA234_MEMORY_CLIENT_PCIE1R &emc>,
 					<&mc TEGRA234_MEMORY_CLIENT_PCIE1W &emc>;
 			interconnect-names = "dma-mem", "write";
+			iommus = <&smmu_niso1 TEGRA234_SID_PCIE1>;
 			iommu-map = <0x0 &smmu_niso1 TEGRA234_SID_PCIE1 0x1000>;
 			iommu-map-mask = <0x0>;
 			dma-coherent;
@@ -2607,6 +2763,7 @@
 			interconnects = <&mc TEGRA234_MEMORY_CLIENT_PCIE2AR &emc>,
 					<&mc TEGRA234_MEMORY_CLIENT_PCIE2AW &emc>;
 			interconnect-names = "dma-mem", "write";
+			iommus = <&smmu_niso1 TEGRA234_SID_PCIE2>;
 			iommu-map = <0x0 &smmu_niso1 TEGRA234_SID_PCIE2 0x1000>;
 			iommu-map-mask = <0x0>;
 			dma-coherent;
@@ -2661,6 +2818,7 @@
 			interconnects = <&mc TEGRA234_MEMORY_CLIENT_PCIE3R &emc>,
 					<&mc TEGRA234_MEMORY_CLIENT_PCIE3W &emc>;
 			interconnect-names = "dma-mem", "write";
+			iommus = <&smmu_niso1 TEGRA234_SID_PCIE3>;
 			iommu-map = <0x0 &smmu_niso1 TEGRA234_SID_PCIE3 0x1000>;
 			iommu-map-mask = <0x0>;
 			dma-coherent;
@@ -2715,6 +2873,7 @@
 			interconnects = <&mc TEGRA234_MEMORY_CLIENT_PCIE4R &emc>,
 					<&mc TEGRA234_MEMORY_CLIENT_PCIE4W &emc>;
 			interconnect-names = "dma-mem", "write";
+			iommus = <&smmu_niso0 TEGRA234_SID_PCIE4>;
 			iommu-map = <0x0 &smmu_niso0 TEGRA234_SID_PCIE4 0x1000>;
 			iommu-map-mask = <0x0>;
 			dma-coherent;
@@ -2769,6 +2928,7 @@
 			interconnects = <&mc TEGRA234_MEMORY_CLIENT_PCIE0R &emc>,
 					<&mc TEGRA234_MEMORY_CLIENT_PCIE0W &emc>;
 			interconnect-names = "dma-mem", "write";
+			iommus = <&smmu_niso0 TEGRA234_SID_PCIE0>;
 			iommu-map = <0x0 &smmu_niso0 TEGRA234_SID_PCIE0 0x1000>;
 			iommu-map-mask = <0x0>;
 			dma-coherent;
@@ -2823,6 +2983,7 @@
 			interconnects = <&mc TEGRA234_MEMORY_CLIENT_PCIE5R &emc>,
 					<&mc TEGRA234_MEMORY_CLIENT_PCIE5W &emc>;
 			interconnect-names = "dma-mem", "write";
+			iommus = <&smmu_niso0 TEGRA234_SID_PCIE5>;
 			iommu-map = <0x0 &smmu_niso0 TEGRA234_SID_PCIE5 0x1000>;
 			iommu-map-mask = <0x0>;
 			dma-coherent;
@@ -2861,6 +3022,7 @@
 			interconnects = <&mc TEGRA234_MEMORY_CLIENT_PCIE5R &emc>,
 					<&mc TEGRA234_MEMORY_CLIENT_PCIE5W &emc>;
 			interconnect-names = "dma-mem", "write";
+			iommus = <&smmu_niso0 TEGRA234_SID_PCIE5>;
 			iommu-map = <0x0 &smmu_niso0 TEGRA234_SID_PCIE5 0x1000>;
 			iommu-map-mask = <0x0>;
 			dma-coherent;
@@ -2915,6 +3077,7 @@
 			interconnects = <&mc TEGRA234_MEMORY_CLIENT_PCIE6AR &emc>,
 					<&mc TEGRA234_MEMORY_CLIENT_PCIE6AW &emc>;
 			interconnect-names = "dma-mem", "write";
+			iommus = <&smmu_niso0 TEGRA234_SID_PCIE6>;
 			iommu-map = <0x0 &smmu_niso0 TEGRA234_SID_PCIE6 0x1000>;
 			iommu-map-mask = <0x0>;
 			dma-coherent;
@@ -2953,6 +3116,7 @@
 			interconnects = <&mc TEGRA234_MEMORY_CLIENT_PCIE6AR &emc>,
 					<&mc TEGRA234_MEMORY_CLIENT_PCIE6AW &emc>;
 			interconnect-names = "dma-mem", "write";
+			iommus = <&smmu_niso0 TEGRA234_SID_PCIE6>;
 			iommu-map = <0x0 &smmu_niso0 TEGRA234_SID_PCIE6 0x1000>;
 			iommu-map-mask = <0x0>;
 			dma-coherent;
@@ -3007,6 +3171,7 @@
 			interconnects = <&mc TEGRA234_MEMORY_CLIENT_PCIE7AR &emc>,
 					<&mc TEGRA234_MEMORY_CLIENT_PCIE7AW &emc>;
 			interconnect-names = "dma-mem", "write";
+			iommus = <&smmu_niso1 TEGRA234_SID_PCIE7>;
 			iommu-map = <0x0 &smmu_niso1 TEGRA234_SID_PCIE7 0x1000>;
 			iommu-map-mask = <0x0>;
 			dma-coherent;
@@ -3045,6 +3210,7 @@
 			interconnects = <&mc TEGRA234_MEMORY_CLIENT_PCIE7AR &emc>,
 					<&mc TEGRA234_MEMORY_CLIENT_PCIE7AW &emc>;
 			interconnect-names = "dma-mem", "write";
+			iommus = <&smmu_niso1 TEGRA234_SID_PCIE7>;
 			iommu-map = <0x0 &smmu_niso1 TEGRA234_SID_PCIE7 0x1000>;
 			iommu-map-mask = <0x0>;
 			dma-coherent;
@@ -3096,12 +3262,22 @@
 			nvidia,bpmp-bus-id = <5>;
 			#address-cells = <1>;
 			#size-cells = <0>;
+
+			tegra_tmp451: thermal-sensor@4c {
+				compatible = "ti,tmp451";
+				reg = <0x4c>;
+				/* vcc-supply configured in the platform-specific dtsi */
+				#thermal-sensor-cells = <1>;
+				status = "disabled";
+			};
 		};
 
 		bpmp_thermal: thermal {
 			compatible = "nvidia,tegra186-bpmp-thermal";
 			#thermal-sensor-cells = <1>;
+			status = "disabled";
 		};
+
 	};
 
 	cpus {
@@ -3125,6 +3301,7 @@
 			d-cache-line-size = <64>;
 			d-cache-sets = <256>;
 			next-level-cache = <&l2c0_0>;
+			#cooling-cells = <2>;
 		};
 
 		cpu0_1: cpu@100 {
@@ -3201,6 +3378,7 @@
 			d-cache-line-size = <64>;
 			d-cache-sets = <256>;
 			next-level-cache = <&l2c1_0>;
+			#cooling-cells = <2>;
 		};
 
 		cpu1_1: cpu@10100 {
@@ -3277,6 +3455,7 @@
 			d-cache-line-size = <64>;
 			d-cache-sets = <256>;
 			next-level-cache = <&l2c2_0>;
+			#cooling-cells = <2>;
 		};
 
 		cpu2_1: cpu@20100 {
@@ -3590,53 +3769,6 @@
 		assigned-clock-parents = <0>,
 					 <&bpmp TEGRA234_CLK_PLLA>,
 					 <&bpmp TEGRA234_CLK_PLLA_OUT0>;
-	};
-
-	thermal-zones {
-		cpu-thermal {
-			thermal-sensors = <&{/bpmp/thermal} TEGRA234_BPMP_THERMAL_ZONE_CPU>;
-			status = "disabled";
-		};
-
-		gpu-thermal {
-			thermal-sensors = <&{/bpmp/thermal} TEGRA234_BPMP_THERMAL_ZONE_GPU>;
-			status = "disabled";
-		};
-
-		cv0-thermal {
-			thermal-sensors = <&{/bpmp/thermal} TEGRA234_BPMP_THERMAL_ZONE_CV0>;
-			status = "disabled";
-		};
-
-		cv1-thermal {
-			thermal-sensors = <&{/bpmp/thermal} TEGRA234_BPMP_THERMAL_ZONE_CV1>;
-			status = "disabled";
-		};
-
-		cv2-thermal {
-			thermal-sensors = <&{/bpmp/thermal} TEGRA234_BPMP_THERMAL_ZONE_CV2>;
-			status = "disabled";
-		};
-
-		soc0-thermal {
-			thermal-sensors = <&{/bpmp/thermal} TEGRA234_BPMP_THERMAL_ZONE_SOC0>;
-			status = "disabled";
-		};
-
-		soc1-thermal {
-			thermal-sensors = <&{/bpmp/thermal} TEGRA234_BPMP_THERMAL_ZONE_SOC1>;
-			status = "disabled";
-		};
-
-		soc2-thermal {
-			thermal-sensors = <&{/bpmp/thermal} TEGRA234_BPMP_THERMAL_ZONE_SOC2>;
-			status = "disabled";
-		};
-
-		tj-thermal {
-			thermal-sensors = <&{/bpmp/thermal} TEGRA234_BPMP_THERMAL_ZONE_TJ_MAX>;
-			status = "disabled";
-		};
 	};
 
 	timer {
@@ -4096,6 +4228,294 @@
 		cl2_ch1_opp29: opp-2201600000 {
 			opp-hz = /bits/ 64 <2201600000>;
 			opp-peak-kBps = <6400000>;
+		};
+	};
+
+	thermal-zones {
+		cpu-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <1000>;
+			thermal-sensors = <&bpmp_thermal TEGRA234_THERMAL_ZONE_CPU>;
+			status = "disabled";
+
+			trips {
+				cpu_sw_shutdown: cpu-sw-shutdown {
+					temperature = <104500>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+
+				cpu_sw_throttle: cpu-sw-throttle {
+					temperature = <99000>;
+					hysteresis = <0>;
+					type = "passive";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&cpu_sw_throttle>;
+					cooling-device = <&cpu0_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu1_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu2_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		gpu-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <1000>;
+			thermal-sensors = <&bpmp_thermal TEGRA234_THERMAL_ZONE_GPU>;
+			status = "disabled";
+
+			trips {
+				gpu_sw_shutdown: gpu-sw-shutdown {
+					temperature = <104500>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+
+				gpu_sw_throttle: gpu-sw-throttle {
+					temperature = <99000>;
+					hysteresis = <0>;
+					type = "passive";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&gpu_sw_throttle>;
+					cooling-device = <&cpu0_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu1_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu2_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		cv0-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <1000>;
+			thermal-sensors = <&bpmp_thermal TEGRA234_THERMAL_ZONE_CV0>;
+			status = "disabled";
+
+			trips {
+				cv0_sw_shutdown: cv0-sw-shutdown {
+					temperature = <104500>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+
+				cv0_sw_throttle: cv0-sw-throttle {
+					temperature = <99000>;
+					hysteresis = <0>;
+					type = "passive";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&cv0_sw_throttle>;
+					cooling-device = <&cpu0_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu1_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu2_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+
+		cv1-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <1000>;
+			thermal-sensors = <&bpmp_thermal TEGRA234_THERMAL_ZONE_CV1>;
+			status = "disabled";
+
+			trips {
+				cv1_sw_shutdown: cv1-sw-shutdown {
+					temperature = <104500>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+
+				cv1_sw_throttle: cv1-sw-throttle {
+					temperature = <99000>;
+					hysteresis = <0>;
+					type = "passive";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&cv1_sw_throttle>;
+					cooling-device = <&cpu0_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu1_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu2_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		cv2-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <1000>;
+			thermal-sensors = <&bpmp_thermal TEGRA234_THERMAL_ZONE_CV2>;
+			status = "disabled";
+
+			trips {
+				cv2_sw_shutdown: cv2-sw-shutdown {
+					temperature = <104500>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+
+				cv2_sw_throttle: cv2-sw-throttle {
+					temperature = <99000>;
+					hysteresis = <0>;
+					type = "passive";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&cv2_sw_throttle>;
+					cooling-device = <&cpu0_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu1_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu2_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		soc0-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <1000>;
+			thermal-sensors = <&bpmp_thermal TEGRA234_THERMAL_ZONE_SOC0>;
+			status = "disabled";
+
+			trips {
+				soc0_sw_shutdown: soc0-sw-shutdown {
+					temperature = <104500>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+
+				soc0_sw_throttle: soc0-sw-throttle {
+					temperature = <99000>;
+					hysteresis = <0>;
+					type = "passive";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&soc0_sw_throttle>;
+					cooling-device = <&cpu0_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu1_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu2_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		soc1-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <1000>;
+			thermal-sensors = <&bpmp_thermal TEGRA234_THERMAL_ZONE_SOC1>;
+			status = "disabled";
+
+			trips {
+				soc1_sw_shutdown: soc1-sw-shutdown {
+					temperature = <104500>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+
+				soc1_sw_throttle: soc1-sw-throttle {
+					temperature = <99000>;
+					hysteresis = <0>;
+					type = "passive";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&soc1_sw_throttle>;
+					cooling-device = <&cpu0_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu1_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu2_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		soc2-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <1000>;
+			thermal-sensors = <&bpmp_thermal TEGRA234_THERMAL_ZONE_SOC2>;
+			status = "disabled";
+
+			trips {
+				soc2_sw_shutdown: soc2-sw-shutdown {
+					temperature = <104500>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+
+				soc2_sw_throttle: soc2-sw-throttle {
+					temperature = <99000>;
+					hysteresis = <0>;
+					type = "passive";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&soc2_sw_throttle>;
+					cooling-device = <&cpu0_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu1_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu2_0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
+		};
+
+		tj-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <1000>;
+			thermal-sensors = <&bpmp_thermal TEGRA234_THERMAL_ZONE_TJ_MAX>;
+			status = "disabled";
+
+			trips {
+				tj_sw_shutdown: tj-sw-shutdown {
+					temperature = <104500>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+			};
+		};
+
+		tboard-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <1000>;
+			thermal-sensors = <&tegra_tmp451 0>;
+			status = "disabled";
+
+			trips {
+				tboard_sw_shutdown: tboard-sw-shutdown {
+					temperature = <107000>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+			};
+		};
+
+		tdiode-thermal {
+			polling-delay = <1000>;
+			polling-delay-passive = <1000>;
+			thermal-sensors = <&tegra_tmp451 1>;
+			status = "disabled";
+
+			trips {
+				tdiode_sw_shutdown: tdiode-sw-shutdown {
+					temperature = <107000>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+			};
 		};
 	};
 };

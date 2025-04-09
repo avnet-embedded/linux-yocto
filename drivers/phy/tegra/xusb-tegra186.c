@@ -12,6 +12,7 @@
 #include <linux/platform_device.h>
 #include <linux/clk.h>
 #include <linux/slab.h>
+#include <linux/tegra_prod.h>
 
 #include <soc/tegra/fuse.h>
 
@@ -265,6 +266,8 @@ struct tegra186_xusb_padctl {
 	struct tegra_xusb_padctl base;
 	void __iomem *ao_regs;
 
+	/* prod settings */
+	struct tegra_prod *prod_list;
 	struct tegra_xusb_fuse_calibration calib;
 
 	/* UTMI bias and tracking */
@@ -696,6 +699,7 @@ static void tegra186_utmi_bias_pad_power_off(struct tegra_xusb_padctl *padctl)
 static void tegra186_utmi_pad_power_on(struct phy *phy)
 {
 	struct tegra_xusb_lane *lane = phy_get_drvdata(phy);
+	struct tegra_xusb_usb2_lane *usb2 = to_usb2_lane(lane);
 	struct tegra_xusb_padctl *padctl = lane->pad->padctl;
 	struct tegra_xusb_usb2_port *port;
 	struct device *dev = padctl->dev;
@@ -711,6 +715,9 @@ static void tegra186_utmi_pad_power_on(struct phy *phy)
 		return;
 	}
 
+	if (usb2->powered_on)
+		return;
+
 	dev_dbg(dev, "power on UTMI pad %u\n", index);
 
 	tegra186_utmi_bias_pad_power_on(padctl);
@@ -724,16 +731,22 @@ static void tegra186_utmi_pad_power_on(struct phy *phy)
 	value = padctl_readl(padctl, XUSB_PADCTL_USB2_OTG_PADX_CTL1(index));
 	value &= ~USB2_OTG_PD_DR;
 	padctl_writel(padctl, value, XUSB_PADCTL_USB2_OTG_PADX_CTL1(index));
+
+	usb2->powered_on = true;
 }
 
 static void tegra186_utmi_pad_power_down(struct phy *phy)
 {
 	struct tegra_xusb_lane *lane = phy_get_drvdata(phy);
+	struct tegra_xusb_usb2_lane *usb2 = to_usb2_lane(lane);
 	struct tegra_xusb_padctl *padctl = lane->pad->padctl;
 	unsigned int index = lane->index;
 	u32 value;
 
 	if (!phy)
+		return;
+
+	if (!usb2->powered_on)
 		return;
 
 	dev_dbg(padctl->dev, "power down UTMI pad %u\n", index);
@@ -749,6 +762,8 @@ static void tegra186_utmi_pad_power_down(struct phy *phy)
 	udelay(2);
 
 	tegra186_utmi_bias_pad_power_off(padctl);
+
+	usb2->powered_on = false;
 }
 
 static int tegra186_xusb_padctl_vbus_override(struct tegra_xusb_padctl *padctl,
@@ -857,6 +872,29 @@ static int tegra186_utmi_phy_power_on(struct phy *phy)
 	if (!port) {
 		dev_err(dev, "no port found for USB2 lane %u\n", index);
 		return -ENODEV;
+	}
+
+	if (priv->prod_list) {
+		char prod_name[] = "prod_c_utmiX";
+		int err;
+
+		sprintf(prod_name, "prod_c_utmi%d", index);
+		err = tegra_prod_set_by_name(&padctl->regs, prod_name,
+					     priv->prod_list);
+		if (err) {
+			dev_dbg(dev, "failed to apply prod for utmi pad%d\n",
+				index);
+		}
+
+		err = tegra_prod_set_by_name(&padctl->regs, "prod",
+					     priv->prod_list);
+		if (err)
+			dev_dbg(dev, "failed to apply prod settings\n");
+
+		err = tegra_prod_set_by_name(&padctl->regs, "prod_c_bias",
+					     priv->prod_list);
+		if (err)
+			dev_dbg(dev, "failed to apply prod for bias pad\n");
 	}
 
 	value = padctl_readl(padctl, XUSB_PADCTL_USB2_PAD_MUX);
@@ -1503,6 +1541,12 @@ tegra186_xusb_padctl_probe(struct device *dev,
 	err = tegra186_xusb_read_fuse_calibration(priv);
 	if (err < 0)
 		return ERR_PTR(err);
+
+	priv->prod_list = devm_tegra_prod_get(dev);
+	if (IS_ERR(priv->prod_list)) {
+		dev_dbg(dev, "Prod-settings is not available\n");
+		priv->prod_list = NULL;
+	}
 
 	return &priv->base;
 }

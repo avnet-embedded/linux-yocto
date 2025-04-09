@@ -192,6 +192,37 @@
 #define WAKE_AOWAKE_CTRL 0x4f4
 #define  WAKE_AOWAKE_CTRL_INTR_POLARITY BIT(0)
 
+#define SCRATCH_SECURE_RSV104_1		0x3a8
+#define  ROOTFS_SR_MAGIC_SHIFT		(0)
+#define  ROOTFS_SR_MAGIC_MASK		(0xffff)
+#define  ROOTFS_SR_MAGIC_V(r)		((r >> ROOTFS_SR_MAGIC_SHIFT) & \
+						ROOTFS_SR_MAGIC_MASK)
+#define  ROOTFS_SR_MAGIC_MIN		(0)
+#define  ROOTFS_SR_MAGIC_MAX		(0xffff)
+#define  ROOTFS_CURRENT_SHIFT		(16)
+#define  ROOTFS_CURRENT_MASK		(0x3)
+#define  ROOTFS_CURRENT_V(r)		((r >> ROOTFS_CURRENT_SHIFT) & \
+						ROOTFS_CURRENT_MASK)
+#define  ROOTFS_CURRENT_MIN		(0)
+#define  ROOTFS_CURRENT_MAX		(1)
+#define  ROOTFS_RETRY_COUNT_B_SHIFT	(18)
+#define  ROOTFS_RETRY_COUNT_B_MASK	(0x3)
+#define  ROOTFS_RETRY_COUNT_B_V(r)	((r >> ROOTFS_RETRY_COUNT_B_SHIFT) & \
+						ROOTFS_RETRY_COUNT_B_MASK)
+#define  ROOTFS_RETRY_COUNT_B_MIN	(0)
+#define  ROOTFS_RETRY_COUNT_B_MAX	(3)
+#define  ROOTFS_RETRY_COUNT_A_SHIFT	(20)
+#define  ROOTFS_RETRY_COUNT_A_MASK	(0x3)
+#define  ROOTFS_RETRY_COUNT_A_V(r)	((r >> ROOTFS_RETRY_COUNT_A_SHIFT) & \
+						ROOTFS_RETRY_COUNT_A_MASK)
+#define  ROOTFS_RETRY_COUNT_A_MIN	(0)
+#define  ROOTFS_RETRY_COUNT_A_MAX	(3)
+
+#define SCRATCH_SECURE_RSV109_0		0x3cc
+#define  BOOT_CHAIN_STATUS_A_V(r)	((r) & 0x1)
+#define  BOOT_CHAIN_STATUS_B_V(r)	((r >> 1) & 0x1)
+#define  BOOT_CHAIN_CURRENT_V(r)	((r >> 4) & 0x3)
+
 #define SW_WAKE_ID		83 /* wake83 */
 
 /* for secure PMC */
@@ -384,6 +415,8 @@ struct tegra_pmc_soc {
 	bool has_blink_output;
 	bool has_usb_sleepwalk;
 	bool supports_core_domain;
+	bool has_single_mmio_aperture;
+	bool allow_boot_chain_sel;
 };
 
 /**
@@ -2222,6 +2255,153 @@ static ssize_t reset_level_show(struct device *dev,
 
 static DEVICE_ATTR_RO(reset_level);
 
+static ssize_t tegra_pmc_scratch_rsv104_store(struct tegra_pmc *pmc,
+					const char *buf, u32 mask, u32 shift,
+					u32 min, u32 max, size_t count)
+{
+	int ret;
+	u32 reg, val;
+
+	ret = sscanf(buf, "0x%x", &val);
+	if (ret != 1)
+		return -EINVAL;
+
+	if (val < min || val > max)
+		return -EINVAL;
+
+	reg = tegra_pmc_scratch_readl(pmc, SCRATCH_SECURE_RSV104_1);
+	reg &= ~(mask << shift);
+	reg |= (val << shift);
+	tegra_pmc_scratch_writel(pmc, reg, SCRATCH_SECURE_RSV104_1);
+
+	return count;
+}
+
+/* Store magic id */
+static ssize_t rootfs_sr_magic_store(struct device *dev,
+				struct device_attribute *attr, const char *buf,
+				size_t count)
+{
+	return tegra_pmc_scratch_rsv104_store(pmc, buf, ROOTFS_SR_MAGIC_MASK,
+					ROOTFS_SR_MAGIC_SHIFT,
+					ROOTFS_SR_MAGIC_MIN,
+					ROOTFS_SR_MAGIC_MAX, count);
+}
+
+static ssize_t rootfs_sr_magic_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	u32 reg;
+
+	reg = tegra_pmc_scratch_readl(pmc, SCRATCH_SECURE_RSV104_1);
+
+	return sprintf(buf, "0x%x\n", ROOTFS_SR_MAGIC_V(reg));
+}
+static DEVICE_ATTR_RW(rootfs_sr_magic);
+
+/* Store current rootfs chain */
+static ssize_t rootfs_current_store(struct device *dev,
+				struct device_attribute *attr, const char *buf,
+				size_t count)
+{
+	return tegra_pmc_scratch_rsv104_store(pmc, buf, ROOTFS_CURRENT_MASK,
+					ROOTFS_CURRENT_SHIFT,
+					ROOTFS_CURRENT_MIN,
+					ROOTFS_CURRENT_MAX, count);
+}
+
+static ssize_t rootfs_current_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	u32 reg;
+
+	reg = tegra_pmc_scratch_readl(pmc, SCRATCH_SECURE_RSV104_1);
+
+	return sprintf(buf, "0x%x\n", ROOTFS_CURRENT_V(reg));
+}
+static DEVICE_ATTR_RW(rootfs_current);
+
+/* Store retry counter of rootfs chain B */
+static ssize_t rootfs_retry_count_b_store(struct device *dev,
+				struct device_attribute *attr, const char *buf,
+				size_t count)
+{
+	return tegra_pmc_scratch_rsv104_store(pmc, buf,
+					ROOTFS_RETRY_COUNT_B_MASK,
+					ROOTFS_RETRY_COUNT_B_SHIFT,
+					ROOTFS_RETRY_COUNT_B_MIN,
+					ROOTFS_RETRY_COUNT_B_MAX, count);
+}
+static ssize_t rootfs_retry_count_b_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	u32 reg;
+
+	reg = tegra_pmc_scratch_readl(pmc, SCRATCH_SECURE_RSV104_1);
+
+	return sprintf(buf, "0x%x\n", ROOTFS_RETRY_COUNT_B_V(reg));
+}
+static DEVICE_ATTR_RW(rootfs_retry_count_b);
+
+/* Store retry counter of rootfs chain A */
+static ssize_t rootfs_retry_count_a_store(struct device *dev,
+				struct device_attribute *attr, const char *buf,
+				size_t count)
+{
+	return tegra_pmc_scratch_rsv104_store(pmc, buf,
+					ROOTFS_RETRY_COUNT_A_MASK,
+					ROOTFS_RETRY_COUNT_A_SHIFT,
+					ROOTFS_RETRY_COUNT_A_MIN,
+					ROOTFS_RETRY_COUNT_A_MAX, count);
+}
+
+static ssize_t rootfs_retry_count_a_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	u32 reg;
+
+	reg = tegra_pmc_scratch_readl(pmc, SCRATCH_SECURE_RSV104_1);
+
+	return sprintf(buf, "0x%x\n", ROOTFS_RETRY_COUNT_A_V(reg));
+}
+static DEVICE_ATTR_RW(rootfs_retry_count_a);
+
+/* Status of bootloader chain A */
+static ssize_t boot_chain_status_a_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	u32 reg;
+
+	reg = tegra_pmc_scratch_readl(pmc, SCRATCH_SECURE_RSV109_0);
+
+	return sprintf(buf, "0x%x\n", BOOT_CHAIN_STATUS_A_V(reg));
+}
+static DEVICE_ATTR_RO(boot_chain_status_a);
+
+/* Status of bootloader chain B */
+static ssize_t boot_chain_status_b_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	u32 reg;
+
+	reg = tegra_pmc_scratch_readl(pmc, SCRATCH_SECURE_RSV109_0);
+
+	return sprintf(buf, "0x%x\n", BOOT_CHAIN_STATUS_B_V(reg));
+}
+static DEVICE_ATTR_RO(boot_chain_status_b);
+
+/* Current bootloader chain */
+static ssize_t boot_chain_current_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	u32 reg;
+
+	reg = tegra_pmc_scratch_readl(pmc, SCRATCH_SECURE_RSV109_0);
+
+	return sprintf(buf, "0x%x\n", BOOT_CHAIN_CURRENT_V(reg));
+}
+static DEVICE_ATTR_RO(boot_chain_current);
+
 static void tegra_pmc_reset_sysfs_init(struct tegra_pmc *pmc)
 {
 	struct device *dev = pmc->dev;
@@ -2241,6 +2421,44 @@ static void tegra_pmc_reset_sysfs_init(struct tegra_pmc *pmc)
 			dev_warn(dev,
 				 "failed to create attr \"reset_level\": %d\n",
 				 err);
+	}
+
+	if (pmc->soc->allow_boot_chain_sel) {
+		err = device_create_file(dev, &dev_attr_rootfs_sr_magic);
+		if (err < 0)
+			dev_warn(dev,
+				"failed to create attr rootfs_sr_magic: %d\n",
+				err);
+		err = device_create_file(dev, &dev_attr_rootfs_current);
+		if (err < 0)
+			dev_warn(dev,
+				"failed to create attr rootfs_current: %d\n",
+				err);
+		err = device_create_file(dev, &dev_attr_rootfs_retry_count_b);
+		if (err < 0)
+			dev_warn(dev,
+				"failed to create attr rootfs_retry_count_b %d\n",
+				err);
+		err = device_create_file(dev, &dev_attr_rootfs_retry_count_a);
+		if (err < 0)
+			dev_warn(dev,
+				"failed to create attr rootfs_retry_count_a %d\n",
+				err);
+		err = device_create_file(dev, &dev_attr_boot_chain_status_a);
+		if (err < 0)
+			dev_warn(dev,
+				"failed to create attr boot_chain_status_a %d\n",
+				err);
+		err = device_create_file(dev, &dev_attr_boot_chain_status_b);
+		if (err < 0)
+			dev_warn(dev,
+				"failed to create attr boot_chain_status_b %d\n",
+				err);
+		err = device_create_file(dev, &dev_attr_boot_chain_current);
+		if (err < 0)
+			dev_warn(dev,
+				"failed to create attr boot_chain_current %d\n",
+				err);
 	}
 }
 
@@ -2917,31 +3135,38 @@ static int tegra_pmc_probe(struct platform_device *pdev)
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "wake");
-	if (res) {
+	if (pmc->soc->has_single_mmio_aperture) {
+		pmc->wake = base;
+		pmc->aotag = base;
+		pmc->scratch = base;
+	} else {
+		res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+						"wake");
 		pmc->wake = devm_ioremap_resource(&pdev->dev, res);
 		if (IS_ERR(pmc->wake))
 			return PTR_ERR(pmc->wake);
-	} else {
-		pmc->wake = base;
-	}
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "aotag");
-	if (res) {
-		pmc->aotag = devm_ioremap_resource(&pdev->dev, res);
-		if (IS_ERR(pmc->aotag))
-			return PTR_ERR(pmc->aotag);
-	} else {
-		pmc->aotag = base;
-	}
+		/* "aotag" is an optional aperture */
+		res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+						"aotag");
+		if (res) {
+			pmc->aotag = devm_ioremap_resource(&pdev->dev, res);
+			if (IS_ERR(pmc->aotag))
+				return PTR_ERR(pmc->aotag);
+		} else {
+			pmc->aotag = NULL;
+		}
 
-	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "scratch");
-	if (res) {
-		pmc->scratch = devm_ioremap_resource(&pdev->dev, res);
-		if (IS_ERR(pmc->scratch))
-			return PTR_ERR(pmc->scratch);
-	} else {
-		pmc->scratch = base;
+		/* "scratch" is an optional aperture */
+		res = platform_get_resource_byname(pdev, IORESOURCE_MEM,
+						"scratch");
+		if (res) {
+			pmc->scratch = devm_ioremap_resource(&pdev->dev, res);
+			if (IS_ERR(pmc->scratch))
+				return PTR_ERR(pmc->scratch);
+		} else {
+			pmc->scratch = NULL;
+		}
 	}
 
 	pmc->clk = devm_clk_get_optional(&pdev->dev, "pclk");
@@ -2953,12 +3178,16 @@ static int tegra_pmc_probe(struct platform_device *pdev)
 	 * PMC should be last resort for restarting since it soft-resets
 	 * CPU without resetting everything else.
 	 */
-	err = devm_register_reboot_notifier(&pdev->dev,
-					    &tegra_pmc_reboot_notifier);
-	if (err) {
-		dev_err(&pdev->dev, "unable to register reboot notifier, %d\n",
-			err);
-		return err;
+
+	if (pmc->scratch) {
+		err = devm_register_reboot_notifier(&pdev->dev,
+						&tegra_pmc_reboot_notifier);
+		if (err) {
+			dev_err(&pdev->dev,
+				"unable to register reboot notifier, %d\n",
+				err);
+			return err;
+		}
 	}
 
 	err = devm_register_sys_off_handler(&pdev->dev,
@@ -3332,6 +3561,7 @@ static const struct tegra_pmc_soc tegra20_pmc_soc = {
 	.num_pmc_clks = 0,
 	.has_blink_output = true,
 	.has_usb_sleepwalk = true,
+	.has_single_mmio_aperture = true,
 };
 
 static const char * const tegra30_powergates[] = {
@@ -3393,6 +3623,7 @@ static const struct tegra_pmc_soc tegra30_pmc_soc = {
 	.num_pmc_clks = ARRAY_SIZE(tegra_pmc_clks_data),
 	.has_blink_output = true,
 	.has_usb_sleepwalk = true,
+	.has_single_mmio_aperture = true,
 };
 
 static const char * const tegra114_powergates[] = {
@@ -3450,6 +3681,7 @@ static const struct tegra_pmc_soc tegra114_pmc_soc = {
 	.num_pmc_clks = ARRAY_SIZE(tegra_pmc_clks_data),
 	.has_blink_output = true,
 	.has_usb_sleepwalk = true,
+	.has_single_mmio_aperture = true,
 };
 
 static const char * const tegra124_powergates[] = {
@@ -3594,6 +3826,7 @@ static const struct tegra_pmc_soc tegra124_pmc_soc = {
 	.num_pmc_clks = ARRAY_SIZE(tegra_pmc_clks_data),
 	.has_blink_output = true,
 	.has_usb_sleepwalk = true,
+	.has_single_mmio_aperture = true,
 };
 
 static const char * const tegra210_powergates[] = {
@@ -3757,6 +3990,7 @@ static const struct tegra_pmc_soc tegra210_pmc_soc = {
 	.num_pmc_clks = ARRAY_SIZE(tegra_pmc_clks_data),
 	.has_blink_output = true,
 	.has_usb_sleepwalk = true,
+	.has_single_mmio_aperture = true,
 };
 
 static const struct tegra_io_pad_soc tegra186_io_pads[] = {
@@ -3919,6 +4153,7 @@ static const struct tegra_wake_event tegra186_wake_events[] = {
 	TEGRA_WAKE_IRQ("pmu", 24, 209),
 	TEGRA_WAKE_GPIO("power", 29, 1, TEGRA186_AON_GPIO(FF, 0)),
 	TEGRA_WAKE_IRQ("rtc", 73, 10),
+	TEGRA_WAKE_GPIO("eqos", 20, 0, TEGRA194_MAIN_GPIO(G, 4)),
 };
 
 static const struct tegra_pmc_soc tegra186_pmc_soc = {
@@ -3954,6 +4189,7 @@ static const struct tegra_pmc_soc tegra186_pmc_soc = {
 	.num_pmc_clks = 0,
 	.has_blink_output = false,
 	.has_usb_sleepwalk = false,
+	.has_single_mmio_aperture = true,
 };
 
 static const struct tegra_io_pad_soc tegra194_io_pads[] = {
@@ -4139,6 +4375,7 @@ static const struct tegra_pmc_soc tegra194_pmc_soc = {
 	.num_pmc_clks = 0,
 	.has_blink_output = false,
 	.has_usb_sleepwalk = false,
+	.has_single_mmio_aperture = true,
 };
 
 static const struct tegra_io_pad_soc tegra234_io_pads[] = {
@@ -4233,6 +4470,16 @@ static const struct tegra_wake_event tegra234_wake_events[] = {
 	TEGRA_WAKE_GPIO("mgbe", 56, 0, TEGRA234_MAIN_GPIO(Y, 3)),
 	TEGRA_WAKE_IRQ("rtc", 73, 10),
 	TEGRA_WAKE_IRQ("sw-wake", SW_WAKE_ID, 179),
+	TEGRA_WAKE_GPIO("sd_wake", 8, 0, TEGRA234_MAIN_GPIO(G, 7)),
+	TEGRA_WAKE_GPIO("eqos", 20, 0, TEGRA234_MAIN_GPIO(G, 4)),
+	TEGRA_WAKE_IRQ("usb3_port_0", 76, 167),
+	TEGRA_WAKE_IRQ("usb3_port_1", 77, 167),
+	TEGRA_WAKE_IRQ("usb3_port_2_3", 78, 167),
+	TEGRA_WAKE_IRQ("usb2_port_0", 79, 167),
+	TEGRA_WAKE_IRQ("usb2_port_1", 80, 167),
+	TEGRA_WAKE_IRQ("usb2_port_2", 81, 167),
+	TEGRA_WAKE_IRQ("usb2_port_3", 82, 167),
+	TEGRA_WAKE_GPIO("soc_gpio50", 48, 1, TEGRA234_AON_GPIO(BB, 2)),
 };
 
 static const struct tegra_pmc_soc tegra234_pmc_soc = {
@@ -4267,6 +4514,8 @@ static const struct tegra_pmc_soc tegra234_pmc_soc = {
 	.pmc_clks_data = NULL,
 	.num_pmc_clks = 0,
 	.has_blink_output = false,
+	.has_single_mmio_aperture = false,
+	.allow_boot_chain_sel = true,
 };
 
 static const struct of_device_id tegra_pmc_match[] = {

@@ -4,6 +4,7 @@
  *
  *  Copyright (C) 2003 Russell King, All Rights Reserved.
  *  Copyright (C) 2007 Pierre Ossman
+ *  Copyright (c) 2018-2023, NVIDIA CORPORATION.  All rights reserved.
  *
  *  MMC card bus driver model
  */
@@ -27,6 +28,11 @@
 #include "bus.h"
 
 #define to_mmc_driver(d)	container_of(d, struct mmc_driver, drv)
+
+struct mmc_card *mmc_cards[MAX_CARDS_NUM];
+EXPORT_SYMBOL(mmc_cards);
+
+static int card_idx;
 
 static ssize_t type_show(struct device *dev,
 	struct device_attribute *attr, char *buf)
@@ -127,6 +133,26 @@ static int mmc_bus_probe(struct device *dev)
 {
 	struct mmc_driver *drv = to_mmc_driver(dev->driver);
 	struct mmc_card *card = mmc_dev_to_card(dev);
+	int card_id;
+
+	if (card_idx == MAX_CARDS_NUM) {
+		pr_err("Exceeded the total number of cards allowed");
+		return -EINVAL;
+	} else {
+		for (card_id = 0; card_id < MAX_CARDS_NUM; card_id++) {
+			if (!mmc_cards[card_id])
+				break;
+		}
+		mmc_cards[card_id] = card;
+		card_idx++;
+	}
+
+	if (card_idx == MAX_CARDS_NUM) {
+		pr_err("Exceeded the total number of cards allowed");
+		return -EINVAL;
+	} else {
+		mmc_cards[card_idx++] = card;
+	}
 
 	return drv->probe(card);
 }
@@ -135,7 +161,16 @@ static void mmc_bus_remove(struct device *dev)
 {
 	struct mmc_driver *drv = to_mmc_driver(dev->driver);
 	struct mmc_card *card = mmc_dev_to_card(dev);
+	int card_id;
 
+	for (card_id = 0; card_id < MAX_CARDS_NUM; card_id++) {
+		if (mmc_cards[card_id] == card)
+			break;
+	}
+	if (card_id == MAX_CARDS_NUM)
+		card_id--;
+	mmc_cards[card_id] = NULL;
+	card_idx--;
 	drv->remove(card);
 }
 

@@ -92,6 +92,7 @@ struct tegra_gpio_soc {
 	const char *pinmux;
 	bool has_gte;
 	bool has_vm_support;
+	bool is_hw_ts_sup;
 };
 
 struct tegra_gpio {
@@ -824,6 +825,8 @@ static int tegra186_gpio_probe(struct platform_device *pdev)
 	struct device_node *np;
 	char **names;
 	int err;
+	int value;
+	void __iomem *base;
 
 	gpio = devm_kzalloc(&pdev->dev, sizeof(*gpio), GFP_KERNEL);
 	if (!gpio)
@@ -939,27 +942,8 @@ static int tegra186_gpio_probe(struct platform_device *pdev)
 	irq->parent_handler_data = gpio;
 	irq->num_parents = gpio->num_irq;
 
-	/*
-	 * To simplify things, use a single interrupt per bank for now. Some
-	 * chips support up to 8 interrupts per bank, which can be useful to
-	 * distribute the load and decrease the processing latency for GPIOs
-	 * but it also requires a more complicated interrupt routing than we
-	 * currently program.
-	 */
-	if (gpio->num_irqs_per_bank > 1) {
-		irq->parents = devm_kcalloc(&pdev->dev, gpio->num_banks,
-					    sizeof(*irq->parents), GFP_KERNEL);
-		if (!irq->parents)
-			return -ENOMEM;
-
-		for (i = 0; i < gpio->num_banks; i++)
-			irq->parents[i] = gpio->irq[i * gpio->num_irqs_per_bank];
-
-		irq->num_parents = gpio->num_banks;
-	} else {
-		irq->num_parents = gpio->num_irq;
-		irq->parents = gpio->irq;
-	}
+	irq->num_parents = gpio->num_irq;
+	irq->parents = gpio->irq;
 
 	if (gpio->soc->num_irqs_per_bank > 1)
 		tegra186_gpio_init_route_mapping(gpio);
@@ -989,6 +973,23 @@ static int tegra186_gpio_probe(struct platform_device *pdev)
 			irq->map[offset + j] = irq->parents[port->bank];
 
 		offset += port->pins;
+	}
+
+	if (gpio->soc->is_hw_ts_sup) {
+		for (i = 0, offset = 0; i < gpio->soc->num_ports; i++) {
+			const struct tegra_gpio_port *port =
+							&gpio->soc->ports[i];
+			for (j = 0; j < port->pins; j++) {
+				base = tegra186_gpio_get_base(gpio, offset + j);
+				if (WARN_ON(base == NULL))
+					return -EINVAL;
+
+				value = readl(base + TEGRA186_GPIO_ENABLE_CONFIG);
+				value |= TEGRA186_GPIO_ENABLE_CONFIG_TIMESTAMP_FUNC;
+				writel(value, base + TEGRA186_GPIO_ENABLE_CONFIG);
+			}
+			offset += port->pins;
+		}
 	}
 
 	return devm_gpiochip_add_data(&pdev->dev, &gpio->gpio, gpio);
@@ -1270,6 +1271,7 @@ static const struct tegra_gpio_soc tegra241_aon_soc = {
 	.instance = 1,
 	.num_irqs_per_bank = 8,
 	.has_vm_support = false,
+	.is_hw_ts_sup = true,
 };
 
 static const struct of_device_id tegra186_gpio_of_match[] = {

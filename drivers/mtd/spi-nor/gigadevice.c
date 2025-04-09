@@ -67,6 +67,11 @@ static const struct flash_info gigadevice_nor_parts[] = {
 		FLAGS(SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_TB_SR_BIT6)
 		FIXUP_FLAGS(SPI_NOR_4B_OPCODES)
 		.fixups = &gd25q256_fixups },
+	{ "gd25lt512m", INFO(0xc8661a, 0, 64 * 1024, 1024)
+	        FLAGS(SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_TB_SR_BIT6)
+	        FIXUP_FLAGS(SPI_NOR_4B_OPCODES)
+	        NO_SFDP_FLAGS(SECT_4K | SPI_NOR_QUAD_READ)
+		.fixups = &gd25q256_fixups },
 };
 
 const struct spi_nor_manufacturer spi_nor_gigadevice = {
