@@ -3331,6 +3331,7 @@ static void serial8250_console_restore(struct uart_8250_port *up)
 	serial8250_out_MCR(up, up->mcr | UART_MCR_DTR | UART_MCR_RTS);
 }
 
+#ifdef CONFIG_SERIAL_8250_LEGACY_CONSOLE
 static void fifo_wait_for_lsr(struct uart_8250_port *up, unsigned int count)
 {
 	unsigned int i;
@@ -3379,7 +3380,6 @@ static void serial8250_console_fifo_write(struct uart_8250_port *up,
 	fifo_wait_for_lsr(up, tx_count);
 }
 
-#ifdef CONFIG_SERIAL_8250_LEGACY_CONSOLE
 /*
  *	Print a string to the serial port trying not to disturb
  *	any possible real use of the port...
