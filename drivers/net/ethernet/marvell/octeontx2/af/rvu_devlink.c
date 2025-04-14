@@ -212,7 +212,7 @@ static void rvu_nix_unregister_interrupts(struct rvu *rvu)
 	rvu_write64(rvu, blkaddr, NIX_AF_ERR_INT_ENA_W1C, ~0ULL);
 	rvu_write64(rvu, blkaddr, NIX_AF_RAS_ENA_W1C, ~0ULL);
 
-	for (i = NIX_AF_INT_VEC_RVU; i < NIX_AF_INT_VEC_CNT; i++) {
+	for (i = NIX_AF_INT_VEC_GEN; i < NIX_AF_INT_VEC_CNT; i++) {
 		vec = offs + i;
 		if (rvu->irq_allocated[vec]) {
 			free_irq(pci_irq_vector(rvu->pdev, vec), rvu_dl);
