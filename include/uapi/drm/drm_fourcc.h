@@ -454,6 +454,15 @@ extern "C" {
 #define DRM_FORMAT_S416	fourcc_code('S', '4', '1', '6') /* non-subsampled Cb (1) and Cr (2) planes 16 bits per channel */
 
 /*
+ * 3 plane non-subsampled (444) YCbCr
+ * 12 bits per component, 24 bits contains 2 pixels
+ * index 0: Y plane, [23:12] Y1 [11:0] Y0
+ * index 1: Cb plane, [23:12] Cb1 [11:0] Cb0
+ * index 2: Cr plane, [23:12] Cr1 [11:0] Cr0
+ */
+#define DRM_FORMAT_X423 fourcc_code('X', '4', '2', '3')
+
+/*
  * 3 plane YCbCr
  * index 0: Y plane, [7:0] Y
  * index 1: Cb plane, [7:0] Cb
