@@ -239,7 +239,6 @@ struct gpmc_device {
 	int nirqs;
 	struct resource *data;
 	unsigned int is_suspended:1;
-	struct resource *data;
 };
 
 static struct irq_domain *gpmc_irq_domain;
