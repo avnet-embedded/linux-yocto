@@ -1137,7 +1137,7 @@ static int cpsw_ndo_xdp_xmit(struct net_device *ndev, int n,
 
 	for (i = 0; i < n; i++) {
 		xdpf = frames[i];
-		if (xdpf->len < tx_packet_min) {
+		if (xdpf->len < tx_packet_min)
 			break;
 
 		port = priv->emac_port + cpsw->data.dual_emac;
