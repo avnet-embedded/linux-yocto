@@ -320,6 +320,9 @@ static struct mvpp2_cls_flow cls_flows[MVPP2_N_FLOWS] = {
 	MVPP2_DEF_FLOW(ETHER_FLOW, MVPP2_FL_NON_IP_TAG,
 		       MVPP22_CLS_HEK_OPT_VLAN,
 		       0, 0),
+	MVPP2_DEF_FLOW(MVPP22_FLOW_ETHERNET, MVPP2_FL_NON_IP_TAG,
+		       MVPP22_CLS_HEK_TAGGED,
+		       0, 0),
 };
 
 u32 mvpp2_cls_flow_hits(struct mvpp2 *priv, int index)
