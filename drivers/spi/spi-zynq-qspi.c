@@ -482,6 +482,8 @@ static int zynq_qspi_config_op(struct spi_device *spi,
 static int zynq_qspi_setup_op(struct spi_device *spi)
 {
 	struct device *dev = &spi->master->dev;
+	struct spi_controller *ctlr = spi->master;
+	struct zynq_qspi *qspi = spi_controller_get_devdata(ctlr);
 	int ret;
 
 	if (gpio_is_valid(spi->cs_gpio)) {
@@ -498,7 +500,24 @@ static int zynq_qspi_setup_op(struct spi_device *spi)
 	if (spi->master->busy)
 		return -EBUSY;
 
-	return zynq_qspi_config_op(spi, NULL);
+	ret = zynq_qspi_config_op(spi, NULL);
+	if (ret)
+		return ret;
+	
+	ret = clk_enable(qspi->refclk);
+	if (ret)
+		return ret;
+
+	ret = clk_enable(qspi->pclk);
+	if (ret) {
+		clk_disable(qspi->refclk);
+		return ret;
+	}
+
+	zynq_qspi_write(qspi, ZYNQ_QSPI_ENABLE_OFFSET,
+			ZYNQ_QSPI_ENABLE_ENABLE_MASK);
+
+	return 0;
 }
 
 /**
