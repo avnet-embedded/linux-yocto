@@ -95,6 +95,13 @@ static int mtdchar_close(struct inode *inode, struct file *file)
 
 	pr_debug("MTD_close\n");
 
+	if (!inode->i_nlink){
+		mfi->mtd = NULL;
+		file->private_data = NULL;
+		kfree(mfi);
+		return 0;
+	}
+
 	/* Only sync if opened RW */
 	if ((file->f_mode & FMODE_WRITE))
 		mtd_sync(mtd);
