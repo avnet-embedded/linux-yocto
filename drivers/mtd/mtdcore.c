@@ -753,12 +753,19 @@ int del_mtd_device(struct mtd_info *mtd)
 {
 	int ret;
 	struct mtd_notifier *not;
+	struct mtd_info *master = mtd_get_master(mtd);
 
 	mutex_lock(&mtd_table_mutex);
 
 	if (idr_find(&mtd_idr, mtd->index) != mtd) {
 		ret = -ENODEV;
 		goto out_error;
+	}
+
+	while (master->mtd_event_remove) {
+		if (kref_read(&mtd->refcnt) == 1)
+			break;
+		__put_mtd_device(mtd);
 	}
 
 	/* No need to get a refcount on the module containing
