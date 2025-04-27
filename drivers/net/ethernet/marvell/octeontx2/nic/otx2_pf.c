@@ -2042,6 +2042,7 @@ int otx2_open(struct net_device *netdev)
 	struct otx2_qset *qset = &pf->qset;
 	int err = 0, qidx, vec;
 	char *irq_name;
+	int name_len;
 
 	netif_carrier_off(netdev);
 
@@ -2126,7 +2127,6 @@ int otx2_open(struct net_device *netdev)
 	vec = pf->hw.nix_msixoff + NIX_LF_CINT_VEC_START;
 	for (qidx = 0; qidx < pf->hw.cint_cnt; qidx++) {
 		irq_name = &pf->hw.irq_name[vec * NAME_SIZE];
-		int name_len;
 
 		name_len = snprintf(irq_name, NAME_SIZE, "%s-rxtx-%d",
 				    pf->netdev->name, qidx);
