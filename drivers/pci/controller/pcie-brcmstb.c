@@ -2014,13 +2014,11 @@ static int brcm_pcie_probe(struct platform_device *pdev)
 		goto fail;
 	}
 
-	if (pci_msi_enabled()) {
-		struct device_node *msi_np = of_parse_phandle(pcie->np, "msi-parent", 0);
+	struct device_node *msi_np __free(device_node) =
+				of_parse_phandle(pcie->np, "msi-parent", 0);
+	if (pci_msi_enabled() && msi_np == pcie->np) {
 
-		if (msi_np == pcie->np)
-			ret = brcm_pcie_enable_msi(pcie);
-
-		of_node_put(msi_np);
+		ret = brcm_pcie_enable_msi(pcie);
 
 		if (ret) {
 			dev_err(pcie->dev, "probe of internal MSI failed");
