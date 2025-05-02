@@ -934,6 +934,8 @@ static int ov7251_set_power_on(struct device *dev)
 		return ret;
 	}
 
+	usleep_range(1000, 1100);
+
 	gpiod_set_value_cansleep(ov7251->enable_gpio, 1);
 
 	/* wait at least 65536 external clock cycles */
@@ -1714,7 +1716,7 @@ static int ov7251_probe(struct i2c_client *client)
 	}
 
 	ov7251->enable_gpio = devm_gpiod_get_optional(dev, "enable",
-						      GPIOD_OUT_HIGH);
+						      GPIOD_OUT_LOW);
 	if (IS_ERR(ov7251->enable_gpio)) {
 		dev_err(dev, "cannot get enable gpio\n");
 		return PTR_ERR(ov7251->enable_gpio);
