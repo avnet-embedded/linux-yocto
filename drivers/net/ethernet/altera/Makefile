@@ -19,5 +19,5 @@ ifeq ($(CONFIG_INTEL_FPGA_ETILE),y)
 	obj-$(CONFIG_INTEL_FPGA_ETILE) += intel_fpga_etile.o
 	intel_fpga_etile-objs := intel_fpga_etile_main.o intel_fpga_etile_fec.o \
 				 intel_fpga_etile_ethtool.o
-+endif
+endif
 
