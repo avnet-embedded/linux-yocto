@@ -2475,7 +2475,7 @@ static int altr_edac_a10_probe(struct platform_device *pdev)
 
 	/* Set irq mask for DDR SBE to avoid any pending irq before registration */
 	regmap_write(edac->ecc_mgr_map, A10_SYSMGR_ECC_INTMASK_SET_OFST,
-		     (BIT(16) | BIT(17)));
+		     (A10_SYSMGR_ECC_INTMASK_SDMMCB | A10_SYSMGR_ECC_INTMASK_DDR0));
 
 	edac->irq_chip.name = pdev->dev.of_node->name;
 	edac->irq_chip.irq_mask = a10_eccmgr_irq_mask;
