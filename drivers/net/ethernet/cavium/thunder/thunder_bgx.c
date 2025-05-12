@@ -283,7 +283,6 @@ EXPORT_SYMBOL(bgx_get_lmac_mac);
 void bgx_set_lmac_mac(int node, int bgx_idx, int lmacid, const u8 *mac)
 {
 	struct bgx *bgx = get_bgx(node, bgx_idx);
-	struct lmac *lmac = &bgx->lmac[lmacid];
 	u64 cam_dmac;
 
 	if (!bgx)
