@@ -73,69 +73,69 @@ static struct npc_mcam_kex_extr npc_mkex_extr_default = {
 		[0] = {
 			/* Layer A: Ethernet: */
 			[NPC_LT_LA_ETHER] =
-				/* DMAC: 6 bytes, KW1[55:8] */
-				KEX_EXTR_CFG(0x05, 0x0, 0x1, NPC_KEXOF_DMAC),
+				/* DMAC: 6 bytes, KW1[63:15] */
+				KEX_EXTR_CFG(0x05, 0x0, 0x1, NPC_KEXOF_DMAC + 1),
 			[NPC_LT_LA_CPT_HDR] =
-				/* DMAC: 6 bytes, KW1[55:8] */
-				KEX_EXTR_CFG(0x05, 0x0, 0x1, NPC_KEXOF_DMAC),
+				/* DMAC: 6 bytes, KW1[63:15] */
+				KEX_EXTR_CFG(0x05, 0x0, 0x1, NPC_KEXOF_DMAC + 1),
 		},
 		[1] = {
 			/* Layer A: Ethernet: */
 			[NPC_LT_LA_ETHER] =
-				/* Ethertype: 2 bytes, KW0[55:40] */
-				KEX_EXTR_CFG(0x01, 0xc, 0x1, 0x5),
+				/* Ethertype: 2 bytes, KW0[63:48] */
+				KEX_EXTR_CFG(0x01, 0xc, 0x1, 0x6),
 			[NPC_LT_LA_CPT_HDR] =
-				/* Ethertype: 2 bytes, KW0[55:40] */
-				KEX_EXTR_CFG(0x01, 0xc, 0x1, 0x5),
+				/* Ethertype: 2 bytes, KW0[63:48] */
+				KEX_EXTR_CFG(0x01, 0xc, 0x1, 0x6),
 		},
 		[2] = {
 			/* Layer B: Single VLAN (CTAG) */
 			[NPC_LT_LB_CTAG] =
-				/* CTAG VLAN: 2 bytes, KW1[7:0], KW0[63:56] */
-				KEX_EXTR_CFG(0x01, 0x2, 0x1, 0x7),
+				/* CTAG VLAN: 2 bytes, KW1[15:0] */
+				KEX_EXTR_CFG(0x01, 0x2, 0x1, 0x8),
 			/* Layer B: Stacked VLAN (STAG|QinQ) */
 			[NPC_LT_LB_STAG_QINQ] =
-				/* Outer VLAN: 2 bytes, KW1[7:0], KW0[63:56] */
-				KEX_EXTR_CFG(0x01, 0x2, 0x1, 0x7),
+				/* Outer VLAN: 2 bytes, KW1[15:0] */
+				KEX_EXTR_CFG(0x01, 0x2, 0x1, 0x8),
 			[NPC_LT_LB_FDSA] =
-				/* SWITCH PORT: 1 byte, KW0[63:56] */
-				KEX_EXTR_CFG(0x0, 0x1, 0x1, 0x7),
+				/* SWITCH PORT: 1 byte, KW1[7:0] */
+				KEX_EXTR_CFG(0x0, 0x1, 0x1, 0x8),
 		},
 		[3] = {
 			[NPC_LT_LB_CTAG] =
-				/* Ethertype: 2 bytes, KW0[55:40] */
-				KEX_EXTR_CFG(0x01, 0x4, 0x1, 0x5),
+				/* Ethertype: 2 bytes, KW0[63:48] */
+				KEX_EXTR_CFG(0x01, 0x4, 0x1, 0x6),
 			[NPC_LT_LB_STAG_QINQ] =
-				/* Ethertype: 2 bytes, KW0[55:40] */
-				KEX_EXTR_CFG(0x01, 0x8, 0x1, 0x5),
+				/* Ethertype: 2 bytes, KW0[63:48] */
+				KEX_EXTR_CFG(0x01, 0x8, 0x1, 0x6),
 			[NPC_LT_LB_FDSA] =
-				/* Ethertype: 2 bytes, KW0[55:40] */
-				KEX_EXTR_CFG(0x01, 0x4, 0x1, 0x5),
+				/* Ethertype: 2 bytes, KW0[63:48] */
+				KEX_EXTR_CFG(0x01, 0x4, 0x1, 0x6),
 		},
 		[4] = {
 			/* Layer C: IPv4 */
 			[NPC_LT_LC_IP] =
-				/* SIP+DIP: 8 bytes, KW2[63:0] */
-				KEX_EXTR_CFG(0x07, 0xc, 0x1, 0x10),
+				/* SIP+DIP: 8 bytes, KW3[7:0], KW2[63:8] */
+				KEX_EXTR_CFG(0x07, 0xc, 0x1, 0x11),
 			/* Layer C: IPv6 */
 			[NPC_LT_LC_IP6] =
-				/* Everything up to SADDR: 8 bytes, KW2[63:0] */
-				KEX_EXTR_CFG(0x07, 0x0, 0x1, 0x10),
+				/* Everything up to SADDR: 8 bytes, KW3[7:0], KW2[63:8] */
+				KEX_EXTR_CFG(0x07, 0x0, 0x1, 0x11),
 		},
 		[5] = {
 			[NPC_LT_LC_IP] =
-				/* TOS: 1 byte, KW1[63:56] */
-				KEX_EXTR_CFG(0x0, 0x1, 0x1, 0xf),
+				/* TOS: 1 byte, KW2[7:0] */
+				KEX_EXTR_CFG(0x0, 0x1, 0x1, 0x10),
 		},
 		[6] = {
 			/* Layer D:UDP */
 			[NPC_LT_LD_UDP] =
-				/* SPORT+DPORT: 4 bytes, KW3[31:0] */
-				KEX_EXTR_CFG(0x3, 0x0, 0x1, 0x18),
+				/* SPORT+DPORT: 4 bytes, KW3[39:8] */
+				KEX_EXTR_CFG(0x3, 0x0, 0x1, 0x19),
 			/* Layer D:TCP */
 			[NPC_LT_LD_TCP] =
-				/* SPORT+DPORT: 4 bytes, KW3[31:0] */
-				KEX_EXTR_CFG(0x3, 0x0, 0x1, 0x18),
+				/* SPORT+DPORT: 4 bytes, KW3[39:8] */
+				KEX_EXTR_CFG(0x3, 0x0, 0x1, 0x19),
 		},
 	},
 
@@ -2958,8 +2958,8 @@ void npc_cn20k_enable_mcam_entry(struct rvu *rvu, int blkaddr, int index, bool e
 	}
 }
 
-static void npc_cn20k_clear_mcam_entry(struct rvu *rvu, int blkaddr,
-				       int bank, int index)
+void npc_cn20k_clear_mcam_entry(struct rvu *rvu, int blkaddr,
+				int bank, int index)
 {
 	rvu_write64(rvu, blkaddr,
 		    NPC_AF_CN20K_MCAMEX_BANKX_CAMX_INTF_EXT(index, bank, 1), 0);
@@ -4060,6 +4060,14 @@ int rvu_mbox_handler_npc_cn20k_mcam_alloc_and_write_entry(struct rvu *rvu,
 	return 0;
 }
 
+static int rvu_npc_get_base_steer_rule_type(struct rvu *rvu, u16 pcifunc)
+{
+	if (is_lbk_vf(rvu, pcifunc))
+		return NIXLF_PROMISC_ENTRY;
+
+	return NIXLF_UCAST_ENTRY;
+}
+
 int rvu_mbox_handler_npc_cn20k_read_base_steer_rule(struct rvu *rvu,
 						    struct msg_req *req,
 						    struct npc_cn20k_mcam_read_base_rule_rsp *rsp)
@@ -4069,6 +4077,7 @@ int rvu_mbox_handler_npc_cn20k_read_base_steer_rule(struct rvu *rvu,
 	u16 pcifunc = req->hdr.pcifunc;
 	u8 intf, enable, hw_prio;
 	struct rvu_pfvf *pfvf;
+	int rl_type;
 
 	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NPC, 0);
 	if (blkaddr < 0)
@@ -4094,9 +4103,11 @@ int rvu_mbox_handler_npc_cn20k_read_base_steer_rule(struct rvu *rvu,
 		mutex_unlock(&mcam->lock);
 		goto out;
 	}
+
+	rl_type = rvu_npc_get_base_steer_rule_type(rvu, pcifunc);
+
 	/* Read the default ucast entry if there is no pkt steering rule */
-	index = npc_get_nixlf_mcam_index(rvu, mcam, pcifunc, nixlf,
-					 NIXLF_UCAST_ENTRY);
+	index = npc_get_nixlf_mcam_index(rvu, mcam, pcifunc, nixlf, rl_type);
 read_entry:
 	/* Read the mcam entry */
 	npc_cn20k_read_mcam_entry(rvu, blkaddr, index,

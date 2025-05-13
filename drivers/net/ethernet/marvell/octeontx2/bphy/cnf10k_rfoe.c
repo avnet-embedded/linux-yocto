@@ -297,7 +297,8 @@ static bool cnf10k_validate_network_transport(struct sk_buff *skb)
 }
 
 static bool cnf10k_is_ptp_sync_ecpri_req(struct sk_buff *skb, int *offset,
-					 int *udp_csum, int *pkt_type)
+					 int *udp_csum, int *pkt_type,
+					 bool *read_tx_ts)
 {
 	struct ethhdr *eth = (struct ethhdr *)(skb->data);
 	struct roe_ecpri_msg_5_hdr_s *ecpri_t5_hdr;
@@ -305,6 +306,8 @@ static bool cnf10k_is_ptp_sync_ecpri_req(struct sk_buff *skb, int *offset,
 	u8 *data = skb->data, *msgtype;
 	__be16 proto = eth->h_proto;
 	int network_depth = 0;
+
+	*read_tx_ts = false;
 
 	if (eth_type_vlan(eth->h_proto))
 		proto = __vlan_get_protocol(skb, eth->h_proto, &network_depth);
@@ -327,17 +330,21 @@ static bool cnf10k_is_ptp_sync_ecpri_req(struct sk_buff *skb, int *offset,
 	}
 
 	if (ntohs(proto) == ETH_P_ECPRI) {
-		ecpri_hdr = (struct roe_ecpri_cmn_hdr_s *)(skb->data + sizeof(*eth));
-		ecpri_t5_hdr = (struct roe_ecpri_msg_5_hdr_s *)(skb->data + sizeof(*eth) +
-				sizeof(*ecpri_hdr));
+		ecpri_hdr = (struct roe_ecpri_cmn_hdr_s *)(skb->data + *offset);
+		ecpri_t5_hdr = (struct roe_ecpri_msg_5_hdr_s *)(skb->data + *offset +
+								sizeof(*ecpri_hdr));
 		if (ecpri_hdr->msg_type == ECPRI_MSG_TYPE_5) {
 			*pkt_type = PACKET_TYPE_ECPRI;
 			switch (ecpri_t5_hdr->action_type) {
 			case ACTION_REQ:
-			case ACTION_RESP:
 				*offset = *offset + sizeof(*ecpri_hdr);
+				*read_tx_ts = true;
 				return true;
+			case ACTION_RESP:
 			case ACTION_REQ_WITH_FOLLOWUP:
+				*read_tx_ts = true;
+				return false;
+			case ACTION_FOLLOWUP:
 			case ACTION_REMOTE_REQ:
 			case ACTION_REMOTE_REQ_WITH_FOLLOWUP:
 			default:
@@ -353,6 +360,7 @@ static bool cnf10k_is_ptp_sync_ecpri_req(struct sk_buff *skb, int *offset,
 		}
 	} else {
 		msgtype = data + *offset;
+		*read_tx_ts = ((*msgtype & 0xf) == DELAY_REQUEST_MSG_ID);
 	}
 
 	*pkt_type = PACKET_TYPE_PTP;
@@ -1066,17 +1074,23 @@ static netdev_tx_t cnf10k_rfoe_ptp_xmit(struct sk_buff *skb,
 	struct netdev_queue *txq;
 	unsigned int pkt_len = 0;
 	unsigned long flags;
-	struct ethhdr *eth;
 	int psm_queue_id;
+	u8 ts_steps_count = priv->cdev_priv->ts_force_steps.other_ts_steps;
+	__be16 proto;
 
 	job_cfg = &priv->tx_ptp_job_cfg;
 	memset(&tx_mem, 0, sizeof(tx_mem));
 
 	txq = netdev_get_tx_queue(netdev, skb_get_queue_mapping(skb));
 
-	eth = (struct ethhdr *)skb->data;
-	if (htons(eth->h_proto) == ETH_P_ECPRI)
+	proto = rfoe_common_get_protocol(skb);
+	if (proto == ETH_P_ECPRI) {
+		ts_steps_count = priv->cdev_priv->ts_force_steps.ecpri_ts_steps;
 		pkt_stats_type = PACKET_TYPE_ECPRI;
+	}
+
+	if (!ts_steps_count)
+		ts_steps_count = (priv->ptp_onestep_sync ? 1 : 2);
 
 	spin_lock_irqsave(&job_cfg->lock, flags);
 
@@ -1125,8 +1139,12 @@ static netdev_tx_t cnf10k_rfoe_ptp_xmit(struct sk_buff *skb,
 	}
 
 	/* check if one-step is enabled */
-	if (priv->ptp_onestep_sync) {
-		if (cnf10k_is_ptp_sync_ecpri_req(skb, &proto_data_offset, &udp_csum, &pkt_type)) {
+	if (ts_steps_count == 1) {
+		bool read_tx_ts = false;
+
+		if (cnf10k_is_ptp_sync_ecpri_req(skb, &proto_data_offset,
+						 &udp_csum, &pkt_type,
+						 &read_tx_ts)) {
 			cnf10k_rfoe_prepare_onestep_ptp_header(priv,
 							       &tx_mem, skb,
 							       proto_data_offset,
@@ -1138,9 +1156,7 @@ static netdev_tx_t cnf10k_rfoe_ptp_xmit(struct sk_buff *skb,
 				cnf10k_rfoe_compute_udp_csum(skb);
 		}
 
-		if ((pkt_type == PACKET_TYPE_PTP && ((*(skb->data + proto_data_offset) & 0xF) !=
-				    DELAY_REQUEST_MSG_ID)) || pkt_type == PACKET_TYPE_ECPRI)
-
+		if (!read_tx_ts)
 			goto ptp_one_step_out;
 	}
 
@@ -1199,15 +1215,15 @@ static netdev_tx_t cnf10k_rfoe_eth_start_xmit(struct sk_buff *skb,
 	struct netdev_queue *txq;
 	unsigned int pkt_len = 0;
 	unsigned long flags;
-	struct ethhdr *eth;
+	__be16 proto;
 
 	if (skb_get_queue_mapping(skb) == PTP_QUEUE_ID)
 		return cnf10k_rfoe_ptp_xmit(skb, netdev);
 
-	eth = (struct ethhdr *)skb->data;
+	proto = rfoe_common_get_protocol(skb);
 	job_cfg = &priv->rfoe_common->tx_oth_job_cfg;
 	pkt_type = PACKET_TYPE_OTHER;
-	if (htons(eth->h_proto) == ETH_P_ECPRI)
+	if (proto == ETH_P_ECPRI)
 		pkt_type = PACKET_TYPE_ECPRI;
 
 	txq = netdev_get_tx_queue(netdev, qidx);

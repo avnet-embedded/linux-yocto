@@ -35,6 +35,9 @@ enum rvu_block_addr_e {
 	BLKADDR_REE0		= 0x14ULL,
 	BLKADDR_REE1		= 0x15ULL,
 	BLKADDR_APR		= 0x16ULL,
+	BLKADDR_DPI0		= 0x18ULL,
+	BLKADDR_DPI1		= 0x19ULL,
+	BLKADDR_ML		= 0x1aULL,
 	BLKADDR_MBOX		= 0x1bULL,
 	BLK_COUNT		= 0x1cULL,
 };
@@ -53,6 +56,8 @@ enum rvu_block_type_e {
 	BLKTYPE_CPT  = 0x9,
 	BLKTYPE_NDC  = 0xa,
 	BLKTYPE_REE  = 0xe,
+	BLKTYPE_DPI  = 0x11,
+	BLKTYPE_ML   = 0x12,
 	BLKTYPE_MBOX = 0x13,
 	BLKTYPE_MAX  = 0x13,
 };
@@ -156,6 +161,7 @@ enum npa_aq_comp {
 enum npa_aq_ctype {
 	NPA_AQ_CTYPE_AURA = 0x0,
 	NPA_AQ_CTYPE_POOL = 0x1,
+	NPA_AQ_CTYPE_HALO = 0x2,
 };
 
 /* NPA admin queue instruction opcodes */
@@ -443,7 +449,8 @@ struct nix_cn10k_rq_ctx_s {
 	u64 rsvd_171		: 1;
 	u64 later_skip		: 6;
 	u64 xqe_imm_size	: 6;
-	u64 rsvd_189_184	: 6;
+	u64 band_prof_id_h	: 4;
+	u64 rsvd_189_188	: 2;
 	u64 xqe_imm_copy	: 1;
 	u64 xqe_hdr_split	: 1;
 	u64 xqe_drop		: 8; /* W3 */
@@ -766,7 +773,8 @@ struct nix_bandprof_s {
 	uint64_t rc_action                   :  2;
 	uint64_t meter_algo                  :  2;
 	uint64_t band_prof_id                :  7;
-	uint64_t reserved_111_118            :  8;
+	uint64_t band_prof_id_h              :  4;
+	uint64_t reserved_111_118            :  4;
 	uint64_t hl_en                       :  1;
 	uint64_t reserved_120_127            :  8;
 	uint64_t ts                          : 48; /* W2 */

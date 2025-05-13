@@ -92,6 +92,21 @@ config OCTEONTX_SERDES
 	  capture eye, use PRBS, configure serdes in loopback mode, and
 	  read/write TX tuning parameters.
 
+config MARVELL_FWLOG
+	tristate "firmware log interface"
+	depends on ARM64
+	help
+	  Provides interface to read firmware boot logs. Firmware bootlogs are saved
+	  in memory that is accessible from kernel. Enabling this option allows the
+	  user to dump the firmware boot logs.
+
+	  Firmware needs to build with `RECORD_FWLOG=1` to see the boot logs and
+	  U-boot config `CONFIG_FWLOG_TTYMEM` is also required to have this feature
+	  validated from linux.
+
+	  Say Y here if you want to dump the firmware boot logs from linux shell. This
+	  option is available only for Octeon10 and OcteonTX2 platforms.
+
 config MARVELL_CN10K_SERDES_DIAGNOSTICS
 	tristate "Marvell SerDes diagnostics debugfs driver"
 	default m
@@ -164,4 +179,23 @@ config MRVL_SWUP
             -> TIM Version check
             -> TIM Hash verification
             -> TIM firmware update
+
+config MARVELL_PTM_EP
+	tristate "Marvell PCIe PTM EP"
+	default m
+	help
+	  Provides PTM requestor(EP) support. The driver provides interface for
+	  triggering and capturing time.
+
+	  To compile this as a module, choose M here. The module will be called
+	  mrvl-ptm-ep.
+
+config MVMDIO_UIO
+	tristate "Marvell MDIO interface driver"
+	  default m
+	select MDIO_THUNDER
+	help
+	  Select this option if you want to provide an interface for userspace
+	  PHY drivers to access Marvell's MDIO bus.
+
 endmenu

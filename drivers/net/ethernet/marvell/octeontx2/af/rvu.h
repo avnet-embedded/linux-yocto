@@ -22,6 +22,7 @@
 #include "rvu_reg.h"
 #include "cn20k/nix.h"
 #include "ptp.h"
+#include "cn20k/reg.h"
 
 /* PCI device IDs */
 #define	PCI_DEVID_OCTEONTX2_RVU_AF		0xA065
@@ -34,6 +35,8 @@
 #define PCI_SUBSYS_DEVID_CNF10K_A	       0xBA00
 #define PCI_SUBSYS_DEVID_CNF10K_B              0xBC00
 #define PCI_SUBSYS_DEVID_CN10K_B               0xBD00
+#define PCI_SUBSYS_DEVID_CN20KA                0xC220
+#define PCI_SUBSYS_DEVID_CNF20KA               0xC320
 
 /* PCI BAR nos */
 #define	PCI_AF_REG_BAR_NUM			0
@@ -207,6 +210,7 @@ struct npc_mcam {
 	u16	total_entries;	/* Total number of MCAM entries */
 	u16	nixlf_offset;	/* Offset of nixlf rsvd uncast entries */
 	u16	pf_offset;	/* Offset of PF's rsvd bcast, promisc entries */
+	u16	cpt_pass2_offset;
 	u16	lprio_count;
 	u16	lprio_start;
 	u16	hprio_count;
@@ -260,6 +264,9 @@ struct rvu_pfvf {
 	u16		cpt1_lfs;
 	u16		ree0_lfs;
 	u16		ree1_lfs;
+	u16		mllfs;
+	u16		dpilfs;
+	u16		dpi1_lfs;
 	u8		cgx_lmac;
 	u8		sso_uniq_ident;
 
@@ -273,6 +280,7 @@ struct rvu_pfvf {
 	struct qmem	*pool_ctx;
 	struct qmem	*npa_qints_ctx;
 	unsigned long	*aura_bmap;
+	unsigned long	*halo_bmap; /* Aura and Halo bmap are mutually exclusive */
 	unsigned long	*pool_bmap;
 
 	/* NIX contexts */
@@ -461,6 +469,7 @@ struct rvu_hwinfo {
 	u8	total_pfs;   /* MAX RVU PFs HW supports */
 	u16	total_vfs;   /* Max RVU VFs HW supports */
 	u16	max_vfs_per_pf; /* Max VFs that can be attached to a PF */
+	u32	max_msix;	/* Max msix vec HW support */
 	u8	cgx;
 	u8	lmac_per_cgx;
 	u16	cgx_chan_base;	/* CGX base channel number */
@@ -679,8 +688,13 @@ struct rvu {
 	spinlock_t		mcs_intrq_lock;
 	/* CPT interrupt lock */
 	spinlock_t		cpt_intr_lock;
+	/* DPI lock */
+	struct mutex		dpi_rsrc_lock;
 
 	struct rvu_cpt		cpt;
+
+	/* NPA */
+	struct rsrc_bmap	npa_dpc;
 
 	struct mutex		mbox_lock; /* Serialize mbox up and down msgs */
 	u16			rep_pcifunc;
@@ -692,8 +706,8 @@ struct rvu {
 	struct list_head	rep_evtq_head;
 	/* Representor event lock */
 	spinlock_t		rep_evtq_lock;
-
-	struct ng_rvu           *ng_rvu;
+	struct ng_rvu		*ng_rvu;
+	int			ml_pf_num;
 };
 
 static inline void rvu_write64(struct rvu *rvu, u64 block, u64 offset, u64 val)
@@ -876,20 +890,6 @@ static inline bool is_cnf10ka_a1(struct rvu *rvu)
 	return false;
 }
 
-static inline bool is_cgx_mapped_to_nix(unsigned short id, u8 cgx_id)
-{
-	/* On CNF10KA and CNF10KB silicons only two CGX blocks are connected
-	* to NIX.
-	*/
-	if (id == PCI_SUBSYS_DEVID_CNF10K_A || id == PCI_SUBSYS_DEVID_CNF10K_B)
-		return cgx_id <= 1;
-
-	return !(cgx_id && !(id == PCI_SUBSYS_DEVID_96XX ||
-			     id == PCI_SUBSYS_DEVID_98XX ||
-			     id == PCI_SUBSYS_DEVID_CN10K_A ||
-			     id == PCI_SUBSYS_DEVID_CN10K_B));
-}
-
 static inline bool is_cnf10ka_a0(struct rvu *rvu)
 {
 	struct pci_dev *pdev = rvu->pdev;
@@ -898,6 +898,20 @@ static inline bool is_cnf10ka_a0(struct rvu *rvu)
 	    (pdev->revision & 0x0F) == 0x0)
 		return true;
 	return false;
+}
+
+static inline bool is_cgx_mapped_to_nix(unsigned short id, u8 cgx_id)
+{
+	/* On CNF10KA and CNF10KB silicons only two CGX blocks are connected
+	 * to NIX.
+	 */
+	if (id == PCI_SUBSYS_DEVID_CNF10K_A || id == PCI_SUBSYS_DEVID_CNF10K_B)
+		return cgx_id <= 1;
+
+	return !(cgx_id && !(id == PCI_SUBSYS_DEVID_96XX ||
+			     id == PCI_SUBSYS_DEVID_98XX ||
+			     id == PCI_SUBSYS_DEVID_CN10K_A ||
+			     id == PCI_SUBSYS_DEVID_CN10K_B));
 }
 
 static inline bool is_rvu_npc_hash_extract_en(struct rvu *rvu)
@@ -1019,7 +1033,7 @@ int rvu_get_lf(struct rvu *rvu, struct rvu_block *block, u16 pcifunc, u16 slot);
 int rvu_lf_reset(struct rvu *rvu, struct rvu_block *block, int lf);
 int rvu_get_blkaddr(struct rvu *rvu, int blktype, u16 pcifunc);
 int rvu_poll_reg(struct rvu *rvu, u64 block, u64 offset, u64 mask, bool zero);
-int rvu_get_num_lbk_chans(void);
+int rvu_get_num_lbk_chans(struct rvu *rvu);
 int rvu_ndc_sync(struct rvu *rvu, int lfblkid, int lfidx, u64 lfoffset);
 int rvu_get_blkaddr_from_slot(struct rvu *rvu, int blktype, u16 pcifunc,
 			      u16 global_slot, u16 *slot_in_block);
@@ -1121,6 +1135,7 @@ void rvu_npa_freemem(struct rvu *rvu);
 void rvu_npa_lf_teardown(struct rvu *rvu, u16 pcifunc, int npalf);
 int rvu_npa_aq_enq_inst(struct rvu *rvu, struct npa_aq_enq_req *req,
 			struct npa_aq_enq_rsp *rsp);
+int rvu_npa_halo_hwctx_disable(struct npa_aq_enq_req *req);
 
 /* NIX APIs */
 bool is_nixlf_attached(struct rvu *rvu, u16 pcifunc);
@@ -1212,6 +1227,8 @@ void rvu_npc_get_mcam_entry_alloc_info(struct rvu *rvu, u16 pcifunc,
 void rvu_npc_get_mcam_counter_alloc_info(struct rvu *rvu, u16 pcifunc,
 					 int blkaddr, int *alloc_cnt,
 					 int *enable_cnt);
+void rvu_npc_clear_ucast_entry(struct rvu *rvu, int pcifunc, int nixlf);
+
 bool is_npc_intf_tx(u8 intf);
 bool is_npc_intf_rx(u8 intf);
 bool is_npc_interface_valid(struct rvu *rvu, u8 intf);
@@ -1259,6 +1276,12 @@ bool npc_is_feature_supported(struct rvu *rvu, u64 features, u8 intf);
 int npc_mcam_verify_entry(struct npc_mcam *mcam, u16 pcifunc, int entry);
 int npc_mcam_rsrcs_init(struct rvu *rvu, int blkaddr);
 void npc_mcam_rsrcs_deinit(struct rvu *rvu);
+int npc_install_flow(struct rvu *rvu, int blkaddr, u16 target,
+		     int nixlf, struct rvu_pfvf *pfvf,
+		     struct npc_install_flow_req *req,
+		     struct npc_install_flow_rsp *rsp, bool enable,
+		     bool pf_set_vfs_mac);
+int rvu_npc_install_cpt_pass2_entry(struct rvu *rvu);
 
 /* CPT APIs */
 int rvu_cpt_register_interrupts(struct rvu *rvu);
@@ -1275,6 +1298,8 @@ u32 rvu_get_cpt_chan_mask(struct rvu *rvu);
 /* CN10K RVU */
 int rvu_set_channels_base(struct rvu *rvu);
 void rvu_program_channels(struct rvu *rvu);
+
+void rvu_afvf_queue_flr_work(struct rvu *rvu, int start_vf, int numvfs);
 
 /* CN10K NIX */
 void rvu_nix_block_cn10k_init(struct rvu *rvu, struct nix_hw *nix_hw);
@@ -1328,4 +1353,17 @@ int rvu_rep_pf_init(struct rvu *rvu);
 int rvu_rep_install_mcam_rules(struct rvu *rvu);
 void rvu_rep_update_rules(struct rvu *rvu, u16 pcifunc, bool ena);
 int rvu_rep_notify_pfvf_state(struct rvu *rvu, u16 pcifunc, bool enable);
+
+void rvu_reset_blk_lfcfg(struct rvu *rvu, struct rvu_block *block);
+void rvu_scan_block(struct rvu *rvu, struct rvu_block *block);
+void rvu_detach_block(struct rvu *rvu, int pcifunc, int blktype);
+void rvu_update_rsrc_map(struct rvu *rvu, struct rvu_pfvf *pfvf,
+			 struct rvu_block *block, u16 pcifunc, u16 lf,
+			 bool attach);
+void rvu_set_msix_offset(struct rvu *rvu, struct rvu_pfvf *pfvf,
+			 struct rvu_block *block, int lf);
+u16 rvu_get_msix_offset(struct rvu *rvu, struct rvu_pfvf *pfvf, int blkaddr,
+			int lf);
+void __rvu_flr_handler(struct rvu *rvu, u16 pcifunc);
+
 #endif /* RVU_H */

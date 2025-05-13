@@ -9,6 +9,7 @@
 #include "rvu.h"
 #include "cgx.h"
 #include "rvu_reg.h"
+#include "cn20k/api.h"
 
 /* RVU LMTST */
 #define LMT_TBL_OP_READ		0
@@ -84,9 +85,13 @@ static int rvu_get_lmtaddr(struct rvu *rvu, u16 pcifunc,
 
 	mutex_lock(&rvu->rsrc_lock);
 	rvu_write64(rvu, BLKADDR_RVUM, RVU_AF_SMMU_ADDR_REQ, iova);
-	pf = rvu_get_pf(pcifunc) & 0x1F;
-	val = BIT_ULL(63) | BIT_ULL(14) | BIT_ULL(13) | pf << 8 |
-	      ((pcifunc & RVU_PFVF_FUNC_MASK) & 0xFF);
+	pf = rvu_get_pf(pcifunc) & RVU_PFVF_PF_MASK;
+	val = pf << 8 | ((pcifunc & RVU_PFVF_FUNC_MASK) & 0xFF);
+
+	if (is_cn20k(rvu->pdev))
+		val |= BIT_ULL(63) | BIT_ULL(23) | BIT_ULL(22);
+	else
+		val |= BIT_ULL(63) | BIT_ULL(14) | BIT_ULL(13);
 	rvu_write64(rvu, BLKADDR_RVUM, RVU_AF_SMMU_TXN_REQ, val);
 
 	err = rvu_poll_reg(rvu, BLKADDR_RVUM, RVU_AF_SMMU_ADDR_RSP_STS, BIT_ULL(0), false);
@@ -301,6 +306,9 @@ int rvu_set_channels_base(struct rvu *rvu)
 	struct rvu_hwinfo *hw = rvu->hw;
 	u64 nix_const, nix_const1;
 	int blkaddr;
+
+	if (is_cn20k(rvu->pdev))
+		return rvu_cn20k_set_channels_base(rvu);
 
 	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NIX, 0);
 	if (blkaddr < 0)
@@ -553,13 +561,17 @@ void rvu_program_channels(struct rvu *rvu)
 		return;
 
 	rvu_nix_set_channels(rvu);
-	rvu_lbk_set_channels(rvu);
 	rvu_rpm_set_channels(rvu);
+	if (is_cn20k(rvu->pdev)) {
+		rvu_cn20k_cpt_chan_cfg(rvu);
+		rvu_cn20k_lbk_set_channels(rvu);
+		return;
+	}
+	rvu_lbk_set_channels(rvu);
 }
 
 void rvu_nix_block_cn10k_init(struct rvu *rvu, struct nix_hw *nix_hw)
 {
-	struct rvu_hwinfo *hw = rvu->hw;
 	int blkaddr = nix_hw->blkaddr;
 	u64 cfg, val;
 
@@ -585,14 +597,6 @@ void rvu_nix_block_cn10k_init(struct rvu *rvu, struct nix_hw *nix_hw)
 		rvu_write64(rvu, blkaddr, NIX_AF_RQM_ECO, cfg);
 	}
 
-	cfg = rvu_read64(rvu, blkaddr, NIX_AF_CONST);
-
-	if (!(cfg & BIT_ULL(62))) {
-		hw->cap.second_cpt_pass = false;
-		return;
-	}
-
-	hw->cap.second_cpt_pass = true;
 	nix_hw->rq_msk.total = NIX_RQ_MSK_PROFILES;
 }
 

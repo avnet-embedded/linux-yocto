@@ -1491,11 +1491,11 @@ static int npc_update_tx_entry(struct rvu *rvu, struct rvu_pfvf *pfvf,
 	return 0;
 }
 
-static int npc_install_flow(struct rvu *rvu, int blkaddr, u16 target,
-			    int nixlf, struct rvu_pfvf *pfvf,
-			    struct npc_install_flow_req *req,
-			    struct npc_install_flow_rsp *rsp, bool enable,
-			    bool pf_set_vfs_mac)
+int npc_install_flow(struct rvu *rvu, int blkaddr, u16 target,
+		     int nixlf, struct rvu_pfvf *pfvf,
+		     struct npc_install_flow_req *req,
+		     struct npc_install_flow_rsp *rsp, bool enable,
+		     bool pf_set_vfs_mac)
 {
 	struct rvu_npc_mcam_rule *def_ucast_rule = pfvf->def_ucast_rule;
 	struct npc_cn20k_mcam_write_entry_req cn20k_write_req = { 0 };
@@ -1645,10 +1645,14 @@ update_rule:
 	rule->chan &= rule->chan_mask;
 	rule->lxmb = dummy.lxmb;
 	rule->hw_prio = req->hw_prio;
-	if (is_npc_intf_tx(req->intf))
-		rule->intf = pfvf->nix_tx_intf;
-	else
-		rule->intf = pfvf->nix_rx_intf;
+	if (is_pf_cgxmapped(rvu, req->hdr.pcifunc)) {
+		if (is_npc_intf_tx(req->intf))
+			rule->intf = pfvf->nix_tx_intf;
+		else
+			rule->intf = pfvf->nix_rx_intf;
+	} else {
+		rule->intf = req->intf;
+	}
 
 	if (new)
 		rvu_mcam_add_rule(mcam, rule);
@@ -2006,7 +2010,7 @@ int rvu_mbox_handler_npc_delete_flow(struct rvu *rvu,
 			/* single rule */
 			} else if (req->entry == iter->entry) {
 				blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NPC, 0);
-				if (blkaddr)
+				if (blkaddr && !is_cn20k(rvu->pdev))
 					rsp->cntr_val = rvu_read64(rvu, blkaddr,
 								   NPC_AF_MATCH_STATX(iter->cntr));
 				list_move_tail(&iter->list, &del_list);
@@ -2297,13 +2301,14 @@ int rvu_mbox_handler_npc_mcam_get_hit_status(struct rvu *rvu,
 					     struct npc_mcam_get_hit_status_rsp *rsp)
 {
 	struct npc_mcam *mcam = &rvu->hw->mcam;
-	u8 mcam_entry_per_hit_counter = 16;
+	u8 mcam_entry_per_hit_counter = 64;
 	u8 bank_inc, bank_start, bank_end;
 	u8 hit_start, hit_end;
 	u8 bank, arr_idx;
 	u64 val, bitmap;
 	u32 start, end;
 	int blkaddr;
+	u8 hit_max;
 	bool clear;
 
 	if (is_cn20k(rvu->pdev))
@@ -2312,10 +2317,6 @@ int rvu_mbox_handler_npc_mcam_get_hit_status(struct rvu *rvu,
 	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NPC, 0);
 	if (blkaddr < 0)
 		return NPC_MCAM_INVALID_REQ;
-
-	if (is_cn10ka_a0(rvu) || is_cn10ka_a1(rvu) ||
-	    is_cnf10kb_a0(rvu) || is_cnf10ka_a1(rvu))
-		mcam_entry_per_hit_counter = 64;
 
 	bank_inc = 1;
 	start = req->mcam_id_start;
@@ -2329,13 +2330,14 @@ int rvu_mbox_handler_npc_mcam_get_hit_status(struct rvu *rvu,
 	arr_idx = start / mcam_entry_per_hit_counter;
 	hit_start = (start % mcam->banksize) / mcam_entry_per_hit_counter;
 	hit_end = (end % mcam->banksize) / mcam_entry_per_hit_counter;
+	hit_max = mcam->banksize / mcam_entry_per_hit_counter;
 	clear = req->clear;
 	if (mcam->keysize == NPC_MCAM_KEY_X2)
 		bank_inc = 2;
 
 	bank = bank_start;
 	while (bank <= bank_end) {
-		for (; hit_start < mcam_entry_per_hit_counter; hit_start++) {
+		for (; hit_start < hit_max; hit_start++) {
 			if (bank == bank_end && hit_start > hit_end)
 				return 0;
 
