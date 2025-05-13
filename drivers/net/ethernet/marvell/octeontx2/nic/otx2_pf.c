@@ -1314,6 +1314,7 @@ int otx2_reset_mac_stats(struct otx2_nic *pfvf)
 	mutex_unlock(&pfvf->mbox.lock);
 	return err;
 }
+EXPORT_SYMBOL(otx2_reset_mac_stats);
 
 static int otx2_cgx_config_loopback(struct otx2_nic *pf, bool enable)
 {
@@ -2938,7 +2939,6 @@ static int otx2_get_vf_config(struct net_device *netdev, int vf,
 static int otx2_xdp_xmit_tx(struct otx2_nic *pf, struct xdp_frame *xdpf,
 			    int qidx)
 {
-	struct page *page;
 	u64 dma_addr;
 	int err = 0;
 
@@ -2948,15 +2948,11 @@ static int otx2_xdp_xmit_tx(struct otx2_nic *pf, struct xdp_frame *xdpf,
 	if (dma_mapping_error(pf->dev, dma_addr))
 		return -ENOMEM;
 
-	err = otx2_xdp_sq_append_pkt(pf, dma_addr, xdpf->len,
-				     qidx, XDP_REDIRECT);
+	err = otx2_xdp_sq_append_pkt(pf, xdpf, dma_addr, xdpf->len,
+				     qidx, OTX2_XDP_REDIRECT);
 	if (!err) {
 		otx2_dma_unmap_page(pf, dma_addr, xdpf->len, DMA_TO_DEVICE);
-		page = virt_to_page(xdpf->data);
-		if (page->pp)
-			page_pool_recycle_direct(page->pp, page);
-		else
-			put_page(page);
+		xdp_return_frame(xdpf);
 		return -ENOMEM;
 	}
 	return 0;
@@ -3136,6 +3132,9 @@ int otx2_wq_init(struct otx2_nic *pf)
 int otx2_check_pf_usable(struct otx2_nic *nic)
 {
 	u64 rev;
+
+	if (is_cn20k(nic->hw.pdev))
+		return cn20k_check_pf_usable(nic);
 
 	rev = otx2_read64(nic, RVU_PF_BLOCK_ADDRX_DISC(BLKADDR_RVUM));
 	rev = (rev >> 12) & 0xFF;

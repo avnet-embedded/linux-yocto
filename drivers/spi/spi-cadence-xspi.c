@@ -261,7 +261,7 @@ struct dentry *mrvl_spi_debug_root;
 #define SPI_NOT_CLAIMED				0x00
 #define SPI_AP_NS_OWN				0x02
 #define CDNS_XSPI_PHY_CTB_RFILE_PHY_GPIO_CTRL_1	0x8c
-#define SPI_LOCK_TIMEOUT			100 /* 1 second timeout */
+#define SPI_LOCK_TIMEOUT			20 /* 200ms timeout */
 #define	SPI_LOCK_CHECK_TIMEOUT			10
 #define SPI_LOCK_SLEEP_DURATION_MS		10
 #endif
@@ -320,6 +320,8 @@ struct cdns_xspi_dev {
 	int xspi_id;
 	bool wo_mode;
 #endif
+	spinlock_t lock;
+	unsigned long flags;
 };
 
 #if IS_ENABLED(CONFIG_SPI_CADENCE_MRVL_XSPI)
@@ -377,7 +379,11 @@ static int unlock_spi_bus(struct cdns_xspi_dev *cdns_xspi)
 
 	if (cdns_xspi->lockbase) {
 		if (lock->owner == SPI_AP_NS_OWN) {
-			lock->owner = 0;
+			spin_lock_irqsave(&cdns_xspi->lock, cdns_xspi->flags);
+			WRITE_ONCE(lock->owner, 0);
+			/* To ensure lock->owner will be visible to other CPU */
+			smp_wmb();
+			spin_unlock_irqrestore(&cdns_xspi->lock, cdns_xspi->flags);
 			return 0;
 		}
 	} else {
@@ -404,19 +410,36 @@ static int lock_spi_bus(struct cdns_xspi_dev *cdns_xspi)
 	if (cdns_xspi->lockbase) {
 		while (timeout-- >= 0) {
 			if (xspi_trylock(&lock->lock) != 0) {
-				mdelay(SPI_LOCK_SLEEP_DURATION_MS);
+				msleep(SPI_LOCK_SLEEP_DURATION_MS);
 				continue;
 			}
+
+			/* The spi_lock is shared between different SW modules
+			 * who run on different CPU cores at different EL.
+			 * Memory barriers are used to synchronize data and visible
+			 * to all CPU cores.
+			 */
+			/* To ensure latest value of lock->owner read before compare */
+			smp_rmb();
 			if (lock->owner == 0 || lock->owner == SPI_AP_NS_OWN) {
-				lock->owner = SPI_AP_NS_OWN;
+				spin_lock_irqsave(&cdns_xspi->lock, cdns_xspi->flags);
+				WRITE_ONCE(lock->owner, SPI_AP_NS_OWN);
+				/* To ensure lock->owner will be visible to other CPU */
+				smp_wmb();
+				spin_unlock_irqrestore(&cdns_xspi->lock, cdns_xspi->flags);
 				xspi_unlock(&lock->lock);
 				return 0;
 			}
 			xspi_unlock(&lock->lock);
-			mdelay(SPI_LOCK_SLEEP_DURATION_MS);
+			msleep(SPI_LOCK_SLEEP_DURATION_MS);
 			continue;
 		}
-		pr_err("Flash arbitration failed, lock is owned by: %d\n", lock->owner);
+		if (lock->owner > 2) {
+			pr_err("SPI bus lock %d failed, lock is owned by: (atf_support: 0x%x) 0x%x 0x%x\n",
+			cdns_xspi->xspi_id, lock->atf_support, lock->owner,
+			(int)atomic_read(&lock->lock));
+		} else
+			pr_err("Flash arbitration failed, lock is owned by: %d\n", lock->owner);
 		return -1;
 	}
 
@@ -437,7 +460,7 @@ static int lock_spi_bus(struct cdns_xspi_dev *cdns_xspi)
 			if (check == 0)
 				return 0; // got a lock
 		}
-		mdelay(SPI_LOCK_SLEEP_DURATION_MS);
+		msleep(SPI_LOCK_SLEEP_DURATION_MS);
 	}
 	pr_err("Flash arbitration failed, lock is owned by: %d\n", val);
 	return -1;
@@ -1481,6 +1504,7 @@ static int cdns_xspi_probe(struct platform_device *pdev)
 	} else {
 		struct spi_lock *lock = (struct spi_lock *)cdns_xspi->lockbase;
 
+		spin_lock_init(&cdns_xspi->lock);
 		lock->k_support = 0x01;
 	}
 

@@ -59,6 +59,7 @@
 					 NPC_CN20K_PARSE_NIBBLE_L2L3_BCAST | \
 					 NPC_CN20K_PARSE_NIBBLE_LA_LTYPE | \
 					 NPC_CN20K_PARSE_NIBBLE_LB_LTYPE | \
+					 NPC_CN20K_PARSE_NIBBLE_LC_FLAGS | \
 					 NPC_CN20K_PARSE_NIBBLE_LC_LTYPE | \
 					 NPC_CN20K_PARSE_NIBBLE_LD_LTYPE | \
 					 NPC_CN20K_PARSE_NIBBLE_LE_LTYPE)
@@ -241,5 +242,6 @@ int npc_mcam_idx_2_key_type(struct rvu *rvu, u16 mcam_idx, u8 *key_type);
 int npc_cn20k_apply_custom_kpu(struct rvu *rvu, struct npc_kpu_profile_adapter *profile);
 int npc_cn20k_load_kpu_prfl_img(struct rvu *rvu, void __iomem *prfl_addr,
 				u64 prfl_sz, const char *kpu_profile);
+void npc_cn20k_clear_mcam_entry(struct rvu *rvu, int blkaddr, int bank, int index);
 
 #endif /* NPC_CN20K_H */
