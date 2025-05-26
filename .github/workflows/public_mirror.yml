@@ -10,7 +10,7 @@ on:
 
 jobs:
   git-sync:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, arm, support]
     steps:
       - name: checkout
         uses: actions/checkout@v4.2.2
