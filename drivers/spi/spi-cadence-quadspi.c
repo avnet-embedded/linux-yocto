@@ -2257,7 +2257,6 @@ static int cqspi_remove(struct platform_device *pdev)
 static int cqspi_suspend(struct device *dev)
 {
 	struct cqspi_st *cqspi = dev_get_drvdata(dev);
-	struct spi_master *master = dev_get_drvdata(dev);
 	int ret;
 
 	if (cqspi->clk_tuned && !cqspi->tuning_complete.done &&
@@ -2266,7 +2265,7 @@ static int cqspi_suspend(struct device *dev)
 		return -ETIMEDOUT;
 	}
 
-	ret = spi_master_suspend(master);
+	ret = spi_master_suspend(cqspi->master);
 	cqspi_controller_enable(cqspi, 0);
 
 	clk_disable_unprepare(cqspi->clk);
@@ -2277,7 +2276,6 @@ static int cqspi_suspend(struct device *dev)
 static int cqspi_resume(struct device *dev)
 {
 	struct cqspi_st *cqspi = dev_get_drvdata(dev);
-	struct spi_master *master = dev_get_drvdata(dev);
 	u32 ret;
 
 	clk_prepare_enable(cqspi->clk);
@@ -2311,7 +2309,7 @@ static int cqspi_resume(struct device *dev)
 	gpio_set_value(cqspi->gpio, 1);
 	udelay(35);
 
-	return spi_master_resume(master);
+	return spi_master_resume(cqspi->master);
 }
 
 static DEFINE_SIMPLE_DEV_PM_OPS(cqspi_dev_pm_ops, cqspi_suspend, cqspi_resume);
