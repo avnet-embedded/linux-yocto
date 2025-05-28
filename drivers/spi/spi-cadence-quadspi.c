@@ -2627,10 +2627,9 @@ static void __maybe_unused cqspi_restore_context(struct cqspi_st *cqspi)
 static int cqspi_suspend(struct device *dev)
 {
 	struct cqspi_st *cqspi = dev_get_drvdata(dev);
-	struct spi_master *master = dev_get_drvdata(dev);
 	int ret;
 
-	ret = spi_master_suspend(master);
+	ret = spi_master_suspend(cqspi->master);
 	cqspi_controller_enable(cqspi, 0);
 
 	clk_disable_unprepare(cqspi->clk);
@@ -2641,7 +2640,6 @@ static int cqspi_suspend(struct device *dev)
 static int cqspi_resume(struct device *dev)
 {
 	struct cqspi_st *cqspi = dev_get_drvdata(dev);
-	struct spi_master *master = dev_get_drvdata(dev);
 
 	clk_prepare_enable(cqspi->clk);
 	cqspi_wait_idle(cqspi);
@@ -2656,7 +2654,7 @@ static int cqspi_resume(struct device *dev)
 	if ((cqspi->f_pdata->use_phy) == true)
 		cqspi_restore_context(cqspi);
 
-	return spi_master_resume(master);
+	return spi_master_resume(cqspi->master);
 }
 
 static DEFINE_RUNTIME_DEV_PM_OPS(cqspi_dev_pm_ops, cqspi_suspend,
