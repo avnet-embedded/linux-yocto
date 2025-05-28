@@ -230,7 +230,6 @@ exit:
 
 static int pci_console_nexus_de_init_resources(struct platform_device *pdev)
 {
-	struct device *dev = &pdev->dev;
 	struct pci_console_nexus *pci_cons_nexus = platform_get_drvdata(pdev);
 
 	if (pci_cons_nexus && pci_cons_nexus->desc) {
@@ -394,7 +393,6 @@ exit:
 
 static void pci_console_nexus_shutdown(struct platform_device *pdev)
 {
-	struct device *dev = &pdev->dev;
 }
 
 /*
@@ -840,11 +838,10 @@ static struct tty_driver *pci_console_dev_device(struct console *cons,
 						 int *index)
 {
 	struct pci_console *pci_cons = cons->data;
-	struct device *dev = pci_cons->device;
 
 	*index = pci_cons->cons.index;
 
-	dbgmsg(dev, "return index: %d, tty driver: %p\n", *index,
+	dbgmsg(pci_cons->device, "return index: %d, tty driver: %p\n", *index,
 	       pci_cons->tty.drv);
 
 	return pci_cons->tty.drv;
@@ -1164,8 +1161,6 @@ exit:
 
 static void pci_console_shutdown(struct platform_device *pdev)
 {
-	struct device *dev = &pdev->dev;
-
 	pci_console_de_init(pdev);
 }
 
@@ -1275,10 +1270,9 @@ void pci_console_dev_tty_poll(struct timer_list *timer)
 static int pci_console_dev_tty_open(struct tty_struct *tty, struct file *filp)
 {
 	struct pci_console *pci_cons = tty->driver->driver_state;
-	struct device *dev = pci_cons->device;
 
 	if (!pci_cons->tty.open_count++) {
-		dbgmsg(dev, "Scheduling timer...\n");
+		dbgmsg(pci_cons->device, "Scheduling timer...\n");
 		timer_setup(&pci_cons->tty.poll_timer,
 			    pci_console_dev_tty_poll, 0);
 		mod_timer(&pci_cons->tty.poll_timer,
@@ -1295,10 +1289,9 @@ static void pci_console_dev_tty_close(struct tty_struct *tty,
 				      struct file *filp)
 {
 	struct pci_console *pci_cons = tty->driver->driver_state;
-	struct device *dev = pci_cons->device;
 
 	if (--pci_cons->tty.open_count == 0) {
-		dbgmsg(dev, "Deleting timer...\n");
+		dbgmsg(pci_cons->device, "Deleting timer...\n");
 		del_timer_sync(&pci_cons->tty.poll_timer);
 	}
 }
