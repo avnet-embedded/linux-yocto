@@ -384,14 +384,14 @@ static int v3d_platform_drm_probe(struct platform_device *pdev)
 		ret = PTR_ERR(v3d->reset);
 
 		if (ret == -EPROBE_DEFER)
-			goto clk_disable;
+			return ret;
 
 		v3d->reset = NULL;
 		ret = map_regs(v3d, &v3d->bridge_regs, "bridge");
 		if (ret) {
 			dev_err(dev,
 				"Failed to get reset control or bridge regs\n");
-			goto clk_disable;
+			return ret;
 		}
 	}
 
@@ -463,7 +463,7 @@ gem_destroy:
 dma_free:
 	dma_free_wc(dev, 4096, v3d->mmu_scratch, v3d->mmu_scratch_paddr);
 clk_disable:
-	clk_disable_unprepare(v3d->clk);
+        clk_disable_unprepare(v3d->clk);
 	return ret;
 }
 
