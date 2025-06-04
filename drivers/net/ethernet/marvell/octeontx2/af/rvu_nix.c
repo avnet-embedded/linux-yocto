@@ -544,16 +544,6 @@ static int nix_setup_bpids(struct rvu *rvu, struct nix_hw *hw, int blkaddr)
 	if (!bp->ref_cnt)
 		return -ENOMEM;
 
-	bp->intf_map = devm_kcalloc(rvu->dev, bp->bpids.max,
-				    sizeof(u8), GFP_KERNEL);
-	if (!bp->intf_map)
-		return -ENOMEM;
-
-	bp->ref_cnt = devm_kcalloc(rvu->dev, bp->bpids.max,
-				   sizeof(u8), GFP_KERNEL);
-	if (!bp->ref_cnt)
-		return -ENOMEM;
-
 	return 0;
 }
 
