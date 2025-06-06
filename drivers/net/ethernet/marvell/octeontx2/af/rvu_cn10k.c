@@ -14,7 +14,7 @@
 #define LMT_TBL_OP_READ		0
 #define LMT_TBL_OP_WRITE	1
 #define LMT_MAPTBL_ENTRY_SIZE	16
-#define LMT_MAX_PF_INDEX	256
+#define LMT_MAX_VFS		256
 
 #define LMT_MAP_ENTRY_ENA      BIT_ULL(20)
 #define LMT_MAP_ENTRY_LINES    GENMASK_ULL(18, 16)
@@ -24,9 +24,8 @@ static int lmtst_map_table_ops(struct rvu *rvu, u32 index, u64 *val,
 			       int lmt_tbl_op)
 {
 	void __iomem *lmt_map_base;
-	u64 tbl_base;
+	u64 tbl_base, cfg;
 	int pfs, vfs;
-	u64 cfg;
 
 	tbl_base = rvu_read64(rvu, BLKADDR_APR, APR_AF_LMT_MAP_BASE);
 	cfg  = rvu_read64(rvu, BLKADDR_APR, APR_AF_LMT_CFG);
@@ -67,7 +66,7 @@ static int lmtst_map_table_ops(struct rvu *rvu, u32 index, u64 *val,
 #define LMT_MAP_TBL_W1_OFF  8
 static u32 rvu_get_lmtst_tbl_index(struct rvu *rvu, u16 pcifunc)
 {
-	return ((rvu_get_pf(pcifunc) * LMT_MAX_PF_INDEX) +
+	return ((rvu_get_pf(pcifunc) * LMT_MAX_VFS) +
 		(pcifunc & RVU_PFVF_FUNC_MASK)) * LMT_MAPTBL_ENTRY_SIZE;
 }
 

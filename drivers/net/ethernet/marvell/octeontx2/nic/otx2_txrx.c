@@ -418,6 +418,7 @@ static void otx2_rcv_pkt_handler(struct otx2_nic *pfvf,
 
 	otx2_set_taginfo(parse, skb);
 	skb_mark_for_recycle(skb);
+
 	napi_gro_frags(napi);
 }
 
