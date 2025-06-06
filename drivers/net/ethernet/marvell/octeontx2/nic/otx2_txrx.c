@@ -1241,8 +1241,8 @@ EXPORT_SYMBOL(otx2_sq_append_skb);
 void otx2_cleanup_rx_cqes(struct otx2_nic *pfvf, struct otx2_cq_queue *cq, int qidx)
 {
 	struct nix_cqe_rx_s *cqe;
-	int processed_cqe = 0;
 	struct otx2_pool *pool;
+	int processed_cqe = 0;
 	u16 pool_id;
 	u64 iova;
 
@@ -1267,6 +1267,7 @@ void otx2_cleanup_rx_cqes(struct otx2_nic *pfvf, struct otx2_cq_queue *cq, int q
 			continue;
 		}
 		iova = cqe->sg.seg_addr - OTX2_HEAD_ROOM;
+
 		otx2_free_bufs(pfvf, pool, iova, pfvf->rbsize);
 	}
 

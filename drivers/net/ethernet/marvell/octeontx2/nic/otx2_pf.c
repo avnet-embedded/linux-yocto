@@ -1657,8 +1657,8 @@ static void otx2_free_hw_resources(struct otx2_nic *pf)
 	struct otx2_cq_queue *cq;
 	struct otx2_pool *pool;
 	struct msg_req *req;
-	int qidx;
 	int pool_id;
+	int qidx;
 
 	/* Ensure all SQE are processed */
 	otx2_sqb_flush(pf);
