@@ -1288,8 +1288,6 @@ void otx2_free_bufs(struct otx2_nic *pfvf, struct otx2_pool *pool,
 
 		if (page_ref_count(page))
 			page_frag_free(page);
-
-		put_page(page);
 	}
 }
 
