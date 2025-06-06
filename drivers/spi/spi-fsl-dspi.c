@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0+
 //
 // Copyright 2013 Freescale Semiconductor, Inc.
-// Copyright 2020-2023 NXP
+// Copyright 2020-2025 NXP
 //
 // Freescale DSPI driver
 // This file contains a driver for the Freescale DSPI
@@ -980,7 +980,7 @@ static int dspi_transfer_one_message(struct spi_controller *ctlr,
 	if (val & SPI_MCR_HALT) {
 		regmap_update_bits(dspi->regmap, SPI_MCR, SPI_MCR_HALT, 0);
 		while (regmap_read(dspi->regmap, SPI_SR, &val) >= 0 &&
-				!(val & SPI_SR_TXRXS))
+		       !(val & SPI_SR_TXRXS))
 			;
 	}
 
@@ -1345,8 +1345,8 @@ static const struct regmap_config dspi_regmap_config[] = {
 		.reg_stride	= 4,
 		.max_register	= 0x13c,
 		.volatile_table	= &dspi_xspi_volatile_table,
-		.wr_table	= &dspi_access_table,
 		.rd_table	= &dspi_access_table,
+		.wr_table	= &dspi_access_table,
 	},
 	[S32CC_DSPI_XSPI_REGMAP] = {
 		.reg_bits	= 32,
