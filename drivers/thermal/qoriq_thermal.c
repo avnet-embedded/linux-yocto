@@ -31,6 +31,7 @@
 #define TMR_DISABLE	0x0
 #define TMR_IDLE	0x0
 #define TMR_ME		0x80000000
+#define TMR_CMD			BIT(29)
 #define TMR_ALPF	0x0c000000
 #define TMR_ALPF_V2_DEFAULT	3
 #define TMR_ALPF_V2_MAX		3
@@ -1339,6 +1340,12 @@ static int __maybe_unused qoriq_tmu_suspend(struct device *dev)
 	if (ret)
 		return ret;
 
+	if (data->ver > TMU_VER1) {
+		ret = regmap_set_bits(data->regmap, REGS_TMR, TMR_CMD);
+		if (ret)
+			return ret;
+	}
+
 	clk_disable_unprepare(data->clk);
 
 	return 0;
@@ -1353,6 +1360,12 @@ static int __maybe_unused qoriq_tmu_resume(struct device *dev)
 	ret = clk_prepare_enable(data->clk);
 	if (ret)
 		return ret;
+
+	if (data->ver > TMU_VER1) {
+		ret = regmap_clear_bits(data->regmap, REGS_TMR, TMR_CMD);
+		if (ret)
+			return ret;
+	}
 
 	if (match_data == &s32cc_data) {
 		s32cc_calib(data);
