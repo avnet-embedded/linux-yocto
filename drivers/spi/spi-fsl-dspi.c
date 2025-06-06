@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0+
 //
 // Copyright 2013 Freescale Semiconductor, Inc.
-// Copyright 2020-2022 NXP
+// Copyright 2020-2025 NXP
 //
 // Freescale DSPI driver
 // This file contains a driver for the Freescale DSPI
@@ -944,15 +944,19 @@ static int dspi_transfer_one_message(struct spi_controller *ctlr,
 	int status = 0;
 	u8 pushr_cmd_pcs;
 	u32 val = 0;
+	bool cs_change = false;
 
 	message->actual_length = 0;
 	pushr_cmd_pcs = get_dspi_pushr_cmd_pcs(dspi, spi->chip_select);
 
-	/* Put DSPI in running mode */
-	regmap_update_bits(dspi->regmap, SPI_MCR, SPI_MCR_HALT, 0);
-	while (regmap_read(dspi->regmap, SPI_SR, &val) >= 0 &&
-		!(val & SPI_SR_TXRXS))
-		;
+	/* Put DSPI in running mode if halted. */
+	regmap_read(dspi->regmap, SPI_MCR, &val);
+	if (val & SPI_MCR_HALT) {
+		regmap_update_bits(dspi->regmap, SPI_MCR, SPI_MCR_HALT, 0);
+		while (regmap_read(dspi->regmap, SPI_SR, &val) >= 0 &&
+		       !(val & SPI_SR_TXRXS))
+			;
+	}
 
 	list_for_each_entry(transfer, &message->transfers, transfer_list) {
 		dspi->cur_transfer = transfer;
@@ -977,6 +981,7 @@ static int dspi_transfer_one_message(struct spi_controller *ctlr,
 				dspi->tx_cmd |= SPI_PUSHR_CMD_CONT;
 		}
 
+		cs_change = transfer->cs_change;
 		dspi->tx = transfer->tx_buf;
 		dspi->rx = transfer->rx_buf;
 		dspi->len = transfer->len;
@@ -985,6 +990,8 @@ static int dspi_transfer_one_message(struct spi_controller *ctlr,
 		regmap_update_bits(dspi->regmap, SPI_MCR,
 				   SPI_MCR_CLR_TXF | SPI_MCR_CLR_RXF,
 				   SPI_MCR_CLR_TXF | SPI_MCR_CLR_RXF);
+
+		regmap_write(dspi->regmap, SPI_SR, SPI_SR_CLEAR);
 
 		spi_take_timestamp_pre(dspi->ctlr, dspi->cur_transfer,
 				       dspi->progress, !dspi->irq);
@@ -1009,11 +1016,14 @@ static int dspi_transfer_one_message(struct spi_controller *ctlr,
 		spi_transfer_delay_exec(transfer);
 	}
 
-	/* Put DSPI in stop mode */
-	regmap_update_bits(dspi->regmap, SPI_MCR, SPI_MCR_HALT, SPI_MCR_HALT);
-	while (regmap_read(dspi->regmap, SPI_SR, &val) >= 0 &&
-		val & SPI_SR_TXRXS)
-		;
+	if (status || !cs_change) {
+		/* Put DSPI in stop mode */
+		regmap_update_bits(dspi->regmap, SPI_MCR,
+				   SPI_MCR_HALT, SPI_MCR_HALT);
+		while (regmap_read(dspi->regmap, SPI_SR, &val) >= 0 &&
+		       val & SPI_SR_TXRXS)
+			;
+	}
 
 	message->status = status;
 	spi_finalize_current_message(ctlr);
@@ -1342,8 +1352,8 @@ static const struct regmap_config dspi_regmap_config[] = {
 		.reg_stride	= 4,
 		.max_register	= 0x13c,
 		.volatile_table	= &dspi_xspi_volatile_table,
-		.wr_table	= &dspi_access_table,
 		.rd_table	= &dspi_access_table,
+		.wr_table	= &dspi_access_table,
 	},
 	[S32_DSPI_XSPI_REGMAP] = {
 		.reg_bits	= 32,
