@@ -180,7 +180,8 @@ static int framebuffer_check(struct drm_device *dev,
 	for (i = 0; i < info->num_planes; i++) {
 		unsigned int width = drm_format_info_plane_width(info, r->width, i);
 		unsigned int height = drm_format_info_plane_height(info, r->height, i);
-		unsigned int block_size = info->char_per_block[i];
+		unsigned int block_size = info->char_per_block[i] ||
+					  info->bytes_per_macropixel[i];
 		u64 min_pitch = drm_format_info_min_pitch(info, i, width);
 
 		if (!block_size && (r->modifier[i] == DRM_FORMAT_MOD_LINEAR)) {
@@ -274,7 +275,8 @@ drm_internal_framebuffer_create(struct drm_device *dev,
 	struct drm_framebuffer *fb;
 	int ret;
 
-	if (r->flags & ~(DRM_MODE_FB_INTERLACED | DRM_MODE_FB_MODIFIERS)) {
+	if (r->flags & ~(DRM_MODE_FB_INTERLACED | DRM_MODE_FB_MODIFIERS |
+	    DRM_MODE_FB_ALTERNATE_TOP | DRM_MODE_FB_ALTERNATE_BOTTOM)) {
 		drm_dbg_kms(dev, "bad framebuffer flags 0x%08x\n", r->flags);
 		return ERR_PTR(-EINVAL);
 	}

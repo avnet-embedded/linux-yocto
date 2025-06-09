@@ -32,6 +32,9 @@ properties:
               - xlnx,versal-net-firmware
           - const: xlnx,versal-firmware
 
+      - description: For implementations complying for Versal Gen 2.
+        const: xlnx,versal2-firmware
+
   method:
     description: |
                  The method of calling the PM-API firmware layer.
@@ -98,12 +101,18 @@ properties:
     description: Compatible of the FPGA device.
     type: object
 
+  versal-sec-cfg:
+    $ref: /schemas/nvmem/xlnx,versal-sec-cfg.yaml#
+    description: Secure configuration driver
+    type: object
+
   zynqmp-aes:
     $ref: /schemas/crypto/xlnx,zynqmp-aes.yaml#
     description: The ZynqMP AES-GCM hardened cryptographic accelerator is
       used to encrypt or decrypt the data with provided key and initialization
       vector.
     type: object
+    deprecated: true
 
 required:
   - compatible

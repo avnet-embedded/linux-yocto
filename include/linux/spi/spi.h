@@ -164,6 +164,7 @@ extern void spi_transfer_cs_change_delay_exec(struct spi_message *msg,
  *	(optional, NULL when not using a GPIO line)
  * @word_delay: delay to be inserted between consecutive
  *	words of a transfer
+ * @multi_die: Flash device with multiple dies.
  * @cs_setup: delay to be introduced by the controller after CS is asserted
  * @cs_hold: delay to be introduced by the controller before CS is deasserted
  * @cs_inactive: delay to be introduced by the controller after CS is
@@ -218,6 +219,7 @@ struct spi_device {
 	const char		*driver_override;
 	struct gpio_desc	*cs_gpiod[SPI_CS_CNT_MAX];	/* Chip select gpio desc */
 	struct spi_delay	word_delay; /* Inter-word delay */
+	bool			multi_die;	/* flash with multiple dies*/
 	/* CS delays */
 	struct spi_delay	cs_setup;
 	struct spi_delay	cs_hold;
@@ -595,6 +597,7 @@ struct spi_controller {
 	 * assert/de-assert more than one chip select at once.
 	 */
 #define SPI_CONTROLLER_MULTI_CS		BIT(7)
+#define	SPI_CONTROLLER_NO_4B		BIT(8)	/* No 4-byte mode support */
 
 	/* Flag indicating if the allocation of this struct is devres-managed */
 	bool			devm_allocated;
@@ -970,6 +973,7 @@ struct spi_res {
  * @len: size of rx and tx buffers (in bytes)
  * @speed_hz: Select a speed other than the device default for this
  *      transfer. If 0 the default (from @spi_device) is used.
+ * @dummy_data: indicates transfer is dummy bytes transfer.
  * @bits_per_word: select a bits_per_word other than the device default
  *      for this transfer. If 0 the default (from @spi_device) is used.
  * @dummy_data: indicates transfer is dummy bytes transfer.
@@ -1107,6 +1111,7 @@ struct spi_transfer {
 	struct spi_delay	cs_change_delay;
 	struct spi_delay	word_delay;
 	u32		speed_hz;
+	u32		dummy;
 
 	u32		effective_speed_hz;
 

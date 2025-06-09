@@ -10,6 +10,7 @@
 
 #define WINBOND_NOR_OP_RDEAR	0xc8	/* Read Extended Address Register */
 #define WINBOND_NOR_OP_WREAR	0xc5	/* Write Extended Address Register */
+#define	WINBOND_NOR_NUM_DIE	0x04	/* Number of Die */
 
 #define WINBOND_NOR_WREAR_OP(buf)					\
 	SPI_MEM_OP(SPI_MEM_OP_CMD(WINBOND_NOR_OP_WREAR, 0),		\
@@ -22,6 +23,8 @@ w25q128_post_bfpt_fixups(struct spi_nor *nor,
 			 const struct sfdp_parameter_header *bfpt_header,
 			 const struct sfdp_bfpt *bfpt)
 {
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
+
 	/*
 	 * Zetta ZD25Q128C is a clone of the Winbond device. But the encoded
 	 * size is really wrong. It seems that they confused Mbit with MiB.
@@ -29,10 +32,10 @@ w25q128_post_bfpt_fixups(struct spi_nor *nor,
 	 */
 	if (bfpt_header->major == SFDP_JESD216_MAJOR &&
 	    bfpt_header->minor == SFDP_JESD216_MINOR &&
-	    nor->params->size == SZ_2M &&
-	    nor->params->erase_map.regions[0].size == SZ_2M) {
-		nor->params->size = SZ_16M;
-		nor->params->erase_map.regions[0].size = SZ_16M;
+	    params->size == SZ_2M &&
+	    params->erase_map.regions[0].size == SZ_2M) {
+		params->size = SZ_16M;
+		params->erase_map.regions[0].size = SZ_16M;
 	}
 
 	return 0;
@@ -64,6 +67,55 @@ w25q256_post_bfpt_fixups(struct spi_nor *nor,
 
 static const struct spi_nor_fixups w25q256_fixups = {
 	.post_bfpt = w25q256_post_bfpt_fixups,
+};
+
+static int spi_nor_multi_die_sr_ready(struct spi_nor *nor)
+{
+	u8 die;
+	int ret;
+
+	do
+		ret = spi_nor_sr_ready(nor);
+	while (!ret);
+	if (ret < 0)
+		return ret;
+
+	for (die = 0; die < WINBOND_NOR_NUM_DIE; die++) {
+		nor->bouncebuf[0] = die;
+		if (nor->spimem) {
+			struct spi_mem_op op = SPI_NOR_DIESEL_OP(nor->bouncebuf);
+
+			spi_nor_spimem_setup_op(nor, &op, nor->reg_proto);
+			ret = spi_mem_exec_op(nor->spimem, &op);
+		} else {
+			ret = spi_nor_controller_ops_write_reg(nor, SPINOR_OP_DIESEL,
+							       nor->bouncebuf, 1);
+		}
+
+		if (ret) {
+			dev_dbg(nor->dev, "error %d Switching Die\n", ret);
+			return ret;
+		}
+
+		do
+			ret = spi_nor_sr_ready(nor);
+		while (!ret);
+		if (ret < 0)
+			return ret;
+	}
+
+	return ret;
+}
+
+static void w25q02_default_init_fixups(struct spi_nor *nor)
+{
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
+
+	params->ready = spi_nor_multi_die_sr_ready;
+}
+
+static const struct spi_nor_fixups w25q02_fixups = {
+	.default_init = w25q02_default_init_fixups,
 };
 
 static const struct flash_info winbond_nor_parts[] = {
@@ -183,7 +235,7 @@ static const struct flash_info winbond_nor_parts[] = {
 		.id = SNOR_ID(0xef, 0x60, 0x18),
 		.name = "w25q128fw",
 		.size = SZ_16M,
-		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP | SPI_NOR_BP3_SR_BIT6,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,
 	}, {
 		.id = SNOR_ID(0xef, 0x60, 0x19),
@@ -215,7 +267,7 @@ static const struct flash_info winbond_nor_parts[] = {
 		.id = SNOR_ID(0xef, 0x70, 0x18),
 		.name = "w25q128jv",
 		.size = SZ_16M,
-		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_BP3_SR_BIT6,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,
 	}, {
 		.id = SNOR_ID(0xef, 0x70, 0x19),
@@ -248,12 +300,31 @@ static const struct flash_info winbond_nor_parts[] = {
 		.id = SNOR_ID(0xef, 0x80, 0x19),
 		.name = "w25q256jwm",
 		.size = SZ_32M,
-		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB |
+				SPI_NOR_4BIT_BP | SPI_NOR_TB_SR_BIT6 | SPI_NOR_BP3_SR_BIT5,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,
 	}, {
 		.id = SNOR_ID(0xef, 0x80, 0x20),
 		.name = "w25q512nwm",
 		.otp = SNOR_OTP(256, 3, 0x1000, 0x1000),
+	}, {
+		.id = SNOR_ID(0xef, 0x80, 0x22),
+		.name = "w25q02nw",
+		.size = SZ_8M,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_TB_SR_BIT6 |
+				SPI_NOR_4BIT_BP | SPI_NOR_BP3_SR_BIT5,
+		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,
+		.fixup_flags = SPI_NOR_4B_OPCODES,
+		.fixups = &w25q02_fixups,
+	}, {
+		.id = SNOR_ID(0xef, 0x90, 0x22),
+		.name = "w25q02nw",
+		.size = SZ_8M,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_TB_SR_BIT6 |
+				SPI_NOR_4BIT_BP | SPI_NOR_BP3_SR_BIT5,
+		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,
+		.fixup_flags = SPI_NOR_4B_OPCODES,
+		.fixups = &w25q02_fixups,
 	},
 };
 
@@ -331,7 +402,7 @@ static const struct spi_nor_otp_ops winbond_nor_otp_ops = {
 
 static int winbond_nor_late_init(struct spi_nor *nor)
 {
-	struct spi_nor_flash_parameter *params = nor->params;
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 
 	if (params->otp.org)
 		params->otp.ops = &winbond_nor_otp_ops;

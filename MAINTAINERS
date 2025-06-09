@@ -1099,6 +1099,26 @@ F:	drivers/gpu/drm/amd/include/vi_structs.h
 F:	include/uapi/linux/kfd_ioctl.h
 F:	include/uapi/linux/kfd_sysfs.h
 
+AMD MMI DC DRIVER
+M:	Vishal Sagar <vishal.sagar@amd.com>
+L:	dri-devel@lists.freedesktop.org
+S:	Supported
+F:	Documentation/devicetree/bindings/display/xlnx/amd,mmi-dc.yaml
+F:	drivers/gpu/drm/xlnx/mmi_dc*
+
+AMD MMI DCDMA DRIVER
+M:	Anatoliy Klymenko <anatoliy.klymenko@amd.com>
+L:	dmaengine@vger.kernel.org
+S:	Supported
+F:	Documentation/devicetree/bindings/dma/xilinx/amd,mmi-dcdma-1.0.yaml
+F:	drivers/dma/xilinx/mmi_dcdma.c
+
+AMD MMI DISPLAYPORT TX DRIVER
+M:	Vishal Sagar <vishal.sagar@amd.com>
+S:	Supported
+F:	Documentation/devicetree/bindings/staging/display/amd,mmi-dptx.yaml
+F:	drivers/staging/xlnx-mmi-dptx/
+
 AMD MP2 I2C DRIVER
 M:	Elie Morisse <syniurge@gmail.com>
 M:	Shyam Sundar S K <shyam-sundar.s-k@amd.com>
@@ -5282,6 +5302,15 @@ S:	Maintained
 F:	Documentation/hwmon/powerz.rst
 F:	drivers/hwmon/powerz.c
 
+CHAR and MISC XILINX AI ENGINE DRIVER
+M:	Gregory Williams <gregory.williams@amd.com>
+M:	Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/soc/xilinx/xlnx,ai-engine.yaml
+F:	drivers/misc/xilinx-ai-engine/
+F:	include/linux/xlnx-ai-engine.h
+F:	include/uapi/linux/xlnx-ai-engine.h
+
 CHECKPATCH
 M:	Andy Whitcroft <apw@canonical.com>
 M:	Joe Perches <joe@perches.com>
@@ -7820,7 +7849,28 @@ L:	dri-devel@lists.freedesktop.org
 S:	Maintained
 T:	git https://gitlab.freedesktop.org/drm/misc/kernel.git
 F:	Documentation/devicetree/bindings/display/xlnx/
+F:	Documentation/gpu/zynqmp.rst
 F:	drivers/gpu/drm/xlnx/
+
+DRM KMS DRIVER AND HELPERS FOR XILINX
+M:	Vishal Sagar <vishal.sagar@amd.com>
+S:	Maintained
+F:	drivers/gpu/drm/xlnx/xlnx_crtc*
+F:	drivers/gpu/drm/xlnx/xlnx_drv*
+F:	drivers/gpu/drm/xlnx/xlnx_fb*
+F:	drivers/gpu/drm/xlnx/xlnx_gem*
+
+DRM BRIDGE DRIVER FOR XILINX
+M:	Vishal Sagar <vishal.sagar@amd.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/display/xlnx/bridge.txt
+F:	drivers/gpu/drm/xlnx/xlnx_bridge*
+
+DRM PL DISPLAY DRIVER FOR XILINX
+M:	Vishal Sagar <vishal.sagar@amd.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/display/xlnx/xlnx,pl-disp.txt
+F:	drivers/gpu/drm/xlnx/xlnx_pl_disp.c
 
 DRM GPU SCHEDULER
 M:	Luben Tuikov <ltuikov89@gmail.com>
@@ -8962,6 +9012,14 @@ F:	include/linux/fb.h
 F:	include/uapi/linux/fb.h
 F:	include/uapi/video/
 F:	include/video/
+
+XILINX FRMBUF DRIVER
+M:	Kunal Rane <kunal.rane@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/dma/xilinx/xlnx,axi-frmbuf.yaml
+F:	drivers/dma/xilinx/xilinx_frmbuf.c
 
 FREESCALE CAAM (Cryptographic Acceleration and Assurance Module) DRIVER
 M:	Horia Geantă <horia.geanta@nxp.com>
@@ -11120,6 +11178,13 @@ IMS TWINTURBO FRAMEBUFFER DRIVER
 L:	linux-fbdev@vger.kernel.org
 S:	Orphan
 F:	drivers/video/fbdev/imsttfb.c
+
+INA260 POWER MONITOR DRIVER
+M:	Shubhrajyoti Datta <shubhrajyoti.datta@amd.com>
+R:	Manikanta Guntupalli <manikanta.guntupalli@amd.com>
+R:	Michal Simek <michal.simek@amd.com>
+S:	Maintained
+F:	drivers/iio/adc/ina260-adc.c
 
 INDEX OF FURTHER KERNEL DOCUMENTATION
 M:	Carlos Bilbao <carlos.bilbao.osdev@gmail.com>
@@ -19758,6 +19823,13 @@ S:	Maintained
 F:	Documentation/devicetree/bindings/clock/renesas,versaclock7.yaml
 F:	drivers/clk/clk-versaclock7.c
 
+RENESAS PROXO CLOCK DRIVER
+M:	Alex Helms <alexander.helms.jy@renesas.com>
+M:	Saeed Nowshadi <saeed.nowshadi@amd.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/clock/renesas,proxo.yaml
+F:	drivers/clk/clk-proxo.c
+
 RENESAS X9250 DIGITAL POTENTIOMETERS DRIVER
 M:	Herve Codina <herve.codina@bootlin.com>
 L:	linux-iio@vger.kernel.org
@@ -21073,6 +21145,12 @@ S:	Maintained
 W:	https://linuxtv.org
 T:	git git://linuxtv.org/media.git
 F:	drivers/media/radio/si4713/radio-usb-si4713.c
+
+SI5324 CLOCK DRIVER
+M:	DhanunjanRao Katta <katta.dhanunjanrao@amd.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/clock/silabs,si5324.txt
+F:	drivers/clk/*si5324*
 
 SIANO DVB DRIVER
 M:	Mauro Carvalho Chehab <mchehab@kernel.org>
@@ -23781,6 +23859,12 @@ F:	Documentation/devicetree/bindings/ufs/
 F:	Documentation/scsi/ufs.rst
 F:	drivers/ufs/core/
 
+UNIVERSAL FLASH STORAGE HOST CONTROLLER DRIVER AMD VERSAL2
+M:	Sai Krishna Potthuri <sai.krishna.potthuri@amd.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/ufs/amd,versal2-ufs.yaml
+F:	drivers/ufs/host/ufs-amd-versal2.c
+
 UNIVERSAL FLASH STORAGE HOST CONTROLLER DRIVER DWC HOOKS
 M:	Pedro Sousa <pedrom.sousa@synopsys.com>
 L:	linux-scsi@vger.kernel.org
@@ -24171,6 +24255,11 @@ F:	arch/um/
 F:	arch/x86/um/
 F:	fs/hostfs/
 
+USERSPACE APM
+M:	Shubhrajyoti Datta <shubhrajyoti.datta@amd.com>
+S:	Maintained
+F:	drivers/uio/uio_xilinx_apm.c
+
 USERSPACE COPYIN/COPYOUT (UIOVEC)
 M:	Alexander Viro <viro@zeniv.linux.org.uk>
 S:	Maintained
@@ -24192,6 +24281,16 @@ T:	git git://git.kernel.org/pub/scm/linux/kernel/git/gregkh/char-misc.git
 F:	Documentation/driver-api/uio-howto.rst
 F:	drivers/uio/
 F:	include/linux/uio_driver.h
+
+USERSPACE I/O (XILINX_AI_ENGINE)
+M:	Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+S:	Maintained
+F:	drivers/uio/uio_xilinx_ai_engine.c
+
+USERSPACE I/O (UIO_DMABUF)
+M:	Govindarajulu Varadarajan <govindarajulu.varadarajan@amd.com>
+S:	Maintained
+F:	drivers/uio/uio_dmabuf*
 
 UTIL-LINUX PACKAGE
 M:	Karel Zak <kzak@redhat.com>
@@ -25394,17 +25493,60 @@ F:	include/uapi/linux/dqblk_xfs.h
 F:	include/uapi/linux/fsmap.h
 
 XILINX AMS DRIVER
-M:	Anand Ashok Dumbre <anand.ashok.dumbre@xilinx.com>
+M:	Salih Erim <salih.erim@amd.com>
+R:	Conall O'Griofa <conall.ogriofa@amd.com>
 L:	linux-iio@vger.kernel.org
 S:	Maintained
 F:	Documentation/devicetree/bindings/iio/adc/xlnx,zynqmp-ams.yaml
 F:	drivers/iio/adc/xilinx-ams.c
+
+XILINX AUDIO FORMATTER DRIVER
+M:	Katta Dhanunjanrao <katta.dhanunjanrao@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/sound/xlnx,audio-formatter.yaml
+F:	sound/soc/xilinx/xlnx_formatter_pcm.c
 
 XILINX AXI ETHERNET DRIVER
 M:	Radhey Shyam Pandey <radhey.shyam.pandey@amd.com>
 S:	Maintained
 F:	Documentation/devicetree/bindings/net/xlnx,axi-ethernet.yaml
 F:	drivers/net/ethernet/xilinx/xilinx_axienet*
+
+XILINX XADC DRIVER
+M:	Salih Erim <salih.erim@amd.com>
+R:	Conall O'Griofa <conall.ogriofa@amd.com>
+L:	linux-iio@vger.kernel.org
+S:	Maintained
+F:	Documentation/devicetree/bindings/iio/adc/xilinx-xadc.txt
+F:	drivers/iio/adc/xilinx-xadc*
+
+RENESAS PTP AND RSMU DRIVERS
+M:	Suraj Gupta <suraj.gupta2@amd.com>
+S:	Maintained
+F:	drivers/mfd/rsmu_*
+F:	drivers/misc/rsmu_*
+F:	drivers/ptp/ptp_clockmatrix*
+F:	drivers/ptp/ptp_idt82p33.h
+F:	include/linux/mfd/idt82p33_reg.h
+F:	include/linux/mfd/idt8a340_reg.h
+F:	include/linux/mfd/rsmu.h
+F:	include/uapi/linux/rsmu.h
+
+XILINX MEDIA AXIS SWITCH DRIVER
+M:	Anil kumar M <anil.mamidala@xilinx.com>
+M:	Karthikeyan T <karthikeyan.thangavel@xilinx.com>
+L:	git@xilinx.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,axis-subsetconv.yaml
+F:	drivers/media/platform/xilinx/xilinx-axis-subsetconv.c
+
+XILINX MEDIA HDCP DRIVER
+M:	Lakshmi Prasanna Eachuri <lakshmi.prasanna.eachuri@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+S:	Maintained
+F:	drivers/media/platform/xilinx/xilinx-hdcp*
 
 XILINX CAN DRIVER
 M:	Appana Durga Kedareswara rao <appana.durga.rao@xilinx.com>
@@ -25413,11 +25555,70 @@ S:	Maintained
 F:	Documentation/devicetree/bindings/net/can/xilinx,can.yaml
 F:	drivers/net/can/xilinx_can.c
 
+XILINX DISPLAYPORT RX DRIVER
+M:	Lakshmi Prasanna Eachuri <lakshmi.prasanna.eachuri@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,v-dprxss.yaml
+F:	drivers/media/platform/xilinx/xilinx-dprxss.c
+
+XILINX DISPLAYPORT TX DRIVER
+M:	Lakshmi Prasanna Eachuri <lakshmi.prasanna.eachuri@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/display/xlnx/xlnx,dp-tx.yaml
+F:	drivers/gpu/drm/xlnx/xlnx_dptx.c
+
+XILINX DRM HDCP DRIVER
+M:	Lakshmi Prasanna Eachuri <lakshmi.prasanna.eachuri@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+S:	Maintained
+F:	drivers/gpu/drm/xlnx/hdcp/
+
+XILINX DEMOSAIC DRIVER
+M:	Kunal Rane <kunal.rane@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,v-demosaic.yaml
+F:	drivers/media/platform/xilinx/xilinx-demosaic.c
+
+XILINX ECDSA DRIVER
+M:	Harsh Jain <h.jain@amd.com>
+M:	Harsha <harsha.harsha@amd.com>
+S:	Maintained
+F:	drivers/crypto/xilinx/xilinx-ecdsa.c
+
 XILINX EVENT MANAGEMENT DRIVER
 M:	Michal Simek <michal.simek@amd.com>
 S:	Maintained
 F:	drivers/soc/xilinx/xlnx_event_manager.c
 F:	include/linux/firmware/xlnx-event-manager.h
+
+XILINX PM FIRMWARE DRIVER
+M:	Senthil Nathan Thangaraj <senthilnathan.thangaraj@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	drivers/firmware/xilinx/zynqmp-core.c
+F:	drivers/firmware/xilinx/zynqmp-debug.c
+F:	drivers/firmware/xilinx/zynqmp-pm.c
+F:	drivers/firmware/xilinx/zynqmp-debug.h
+F:	include/linux/firmware/xlnx-versal-error-events.h
+F:	include/linux/firmware/xlnx-versal-net-error-events.h
+F:	include/linux/firmware/xlnx-zynqmp.h
+
+XILINX XILSEM FIRMWARE DRIVER
+M:	Rama Devi Veggalam <rama.devi.veggalam@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	drivers/firmware/xilinx/zynqmp-sem.c
+F:	include/linux/firmware/xlnx-zynqmp-sem.h
+
+XILINX GAMMA DRIVER
+M:	Kunal Rane <kunal.rane@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,v-gamma-lut.yaml
+F:	drivers/media/platform/xilinx/xilinx-gamma.c
 
 XILINX GPIO DRIVER
 M:	Shubhrajyoti Datta <shubhrajyoti.datta@amd.com>
@@ -25433,6 +25634,97 @@ XILINX LL TEMAC ETHERNET DRIVER
 L:	netdev@vger.kernel.org
 S:	Orphan
 F:	drivers/net/ethernet/xilinx/ll_temac*
+
+XILINX HDMI21RXSS DRIVER
+M:	Rajesh Gugulothu <rajesh.gugulothu@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,v-hdmi-rxss1.yaml
+F:	drivers/media/platform/xilinx/xilinx-hdmirxss.c
+
+XILINX AXI4S BROADCASTER DRIVER
+M:	Kunal Rane <kunal.rane@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,axis-broadcaster.yaml
+F:	drivers/media/platform/xilinx/xilinx-axis-broadcaster.c
+
+XILINX AXI4S SUBSETCONV DRIVER
+M:	Kunal Rane <kunal.rane@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,axis-subsetconv.yaml
+F:	drivers/media/platform/xilinx/xilinx-axis-subsetconv.c
+
+XILINX AXI4S SWITCH DRIVER
+M:	Kunal Rane <kunal.rane@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,v-axi4s-switch.yaml
+F:	drivers/media/platform/xilinx/xilinx-axis-switch.c
+
+XILINX HLS DRIVER
+M:	Kunal Rane <kunal.rane@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,v-hls.yaml
+F:	drivers/media/platform/xilinx/xilinx-hls.c
+
+XILINX MULTISCALER DRIVER
+M:	Kunal Rane <kunal.rane@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,v-multi-scaler.yaml
+F:	drivers/media/platform/xilinx/xilinx-multi-scaler.c
+
+XILINX MEDIA VTC DRIVER
+M:	Rajesh Gugulothu <rajesh.gugulothu@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,v-tc.yaml
+F:	drivers/media/platform/xilinx/xilinx-vtc.c
+
+XILINX HDCP COMMON DRIVER
+M:	Lakshmi Prasanna Eachuri <lakshmi.prasanna.eachuri@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+S:	Maintained
+F:	drivers/staging/xilinx_hdcp/
+
+XILINX HDCP1X CIPHER DRIVER
+M:	Lakshmi Prasanna Eachuri <lakshmi.prasanna.eachuri@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+S:	Maintained
+F:	drivers/staging/xlnx_hdcp1x/
+
+XILINX IDT8T49N24X CLOCK DRIVER
+M:	Rajesh Gugulothu <rajesh.gugulothu@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/clock/idt,idt8t49n24x.txt
+F:	drivers/clk/idt/
+
+XILINX I2S SOUND CARD DRIVER
+M:	Katta Dhanunjanrao <katta.dhanunjanrao@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/sound/xlnx,i2s.yaml
+F:	sound/soc/xilinx/xlnx_i2s.c
+
+XILINX PL SOUND CARD DRIVER
+M:	Katta Dhanunjanrao <katta.dhanunjanrao@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	sound/soc/xilinx/xlnx_pl_snd_card.c
+F:	sound/soc/xilinx/xlnx_snd_common.h
+
+XILINX PUF DRIVER
+M:	Harsh Jain <h.jain@amd.com>
+S:	Maintained
+F:	drivers/misc/xilinx_puf.c
+F:	include/uapi/misc/xilinx_puf.h
 
 XILINX PWM DRIVER
 M:	Sean Anderson <sean.anderson@seco.com>
@@ -25451,6 +25743,104 @@ F:	drivers/misc/Makefile
 F:	drivers/misc/xilinx_sdfec.c
 F:	include/uapi/misc/xilinx_sdfec.h
 
+XILINX SDI AUDIO DRIVER
+M:	Katta Dhanunjanrao <katta.dhanunjanrao@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/sound/xlnx,v-uhdsdi-audio.yaml
+F:	sound/soc/xilinx/xlnx_sdi_audio.c
+
+XILINX SDIRXSS DRIVER
+M:	Katta Dhanunjanrao <katta.dhanunjanrao@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,sdirxss.yaml
+F:	drivers/media/platform/xilinx/xilinx-sdirxss.c
+
+XILINX SDITXSS DRIVER
+M:	Katta Dhanunjanrao <katta.dhanunjanrao@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/display/xlnx/xlnx,sdi-tx.yaml
+F:	drivers/gpu/drm/xlnx/xlnx_sdi*
+
+XILINX SPDIF SOUND CARD DRIVER
+M:	Katta Dhanunjanrao <katta.dhanunjanrao@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/sound/xlnx,spdif.yaml
+F:	sound/soc/xilinx/xlnx_spdif.c
+
+XILINX TPG DRIVER
+M:	Kunal Rane <kunal.rane@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,v-tpg.yaml
+F:	drivers/media/platform/xilinx/xilinx-tpg.c
+
+XILINX VCU CLK DRIVER
+M:	Rohit Visavalia <rohit.visavalia@amd.com>
+R:	Vishal Sagar <vishal.sagar@amd.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/clock/xlnx,vcu.yaml
+F:	drivers/clk/xilinx/xlnx_vcu.c
+
+XILINX VPSS CSC DRIVER
+M:	Kunal Rane <kunal.rane@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,v-vpss-csc.yaml
+F:	drivers/media/platform/xilinx/xilinx-vpss-csc.c
+
+XILINX VPSS SCALER DRIVER
+M:	Kunal Rane <kunal.rane@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,v-vpss-scaler.yaml
+F:	drivers/media/platform/xilinx/xilinx-vpss-scaler.c
+
+XILINX VPSS BRIDGE CSC DRIVER
+M:	Kunal Rane <kunal.rane@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/display/xlnx/xlnx,vpss-csc.yaml
+F:	drivers/gpu/drm/xlnx/xlnx_csc.c
+
+XILINX VPSS BRIDGE SCALER DRIVER
+M:	Kunal Rane <kunal.rane@amd.com>
+L:	git@amd.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/display/xlnx/xlnx,vpss-scaler.yaml
+F:	drivers/gpu/drm/xlnx/xlnx_scaler.c
+
+XILINX VERSAL SECURE CONFIGURATION DRIVER
+M:	Harsh Jain <h.jain@amd.com>
+M:	Harsha <harsha.harsha@xilinx.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/nvmem/xlnx,versal-sec-cfg.yaml
+F:	drivers/nvmem/xlnx_secure_config.c
+
+XILINX VERSAL SYSMON DRIVER
+M:	Salih Erim <salih.erim@amd.com>
+R:	Dragan Cvetic <dragan.cvetic@amd.com>
+L:	git@xilinx.com
+S:	Maintained
+F:	Documentation/devicetree/bindings/iio/adc/xlnx,versal-sysmon.yaml
+F:	drivers/iio/adc/versal-sysmon.c
+F:	drivers/iio/adc/versal-sysmon.h
+F:	include/linux/iio/adc/versal-sysmon-events.h
+
+XILINX VERSAL THERMAL DRIVER
+M:	Salih Erim <salih.erim@amd.com>
+R:	Dragan Cvetic <dragan.cvetic@amd.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/thermal/xlnx,versal-thermal.yaml
+F:	drivers/thermal/versal_thermal.c
+
 XILINX UARTLITE SERIAL DRIVER
 M:	Peter Korsgaard <jacmet@sunsite.dk>
 L:	linux-serial@vger.kernel.org
@@ -25465,6 +25855,14 @@ T:	git git://linuxtv.org/media.git
 F:	Documentation/devicetree/bindings/media/xilinx/
 F:	drivers/media/platform/xilinx/
 F:	include/uapi/linux/xilinx-v4l2-controls.h
+
+XILINX VIDEO PIPELINE DRIVER
+M:	Vishal Sagar <vishal.sagar@amd.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/video.txt
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,video.txt
+F:	drivers/media/platform/xilinx/xilinx-dma*
+F:	drivers/media/platform/xilinx/xilinx-vip*
 
 XILINX VERSAL EDAC DRIVER
 M:	Shubhrajyoti Datta <shubhrajyoti.datta@amd.com>
@@ -25494,6 +25892,13 @@ F:	drivers/dma/xilinx/xdma.c
 F:	include/linux/dma/amd_xdma.h
 F:	include/linux/platform_data/amd_xdma.h
 
+XILINX ZYNQMP AES GCM DRIVER
+M:	Harsh Jain <h.jain@amd.com>
+M:	Kalyani Akula <kalyani.akula@amd.com>
+L:	linux-crypto@vger.kernel.org
+S:	Supported
+F:	drivers/crypto/xilinx/zynqmp-aes-gcm.c
+
 XILINX ZYNQMP DPDMA DRIVER
 M:	Laurent Pinchart <laurent.pinchart@ideasonboard.com>
 L:	dmaengine@vger.kernel.org
@@ -25517,18 +25922,45 @@ T:	git https://github.com/Xilinx/linux-xlnx.git
 F:	Documentation/devicetree/bindings/phy/xlnx,zynqmp-psgtr.yaml
 F:	drivers/phy/xilinx/phy-zynqmp.c
 
+XILINX ZYNQMP RSA DRIVER
+M:	Harsh Jain <h.jain@amd.com>
+L:	linux-crypto@vger.kernel.org
+S:	Supported
+F:	drivers/crypto/xilinx/xilinx-rsa.c
+
+XILINX ZYNQMP SECURE FW LOAD
+M:	Harsh Jain <h.jain@amd.com>
+S:	Supported
+F:	drivers/firmware/xilinx/zynqmp-secure.c
+
 XILINX ZYNQMP SHA3 DRIVER
+M:	Harsh Jain <h.jain@amd.com>
 M:	Harsha <harsha.harsha@amd.com>
+L:	linux-crypto@vger.kernel.org
 S:	Maintained
 F:	drivers/crypto/xilinx/zynqmp-sha.c
 
 XILINX ZYNQMP NVMEM DRIVER
-M:	Praveen Teja Kundanala <praveen.teja.kundanala@amd.com>
+M:	Harsh Jain <h.jain@amd.com>
 M:	Kalyani Akula <kalyani.akula@amd.com>
-R:	Michal Simek <michal.simek@amd.com>
 S:	Maintained
 F:	Documentation/devicetree/bindings/nvmem/xlnx,zynqmp-nvmem.yaml
 F:	drivers/nvmem/zynqmp_nvmem.c
+
+XILINX VERSAL XILSEM EDAC DRIVER
+M:	Rama Devi Veggalam <rama.devi.veggalam@amd.com>
+S:	Maintained
+F:	Documentation/devicetree/bindings/edac/xlnx,versal-xilsem-edac.yaml
+F:	drivers/edac/xilinx_xilsem_edac.c
+
+XILINX ISP PIPELINE DRIVER
+M:	Mounik Katikala <mounik.katikala@amd.com>
+L:	linux-media@vger.kernel.org
+S:	Maintained
+F:	Documentation/devicetree/bindings/media/xilinx/xlnx,isppipeline.yaml
+F:	drivers/media/platform/xilinx/xilinx-gamma-correction.h
+F:	drivers/media/platform/xilinx/xilinx-isp-params.h
+F:	drivers/media/platform/xilinx/xilinx-isppipeline.c
 
 XILLYBUS DRIVER
 M:	Eli Billauer <eli.billauer@gmail.com>

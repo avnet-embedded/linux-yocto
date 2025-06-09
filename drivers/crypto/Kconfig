@@ -714,12 +714,36 @@ config CRYPTO_DEV_TEGRA
 	  Select this to enable Tegra Security Engine which accelerates various
 	  AES encryption/decryption and HASH algorithms.
 
+config CRYPTO_DEV_XILINX_ECDSA
+	tristate "Support for Xilinx ECDSA hardware accelerator"
+	depends on ARCH_ZYNQMP || COMPILE_TEST
+	select CRYPTO_ENGINE
+	select CRYPTO_AKCIPHER
+	select CRYPTO_ECDSA
+	help
+	  Xilinx processors have ECDSA hardware accelerator used for signature
+	  and key generation and verification. This driver interfaces with
+	  ECDSA hardware accelerator. Select this if you want to use the Versal
+	  module for ECDSA algorithms.
+
+config CRYPTO_DEV_XILINX_RSA
+	tristate "Support for Xilinx ZynqMP RSA hw accelerator (DEPRECATED)"
+	depends on (ARCH_ZYNQMP || COMPILE_TEST) && (CRYPTO_DEV_XILINX_RSA_AKCIPHER=n)
+	select CRYPTO_AES
+	select CRYPTO_BLKCIPHER
+	help
+	  Xilinx processors have RSA hw accelerator used for signature
+	  generation and verification. This driver is deprecated.
+	  Please migrate to : CRYPTO_DEV_XILINX_RSA_AKCIPHER
+
 config CRYPTO_DEV_ZYNQMP_AES
 	tristate "Support for Xilinx ZynqMP AES hw accelerator"
-	depends on ZYNQMP_FIRMWARE || COMPILE_TEST
+	depends on NET && (ZYNQMP_FIRMWARE || COMPILE_TEST)
 	select CRYPTO_AES
 	select CRYPTO_ENGINE
 	select CRYPTO_AEAD
+	select CRYPTO_GCM
+	select CRYPTO_USER_API_AEAD
 	help
 	  Xilinx ZynqMP has AES-GCM engine used for symmetric key
 	  encryption and decryption. This driver interfaces with AES hw
@@ -735,6 +759,18 @@ config CRYPTO_DEV_ZYNQMP_SHA3
 	  This driver interfaces with SHA3 hardware engine.
 	  Select this if you want to use the ZynqMP module
 	  for SHA3 hash computation.
+
+config CRYPTO_DEV_XILINX_RSA_AKCIPHER
+	tristate "Support for Xilinx RSA hw accelerator"
+	depends on ARCH_ZYNQMP || COMPILE_TEST
+	select CRYPTO_ENGINE
+	select CRYPTO_RSA
+	select CRYPTO_AKCIPHER
+	help
+	  Xilinx processors have RSA hw accelerator used for signature
+	  generation and verification. This driver interfaces with RSA
+	  hw accelerator. Select this if you want to use ZynqMP or Versal
+	  module for RSA algorithms.
 
 source "drivers/crypto/chelsio/Kconfig"
 

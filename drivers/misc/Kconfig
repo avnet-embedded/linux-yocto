@@ -488,6 +488,44 @@ config XILINX_SDFEC
 
 	  If unsure, say N.
 
+config XILINX_DPU
+	tristate "Xilinx Deep learning Processing Unit (DPU) Driver"
+	depends on HAS_IOMEM && COMMON_CLK
+	depends on ARCH_ZYNQMP || MICROBLAZE
+	help
+	  This option enables support for the Xilinx DPUCZDX8G (Deep learning
+	  Processing Unit) Vivado flow driver.
+	  It is a configurable computation engine dedicated for convolutional
+	  neural networks. The degree of parallelism utilized in the engine
+	  is a design parameter and application. It includes a set of optimized
+	  instructions, and supports most convolutional neural networks.
+
+	  If unsure, say N.
+
+config XILINX_AIE
+	tristate "Xilinx AI engine"
+	depends on ARM64 || COMPILE_TEST
+	depends on ZYNQMP_FIRMWARE
+	help
+	  This option enables support for the Xilinx AI engine driver.
+	  One Xilinx AI engine device can have multiple partitions (groups of
+	  AI engine tiles). Xilinx AI engine device driver instance manages
+	  AI engine partitions. User application access its partitions through
+	  AI engine partition instance file operations.
+
+	  If unsure, say N
+
+config XILINX_PUF
+	tristate "Xilinx PUF driver"
+	depends on ZYNQMP_FIRMWARE
+	help
+	  This option enables support for the Xilinx Physical unclonable function
+	  (PUF) driver.
+	  It is a configurable driver to generate PUF KEK source either by using
+	  PUF registration or regeneration command.
+
+	  If unsure, say N.
+
 config MISC_RTSX
 	tristate
 	default MISC_RTSX_PCI || MISC_RTSX_USB
@@ -609,6 +647,16 @@ config MARVELL_CN10K_DPI
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called mrvl_cn10k_dpi.
+
+config RSMU
+	tristate "Renesas Synchronization Management Unit (SMU)"
+	depends on MFD_RSMU_I2C || MFD_RSMU_SPI
+	help
+	  This option enables support for Renesas SMUs, such as the Clockmatrix and
+	  82P33XXX families. It is used by the Renesas PTP Clock Manager for Linux (pcm4l)
+	  software to provide support to GNSS assisted partial timing support (APTS)
+	  and other networking timing functions. It is used by the synced software to
+	  manage the Synchronous Ethernet (SyncE) device.
 
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"

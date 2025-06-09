@@ -29,6 +29,7 @@
 #include <linux/of_gpio.h>
 #include <linux/of_mdio.h>
 #include <linux/of_net.h>
+#include <linux/of_platform.h>
 #include <linux/ip.h>
 #include <linux/udp.h>
 #include <linux/tcp.h>
@@ -87,9 +88,6 @@ struct sifive_fu540_macb_mgmt {
 
 #define MACB_WOL_ENABLED		BIT(0)
 
-#define HS_SPEED_10000M			4
-#define MACB_SERDES_RATE_10G		1
-
 /* Graceful stop timeouts in us. We should allow up to
  * 1 frame time (10 Mbits/s, full-duplex, ignoring collisions)
  */
@@ -97,6 +95,7 @@ struct sifive_fu540_macb_mgmt {
 #define MACB_PM_TIMEOUT  100 /* ms */
 
 #define MACB_MDIO_TIMEOUT	1000000 /* in usecs */
+#define GEM_SYNC_TIMEOUT	2500000 /* in usecs */
 
 /* DMA buffer descriptor might be different size
  * depends on hardware configuration:
@@ -567,28 +566,74 @@ static void macb_usx_pcs_link_up(struct phylink_pcs *pcs, unsigned int neg_mode,
 				 int duplex)
 {
 	struct macb *bp = container_of(pcs, struct macb, phylink_usx_pcs);
-	u32 config;
+	u32 speed_val, serdes_rate, config;
+	bool hs_mac = false;
+
+	switch (speed) {
+	case SPEED_1000:
+		speed_val = HS_SPEED_1000M;
+		serdes_rate = MACB_SERDES_RATE_5G_2G5_1G;
+		break;
+	case SPEED_2500:
+		speed_val = HS_SPEED_2500M;
+		serdes_rate = MACB_SERDES_RATE_5G_2G5_1G;
+		break;
+	case SPEED_5000:
+		speed_val = HS_SPEED_5000M;
+		serdes_rate = MACB_SERDES_RATE_5G_2G5_1G;
+		hs_mac = true;
+		break;
+	case SPEED_10000:
+		speed_val = HS_SPEED_10000M;
+		serdes_rate = MACB_SERDES_RATE_10G;
+		hs_mac = true;
+		break;
+	default:
+		netdev_err(bp->dev, "Specified speed not supported\n");
+		return;
+	}
+
+	/* Configure HS MAC for specified speed */
+	config = gem_readl(bp, HS_MAC_CONFIG);
+	config = GEM_BFINS(HS_MAC_SPEED, speed_val, config);
+	gem_writel(bp, HS_MAC_CONFIG, config);
 
 	config = gem_readl(bp, USX_CONTROL);
-	config = GEM_BFINS(SERDES_RATE, MACB_SERDES_RATE_10G, config);
-	config = GEM_BFINS(USX_CTRL_SPEED, HS_SPEED_10000M, config);
+	config = GEM_BFINS(SERDES_RATE, serdes_rate, config);
+	config = GEM_BFINS(USX_CTRL_SPEED, speed_val, config);
 	config &= ~(GEM_BIT(TX_SCR_BYPASS) | GEM_BIT(RX_SCR_BYPASS));
+	config |= GEM_BIT(RX_SYNC_RESET);
+	gem_writel(bp, USX_CONTROL, config);
+	mdelay(250);
+	config &= ~GEM_BIT(RX_SYNC_RESET);
 	config |= GEM_BIT(TX_EN);
 	gem_writel(bp, USX_CONTROL, config);
+
+	if (hs_mac && readx_poll_timeout(MACB_READ_USX_STATUS, bp, config,
+					 config & GEM_BIT(USX_BLOCK_LOCK),
+					 1, GEM_SYNC_TIMEOUT))
+		netdev_err(bp->dev, "USX PCS block lock not achieved\n");
 }
 
 static void macb_usx_pcs_get_state(struct phylink_pcs *pcs,
 				   struct phylink_link_state *state)
 {
 	struct macb *bp = container_of(pcs, struct macb, phylink_usx_pcs);
+	u32 hs_mac_map[] = {SPEED_UNKNOWN, SPEED_1000, SPEED_2500,
+			    SPEED_5000, SPEED_10000};
 	u32 val;
 
-	state->speed = SPEED_10000;
 	state->duplex = 1;
 	state->an_complete = 1;
 
-	val = gem_readl(bp, USX_STATUS);
-	state->link = !!(val & GEM_BIT(USX_BLOCK_LOCK));
+	val = gem_readl(bp, HS_MAC_CONFIG);
+	val = GEM_BFEXT(HS_MAC_SPEED, val);
+	state->speed = hs_mac_map[val];
+
+	state->link = (state->speed < SPEED_5000) ?
+		!!(macb_readl(bp, NSR) & MACB_BIT(NSR_LINK)) :
+		!!(gem_readl(bp, USX_STATUS) & GEM_BIT(USX_BLOCK_LOCK));
+
 	val = gem_readl(bp, NCFGR);
 	if (val & GEM_BIT(PAE))
 		state->pause = MLO_PAUSE_RX;
@@ -663,6 +708,8 @@ static void macb_mac_config(struct phylink_config *config, unsigned int mode,
 
 		if (state->interface == PHY_INTERFACE_MODE_SGMII) {
 			ctrl |= GEM_BIT(SGMIIEN) | GEM_BIT(PCSSEL);
+		} else if (state->interface == PHY_INTERFACE_MODE_1000BASEX) {
+			ctrl |= GEM_BIT(PCSSEL);
 		} else if (state->interface == PHY_INTERFACE_MODE_10GBASER) {
 			ctrl |= GEM_BIT(PCSSEL);
 			ncr |= GEM_BIT(ENABLE_HS_MAC);
@@ -683,7 +730,8 @@ static void macb_mac_config(struct phylink_config *config, unsigned int mode,
 	 * Must be written after PCSSEL is set in NCFGR,
 	 * otherwise writes will not take effect.
 	 */
-	if (macb_is_gem(bp) && state->interface == PHY_INTERFACE_MODE_SGMII) {
+	if (macb_is_gem(bp) && (state->interface == PHY_INTERFACE_MODE_SGMII ||
+				state->interface == PHY_INTERFACE_MODE_1000BASEX)) {
 		u32 pcsctrl, old_pcsctrl;
 
 		old_pcsctrl = gem_readl(bp, PCSCNTRL);
@@ -769,10 +817,6 @@ static void macb_mac_link_up(struct phylink_config *config,
 
 	macb_or_gem_writel(bp, NCFGR, ctrl);
 
-	if (bp->phy_interface == PHY_INTERFACE_MODE_10GBASER)
-		gem_writel(bp, HS_MAC_CONFIG, GEM_BFINS(HS_MAC_SPEED, HS_SPEED_10000M,
-							gem_readl(bp, HS_MAC_CONFIG)));
-
 	spin_unlock_irqrestore(&bp->lock, flags);
 
 	if (!(bp->caps & MACB_CAPS_MACB_IS_EMAC))
@@ -794,7 +838,8 @@ static struct phylink_pcs *macb_mac_select_pcs(struct phylink_config *config,
 	struct net_device *ndev = to_net_dev(config->dev);
 	struct macb *bp = netdev_priv(ndev);
 
-	if (interface == PHY_INTERFACE_MODE_10GBASER)
+	if (interface == PHY_INTERFACE_MODE_10GBASER ||
+	    interface == PHY_INTERFACE_MODE_1000BASEX)
 		return &bp->phylink_usx_pcs;
 	else if (interface == PHY_INTERFACE_MODE_SGMII)
 		return &bp->phylink_sgmii_pcs;
@@ -841,6 +886,13 @@ static int macb_phylink_connect(struct macb *bp)
 		netdev_err(dev, "Could not attach PHY (%d)\n", ret);
 		return ret;
 	}
+
+	/* Since this driver uses runtime handling of clocks, initiate a phy
+	 * reset if the attached phy requires it. Check return to see if phy
+	 * was reset and then do a phy initialization.
+	 */
+	if (phy_reset_after_clk_enable(dev->phydev) == 1)
+		phy_init_hw(dev->phydev);
 
 	phylink_start(bp->phylink);
 
@@ -915,20 +967,16 @@ static int macb_mii_probe(struct net_device *dev)
 	return 0;
 }
 
-static int macb_mdiobus_register(struct macb *bp)
+static int macb_mdiobus_register(struct macb *bp, struct device_node *mdio_np)
 {
-	struct device_node *child, *np = bp->pdev->dev.of_node;
+	struct device_node *child, *np = bp->pdev->dev.of_node, *dev_np;
+	struct platform_device *mdio_pdev = NULL;
 
 	/* If we have a child named mdio, probe it instead of looking for PHYs
 	 * directly under the MAC node
 	 */
-	child = of_get_child_by_name(np, "mdio");
-	if (child) {
-		int ret = of_mdiobus_register(bp->mii_bus, child);
-
-		of_node_put(child);
-		return ret;
-	}
+	if (mdio_np)
+		return of_mdiobus_register(bp->mii_bus, mdio_np);
 
 	/* Only create the PHY from the device tree if at least one PHY is
 	 * described. Otherwise scan the entire MDIO bus. We do this to support
@@ -945,22 +993,43 @@ static int macb_mdiobus_register(struct macb *bp)
 			return of_mdiobus_register(bp->mii_bus, np);
 		}
 
+	/* For shared MDIO usecases find out MDIO producer platform
+	 * device node by traversing through phy-handle DT property.
+	 */
+	np = of_parse_phandle(np, "phy-handle", 0);
+	mdio_np = of_get_parent(np);
+	of_node_put(np);
+	dev_np = of_get_parent(mdio_np);
+	of_node_put(mdio_np);
+	/* Handle error where bus_find_device returns a match for NULL */
+	if (dev_np)
+		mdio_pdev = of_find_device_by_node(dev_np);
+
+	of_node_put(dev_np);
+
+	/* Check MDIO producer device driver data to see if it's probed */
+	if (mdio_pdev && !dev_get_drvdata(&mdio_pdev->dev)) {
+		platform_device_put(mdio_pdev);
+		netdev_info(bp->dev, "Defer probe as mdio producer %s is not probed\n",
+			    dev_name(&mdio_pdev->dev));
+		return -EPROBE_DEFER;
+	}
+
+	platform_device_put(mdio_pdev);
 	return mdiobus_register(bp->mii_bus);
 }
 
 static int macb_mii_init(struct macb *bp)
 {
-	struct device_node *child, *np = bp->pdev->dev.of_node;
+	struct device_node *mdio_np, *np = bp->pdev->dev.of_node;
 	int err = -ENXIO;
 
 	/* With fixed-link, we don't need to register the MDIO bus,
 	 * except if we have a child named "mdio" in the device tree.
 	 * In that case, some devices may be attached to the MACB's MDIO bus.
 	 */
-	child = of_get_child_by_name(np, "mdio");
-	if (child)
-		of_node_put(child);
-	else if (of_phy_is_fixed_link(np))
+	mdio_np = of_get_child_by_name(np, "mdio");
+	if (!mdio_np && of_phy_is_fixed_link(np))
 		return macb_mii_probe(bp->dev);
 
 	/* Enable management port */
@@ -984,7 +1053,7 @@ static int macb_mii_init(struct macb *bp)
 
 	dev_set_drvdata(&bp->dev->dev, bp->mii_bus);
 
-	err = macb_mdiobus_register(bp);
+	err = macb_mdiobus_register(bp, mdio_np);
 	if (err)
 		goto err_out_free_mdiobus;
 
@@ -999,6 +1068,8 @@ err_out_unregister_bus:
 err_out_free_mdiobus:
 	mdiobus_free(bp->mii_bus);
 err_out:
+	of_node_put(mdio_np);
+
 	return err;
 }
 
@@ -4958,6 +5029,16 @@ static const struct macb_config versal_config = {
 	.usrio = &macb_default_usrio,
 };
 
+static const struct macb_config versal2_10gbe_config = {
+	.caps = MACB_CAPS_GIGABIT_MODE_AVAILABLE | MACB_CAPS_JUMBO |
+		MACB_CAPS_GEM_HAS_PTP | MACB_CAPS_BD_RD_PREFETCH | MACB_CAPS_QUEUE_DISABLE,
+	.dma_burst_length = 16,
+	.clk_init = macb_clk_init,
+	.init = init_reset_optional,
+	.jumbo_max_len = 10240,
+	.usrio = &macb_default_usrio,
+};
+
 static const struct of_device_id macb_dt_ids[] = {
 	{ .compatible = "cdns,at91sam9260-macb", .data = &at91sam9260_config },
 	{ .compatible = "cdns,macb" },
@@ -4981,6 +5062,7 @@ static const struct of_device_id macb_dt_ids[] = {
 	{ .compatible = "xlnx,zynqmp-gem", .data = &zynqmp_config},
 	{ .compatible = "xlnx,zynq-gem", .data = &zynq_config },
 	{ .compatible = "xlnx,versal-gem", .data = &versal_config},
+	{ .compatible = "amd,versal2-10gbe", .data = &versal2_10gbe_config},
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, macb_dt_ids);

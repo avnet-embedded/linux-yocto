@@ -39,15 +39,21 @@ static int __maybe_unused zynqmp_dpsub_suspend(struct device *dev)
 	if (!dpsub->drm)
 		return 0;
 
+	zynqmp_dp_phy_exit(dpsub->dp);
 	return drm_mode_config_helper_suspend(&dpsub->drm->dev);
 }
 
 static int __maybe_unused zynqmp_dpsub_resume(struct device *dev)
 {
 	struct zynqmp_dpsub *dpsub = dev_get_drvdata(dev);
+	int ret;
 
 	if (!dpsub->drm)
 		return 0;
+
+	ret = zynqmp_dp_phy_init(dpsub->dp);
+	if (ret)
+		return ret;
 
 	return drm_mode_config_helper_resume(&dpsub->drm->dev);
 }
@@ -55,36 +61,6 @@ static int __maybe_unused zynqmp_dpsub_resume(struct device *dev)
 static const struct dev_pm_ops zynqmp_dpsub_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(zynqmp_dpsub_suspend, zynqmp_dpsub_resume)
 };
-
-/* -----------------------------------------------------------------------------
- * DPSUB Configuration
- */
-
-/**
- * zynqmp_dpsub_audio_enabled - If the audio is enabled
- * @dpsub: DisplayPort subsystem
- *
- * Return if the audio is enabled depending on the audio clock.
- *
- * Return: true if audio is enabled, or false.
- */
-bool zynqmp_dpsub_audio_enabled(struct zynqmp_dpsub *dpsub)
-{
-	return !!dpsub->aud_clk;
-}
-
-/**
- * zynqmp_dpsub_get_audio_clk_rate - Get the current audio clock rate
- * @dpsub: DisplayPort subsystem
- *
- * Return: the current audio clock rate.
- */
-unsigned int zynqmp_dpsub_get_audio_clk_rate(struct zynqmp_dpsub *dpsub)
-{
-	if (zynqmp_dpsub_audio_enabled(dpsub))
-		return 0;
-	return clk_get_rate(dpsub->aud_clk);
-}
 
 /* -----------------------------------------------------------------------------
  * Probe & Remove
@@ -266,10 +242,17 @@ static int zynqmp_dpsub_probe(struct platform_device *pdev)
 			goto err_disp;
 	}
 
+	ret = zynqmp_audio_init(dpsub);
+	if (ret)
+		goto err_drm_cleanup;
+
 	dev_info(&pdev->dev, "ZynqMP DisplayPort Subsystem driver probed");
 
 	return 0;
 
+err_drm_cleanup:
+	if (dpsub->drm)
+		zynqmp_dpsub_drm_cleanup(dpsub);
 err_disp:
 	drm_bridge_remove(dpsub->bridge);
 	zynqmp_disp_remove(dpsub);
@@ -288,6 +271,8 @@ err_mem:
 static void zynqmp_dpsub_remove(struct platform_device *pdev)
 {
 	struct zynqmp_dpsub *dpsub = platform_get_drvdata(pdev);
+
+	zynqmp_audio_uninit(dpsub);
 
 	if (dpsub->drm)
 		zynqmp_dpsub_drm_cleanup(dpsub);
