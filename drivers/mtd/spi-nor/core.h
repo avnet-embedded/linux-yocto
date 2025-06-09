@@ -18,6 +18,12 @@
 #define SPI_NOR_DEFAULT_N_BANKS 1
 #define SPI_NOR_DEFAULT_SECTOR_SIZE SZ_64K
 
+/* In single configuration enable CS0 */
+#define SPI_NOR_ENABLE_CS0     BIT(0)
+
+/* In parallel configuration enable multiple CS */
+#define SPI_NOR_ENABLE_MULTI_CS	(BIT(0) | BIT(1))
+
 /* Standard SPI NOR flash operations. */
 #define SPI_NOR_READID_OP(naddr, ndummy, buf, len)			\
 	SPI_MEM_OP(SPI_MEM_OP_CMD(SPINOR_OP_RDID, 0),			\
@@ -121,6 +127,12 @@
 		   SPI_MEM_OP_NO_ADDR,					\
 		   SPI_MEM_OP_NO_DATA)
 
+#define SPI_NOR_DIESEL_OP(buf)							\
+	SPI_MEM_OP(SPI_MEM_OP_CMD(SPINOR_OP_DIESEL, 0),			\
+		   SPI_MEM_OP_NO_ADDR,					\
+		   SPI_MEM_OP_NO_DUMMY,					\
+		   SPI_MEM_OP_DATA_OUT(1, buf, 0))
+
 /* Keep these in sync with the list in debugfs.c */
 enum spi_nor_option_flags {
 	SNOR_F_HAS_SR_TB	= BIT(0),
@@ -140,6 +152,10 @@ enum spi_nor_option_flags {
 	SNOR_F_RWW		= BIT(14),
 	SNOR_F_ECC		= BIT(15),
 	SNOR_F_NO_WP		= BIT(16),
+	SNOR_F_HAS_STACKED      = BIT(17),
+	SNOR_F_HAS_PARALLEL	= BIT(18),
+	SNOR_F_HAS_SR_BP3_BIT5  = BIT(19),
+	SNOR_F_HAS_CR_TB	= BIT(20),
 };
 
 struct spi_nor_read_command {
@@ -338,7 +354,7 @@ struct spi_nor_otp {
  *
  * @bank_size:		the flash memory bank density in bytes.
  * @size:		the total flash memory density in bytes.
- * @writesize		Minimal writable flash unit size. Defaults to 1. Set to
+ * @writesize:		Minimal writable flash unit size. Defaults to 1. Set to
  *			ECC unit size for ECC-ed flashes.
  * @page_size:		the page size of the SPI NOR flash memory.
  * @addr_nbytes:	number of address bytes to send.
@@ -347,6 +363,8 @@ struct spi_nor_otp {
  *			internal address mode for opcodes that don't have a 4B
  *			opcode correspondent.
  * @rdsr_dummy:		dummy cycles needed for Read Status Register command
+ *			in octal DTR mode.
+ * @wrsr_dummy:		dummy cycles needed for Write Status Register command
  *			in octal DTR mode.
  * @rdsr_addr_nbytes:	dummy address bytes needed for Read Status Register
  *			command in octal DTR mode.
@@ -380,6 +398,7 @@ struct spi_nor_flash_parameter {
 	u8				addr_nbytes;
 	u8				addr_mode_nbytes;
 	u8				rdsr_dummy;
+	u8				wrsr_dummy;
 	u8				rdsr_addr_nbytes;
 	u8				n_banks;
 	u8				n_dice;
@@ -472,6 +491,11 @@ struct spi_nor_id {
  *   SPI_NOR_NO_ERASE:        no erase command needed.
  *   SPI_NOR_QUAD_PP:         flash supports Quad Input Page Program.
  *   SPI_NOR_RWW:             flash supports reads while write.
+ *   SPI_NOR_BP3_SR_BIT5:     BP3 is bit 5 of status register,
+ *                            must be used with SPI_NOR_4BIT_BP
+ *   SST_GLOBAL_PROT_UNLK:    Unlock the Global protection for sst flashes.
+ *   SPI_NOR_HAS_CR_TB:       Top/Bottom (TB) is in configuration register.
+ *                            Must be used with SPI_NOR_HAS_TB.
  *
  * @no_sfdp_flags:  flags that indicate support that can be discovered via SFDP.
  *                  Used when SFDP tables are not defined in the flash. These
@@ -498,6 +522,9 @@ struct spi_nor_id {
  * @mfr_flags:      manufacturer private flags. Used in the manufacturer fixup
  *                  hooks to differentiate support between flashes of the same
  *                  manufacturer.
+ *   SST_WRITE                use SST byte programming
+ *   USE_FSR                  flash_info mfr_flag. Used to read proprietary FSR
+ *                            register
  * @otp_org:        flash's OTP organization.
  * @fixups:         part specific fixup hooks.
  */
@@ -518,8 +545,13 @@ struct flash_info {
 #define SPI_NOR_BP3_SR_BIT6		BIT(4)
 #define SPI_NOR_SWP_IS_VOLATILE		BIT(5)
 #define SPI_NOR_NO_ERASE		BIT(6)
-#define SPI_NOR_QUAD_PP			BIT(8)
-#define SPI_NOR_RWW			BIT(9)
+#define NO_CHIP_ERASE			BIT(7)
+#define SPI_NOR_NO_FR			BIT(8)
+#define SPI_NOR_QUAD_PP			BIT(9)
+#define SPI_NOR_RWW			BIT(10)
+#define SPI_NOR_BP3_SR_BIT5		BIT(11)
+#define SST_GLOBAL_PROT_UNLK            BIT(12)
+#define SPI_NOR_HAS_CR_TB		BIT(13)
 
 	u8 no_sfdp_flags;
 #define SPI_NOR_SKIP_SFDP		BIT(0)
@@ -535,6 +567,9 @@ struct flash_info {
 #define SPI_NOR_IO_MODE_EN_VOLATILE	BIT(1)
 
 	u8 mfr_flags;
+#define	SST_WRITE			BIT(0)
+#define USE_FSR				BIT(1)
+
 
 	const struct spi_nor_otp_organization *otp;
 	const struct spi_nor_fixups *fixups;

@@ -9,13 +9,15 @@
 #ifndef __MACH_ZYNQ_COMMON_H__
 #define __MACH_ZYNQ_COMMON_H__
 
-extern int zynq_slcr_init(void);
 extern int zynq_early_slcr_init(void);
 extern void zynq_slcr_cpu_stop(int cpu);
 extern void zynq_slcr_cpu_start(int cpu);
 extern bool zynq_slcr_cpu_state_read(int cpu);
 extern void zynq_slcr_cpu_state_write(int cpu, bool die);
 extern u32 zynq_slcr_get_device_id(void);
+
+extern bool zynq_efuse_cpu_state(int cpu);
+extern int zynq_early_efuse_init(void);
 
 #ifdef CONFIG_SMP
 extern char zynq_secondary_trampoline;

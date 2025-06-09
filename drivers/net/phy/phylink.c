@@ -251,6 +251,15 @@ static int phylink_interface_max_speed(phy_interface_t interface)
 	case PHY_INTERFACE_MODE_XLGMII:
 		return SPEED_40000;
 
+	case PHY_INTERFACE_MODE_100GBASER:
+		return SPEED_100000;
+
+	case PHY_INTERFACE_MODE_200GBASER:
+		return SPEED_200000;
+
+	case PHY_INTERFACE_MODE_400GBASER:
+		return SPEED_400000;
+
 	case PHY_INTERFACE_MODE_INTERNAL:
 	case PHY_INTERFACE_MODE_NA:
 	case PHY_INTERFACE_MODE_MAX:
@@ -561,6 +570,18 @@ static unsigned long phylink_get_capabilities(phy_interface_t interface,
 
 	case PHY_INTERFACE_MODE_25GBASER:
 		caps |= MAC_25000FD;
+		break;
+
+	case PHY_INTERFACE_MODE_100GBASER:
+		caps |= MAC_100000FD;
+		break;
+
+	case PHY_INTERFACE_MODE_200GBASER:
+		caps |= MAC_200000FD;
+		break;
+
+	case PHY_INTERFACE_MODE_400GBASER:
+		caps |= MAC_400000FD;
 		break;
 
 	case PHY_INTERFACE_MODE_XLGMII:
@@ -935,6 +956,7 @@ static int phylink_parse_mode(struct phylink *pl,
 		case PHY_INTERFACE_MODE_10GKR:
 		case PHY_INTERFACE_MODE_10GBASER:
 		case PHY_INTERFACE_MODE_XLGMII:
+		case PHY_INTERFACE_MODE_INTERNAL:
 			caps = ~(MAC_SYM_PAUSE | MAC_ASYM_PAUSE);
 			caps = phylink_get_capabilities(pl->link_config.interface, caps,
 							RATE_MATCH_NONE);
@@ -1144,11 +1166,14 @@ static unsigned int phylink_pcs_neg_mode(unsigned int mode,
 
 	case PHY_INTERFACE_MODE_1000BASEX:
 	case PHY_INTERFACE_MODE_2500BASEX:
+	case PHY_INTERFACE_MODE_INTERNAL:
 		/* 1000base-X is designed for use media-side for Fibre
 		 * connections, and thus the Autoneg bit needs to be
 		 * taken into account. We also do this for 2500base-X
 		 * as well, but drivers may not support this, so may
 		 * need to override this.
+		 * For Internal, neg mode to be determined based
+		 * on Autoneg bit.
 		 */
 		if (!phylink_autoneg_inband(mode))
 			neg_mode = PHYLINK_PCS_NEG_OUTBAND;
