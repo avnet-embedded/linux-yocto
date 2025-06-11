@@ -7,7 +7,7 @@
 #include "socfpga_stratix10_socdk.dts"
 
 / {
-	soc {
+	soc@0 {
 		#address-cells = <1>;
 		#size-cells = <1>;
 
