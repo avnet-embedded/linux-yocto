@@ -19,6 +19,7 @@ properties:
       - enum:
           - socionext,uniphier-sd4hc
       - const: cdns,sd4hc
+      - const: cdns,sd6hc
 
   reg:
     maxItems: 1

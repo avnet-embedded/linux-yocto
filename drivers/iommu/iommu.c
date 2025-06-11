@@ -322,13 +322,14 @@ err_out:
 
 void iommu_release_device(struct device *dev)
 {
-	const struct iommu_ops *ops = dev->bus->iommu_ops;
+	const struct iommu_ops *ops;
 
 	if (!dev->iommu)
 		return;
 
 	iommu_device_unlink(dev->iommu->iommu_dev, dev);
 
+	ops = dev_iommu_ops(dev);
 	ops->release_device(dev);
 
 	iommu_group_remove_device(dev);
@@ -673,6 +674,21 @@ struct iommu_group *iommu_group_alloc(void)
 }
 EXPORT_SYMBOL_GPL(iommu_group_alloc);
 
+struct iommu_group *iommu_group_get_from_kobj(struct kobject *group_kobj)
+{
+	struct iommu_group *group;
+
+	if (!iommu_group_kset || !group_kobj)
+		return NULL;
+
+	group = container_of(group_kobj, struct iommu_group, kobj);
+
+	kobject_get(group->devices_kobj);
+	kobject_put(&group->kobj);
+
+	return group;
+}
+
 struct iommu_group *iommu_group_get_by_id(int id)
 {
 	struct kobject *group_kobj;
@@ -701,6 +717,11 @@ struct iommu_group *iommu_group_get_by_id(int id)
 	return group;
 }
 EXPORT_SYMBOL_GPL(iommu_group_get_by_id);
+
+struct kset *iommu_get_group_kset(void)
+{
+	return kset_get(iommu_group_kset);
+}
 
 /**
  * iommu_group_get_iommudata - retrieve iommu_data registered for a group
@@ -839,8 +860,10 @@ out:
 static bool iommu_is_attach_deferred(struct iommu_domain *domain,
 				     struct device *dev)
 {
-	if (domain->ops->is_attach_deferred)
-		return domain->ops->is_attach_deferred(domain, dev);
+	const struct iommu_ops *ops = dev_iommu_ops(dev);
+
+	if (ops->is_attach_deferred)
+		return ops->is_attach_deferred(domain, dev);
 
 	return false;
 }
@@ -1259,10 +1282,10 @@ int iommu_page_response(struct device *dev,
 	struct iommu_fault_event *evt;
 	struct iommu_fault_page_request *prm;
 	struct dev_iommu *param = dev->iommu;
+	const struct iommu_ops *ops = dev_iommu_ops(dev);
 	bool has_pasid = msg->flags & IOMMU_PAGE_RESP_PASID_VALID;
-	struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
 
-	if (!domain || !domain->ops->page_response)
+	if (!ops->page_response)
 		return -ENODEV;
 
 	if (!param || !param->fault_param)
@@ -1303,7 +1326,7 @@ int iommu_page_response(struct device *dev,
 			msg->pasid = 0;
 		}
 
-		ret = domain->ops->page_response(dev, evt, msg);
+		ret = ops->page_response(dev, evt, msg);
 		list_del(&evt->list);
 		kfree(evt);
 		break;
@@ -1528,7 +1551,7 @@ EXPORT_SYMBOL_GPL(fsl_mc_device_group);
 
 static int iommu_get_def_domain_type(struct device *dev)
 {
-	const struct iommu_ops *ops = dev->bus->iommu_ops;
+	const struct iommu_ops *ops = dev_iommu_ops(dev);
 
 	if (dev_is_pci(dev) && to_pci_dev(dev)->untrusted)
 		return IOMMU_DOMAIN_DMA;
@@ -1587,16 +1610,13 @@ static int iommu_alloc_default_domain(struct iommu_group *group,
  */
 static struct iommu_group *iommu_group_get_for_dev(struct device *dev)
 {
-	const struct iommu_ops *ops = dev->bus->iommu_ops;
+	const struct iommu_ops *ops = dev_iommu_ops(dev);
 	struct iommu_group *group;
 	int ret;
 
 	group = iommu_group_get(dev);
 	if (group)
 		return group;
-
-	if (!ops)
-		return ERR_PTR(-EINVAL);
 
 	group = ops->device_group(dev);
 	if (WARN_ON_ONCE(group == NULL))
@@ -1766,10 +1786,10 @@ static int __iommu_group_dma_attach(struct iommu_group *group)
 
 static int iommu_group_do_probe_finalize(struct device *dev, void *data)
 {
-	struct iommu_domain *domain = data;
+	const struct iommu_ops *ops = dev_iommu_ops(dev);
 
-	if (domain->ops->probe_finalize)
-		domain->ops->probe_finalize(dev);
+	if (ops->probe_finalize)
+		ops->probe_finalize(dev);
 
 	return 0;
 }
@@ -2028,7 +2048,7 @@ EXPORT_SYMBOL_GPL(iommu_attach_device);
 
 int iommu_deferred_attach(struct device *dev, struct iommu_domain *domain)
 {
-	const struct iommu_ops *ops = domain->ops;
+	const struct iommu_ops *ops = dev_iommu_ops(dev);
 
 	if (ops->is_attach_deferred && ops->is_attach_deferred(domain, dev))
 		return __iommu_attach_device(domain, dev);
@@ -2297,6 +2317,12 @@ struct iommu_domain *iommu_get_domain_for_dev(struct device *dev)
 	return domain;
 }
 EXPORT_SYMBOL_GPL(iommu_get_domain_for_dev);
+
+struct iommu_domain *iommu_get_domain_for_group(struct iommu_group *group)
+{
+	return group->domain;
+}
+EXPORT_SYMBOL_GPL(iommu_get_domain_for_group);
 
 /*
  * For IOMMU_DOMAIN_DMA implementations which already provide their own
@@ -2797,17 +2823,17 @@ EXPORT_SYMBOL_GPL(iommu_set_pgtable_quirks);
 
 void iommu_get_resv_regions(struct device *dev, struct list_head *list)
 {
-	const struct iommu_ops *ops = dev->bus->iommu_ops;
+	const struct iommu_ops *ops = dev_iommu_ops(dev);
 
-	if (ops && ops->get_resv_regions)
+	if (ops->get_resv_regions)
 		ops->get_resv_regions(dev, list);
 }
 
 void iommu_put_resv_regions(struct device *dev, struct list_head *list)
 {
-	const struct iommu_ops *ops = dev->bus->iommu_ops;
+	const struct iommu_ops *ops = dev_iommu_ops(dev);
 
-	if (ops && ops->put_resv_regions)
+	if (ops->put_resv_regions)
 		ops->put_resv_regions(dev, list);
 }
 
@@ -3057,9 +3083,9 @@ iommu_sva_bind_device(struct device *dev, struct mm_struct *mm, void *drvdata)
 {
 	struct iommu_group *group;
 	struct iommu_sva *handle = ERR_PTR(-EINVAL);
-	const struct iommu_ops *ops = dev->bus->iommu_ops;
+	const struct iommu_ops *ops = dev_iommu_ops(dev);
 
-	if (!ops || !ops->sva_bind)
+	if (!ops->sva_bind)
 		return ERR_PTR(-ENODEV);
 
 	group = iommu_group_get(dev);
@@ -3100,9 +3126,9 @@ void iommu_sva_unbind_device(struct iommu_sva *handle)
 {
 	struct iommu_group *group;
 	struct device *dev = handle->dev;
-	const struct iommu_ops *ops = dev->bus->iommu_ops;
+	const struct iommu_ops *ops = dev_iommu_ops(dev);
 
-	if (!ops || !ops->sva_unbind)
+	if (!ops->sva_unbind)
 		return;
 
 	group = iommu_group_get(dev);
@@ -3119,9 +3145,9 @@ EXPORT_SYMBOL_GPL(iommu_sva_unbind_device);
 
 u32 iommu_sva_get_pasid(struct iommu_sva *handle)
 {
-	const struct iommu_ops *ops = handle->dev->bus->iommu_ops;
+	const struct iommu_ops *ops = dev_iommu_ops(handle->dev);
 
-	if (!ops || !ops->sva_get_pasid)
+	if (!ops->sva_get_pasid)
 		return IOMMU_PASID_INVALID;
 
 	return ops->sva_get_pasid(handle);
@@ -3360,3 +3386,79 @@ out:
 
 	return ret;
 }
+
+/*
+ * iommu_group_set_qos_params() - Set the QoS parameters for a group
+ * @group: the iommu group.
+ * @partition: the partition label all traffic from the group should use.
+ * @perf_mon_grp: the performance label all traffic from the group should use.
+ *
+ * Return: 0 on success, or an error.
+ */
+int iommu_group_set_qos_params(struct iommu_group *group,
+			       u16 partition, u8 perf_mon_grp)
+{
+	const struct iommu_ops *ops;
+	struct group_device *device;
+	int ret;
+
+	mutex_lock(&group->mutex);
+	device = list_first_entry_or_null(&group->devices, typeof(*device),
+					  list);
+	if (!device) {
+		ret = -ENODEV;
+		goto out_unlock;
+	}
+
+	ops = dev_iommu_ops(device->dev);
+	if (!ops->set_group_qos_params) {
+		ret = -EOPNOTSUPP;
+		goto out_unlock;
+	}
+
+	ret = ops->set_group_qos_params(group, partition, perf_mon_grp);
+
+out_unlock:
+	mutex_unlock(&group->mutex);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(iommu_group_set_qos_params);
+
+/*
+ * iommu_group_get_qos_params() - Get the QoS parameters for a group
+ * @group: the iommu group.
+ * @partition: the partition label all traffic from the group uses.
+ * @perf_mon_grp: the performance label all traffic from the group uses.
+ *
+ * Return: 0 on success, or an error.
+ */
+int iommu_group_get_qos_params(struct iommu_group *group,
+			       u16 *partition, u8 *perf_mon_grp)
+{
+	const struct iommu_ops *ops;
+	struct group_device *device;
+	int ret;
+
+	mutex_lock(&group->mutex);
+	device = list_first_entry_or_null(&group->devices, typeof(*device),
+					  list);
+	if (!device) {
+		ret = -ENODEV;
+		goto out_unlock;
+	}
+
+	ops = dev_iommu_ops(device->dev);
+	if (!ops->get_group_qos_params) {
+		ret = -EOPNOTSUPP;
+		goto out_unlock;
+	}
+
+	ret = ops->get_group_qos_params(group, partition, perf_mon_grp);
+
+out_unlock:
+	mutex_unlock(&group->mutex);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(iommu_group_get_qos_params);

@@ -503,6 +503,32 @@
 #define ETM_CNTR_MAX_VAL		0xFFFF
 #define ETM_TRACEID_MASK		0x3f
 
+/* ETM resource group encoding */
+#define ETM_RESGRP_EXTIN		0x0
+#define ETM_RESGRP_PECMP		0x1
+#define ETM_RESGRP_CNTRSEQ		0x2
+#define ETM_RESGRP_SSCMP		0x3
+#define ETM_RESGRP_SADDRCMP		0x4
+#define ETM_RESGRP_ADDRRANGECMP		0x5
+#define ETM_RESGRP_CIDCMP		0x6
+#define ETM_RESGRP_VCIDCMP		0x7
+
+#define ETM_EXTIN_0			0x0
+
+
+/* ETM resource group encoding */
+#define ETM_RESGRP_EXTIN		0x0
+#define ETM_RESGRP_PECMP		0x1
+#define ETM_RESGRP_CNTRSEQ		0x2
+#define ETM_RESGRP_SSCMP		0x3
+#define ETM_RESGRP_SADDRCMP		0x4
+#define ETM_RESGRP_ADDRRANGECMP		0x5
+#define ETM_RESGRP_CIDCMP		0x6
+#define ETM_RESGRP_VCIDCMP		0x7
+
+#define ETM_EXTIN_0			0x0
+
+
 /* ETMv4 programming modes */
 #define ETM_MODE_EXCLUDE		BIT(0)
 #define ETM_MODE_LOAD			BIT(1)
@@ -591,6 +617,8 @@
 	(ETM_DEVARCH_ARCHITECT_ARM | ETM_DEVARCH_ARCHID_ETMv4x | ETM_DEVARCH_PRESENT)
 #define ETM_DEVARCH_ETE_ARCH						\
 	(ETM_DEVARCH_ARCHITECT_ARM | ETM_DEVARCH_ARCHID_ETE | ETM_DEVARCH_PRESENT)
+
+#define CS_DEVTYPE_PE_TRACE		0x00000013
 
 #define TRCSTATR_IDLE_BIT		0
 #define TRCSTATR_PMSTABLE_BIT		1
@@ -846,6 +874,7 @@ struct etmv4_save_state {
 
 /**
  * struct etm4_drvdata - specifics associated to an ETM component
+ * @pclk        APB clock if present, otherwise NULL
  * @base:       Memory mapped base address for this component.
  * @csdev:      Component vitals needed by the framework.
  * @spinlock:   Only one at a time pls.
@@ -908,10 +937,14 @@ struct etmv4_save_state {
  * @arch_features: Bitmap of arch features of etmv4 devices.
  */
 struct etmv4_drvdata {
+	struct clk			*pclk;
 	void __iomem			*base;
 	struct coresight_device		*csdev;
 	spinlock_t			spinlock;
 	local_t				mode;
+	u32				etm_quirks;
+	int				hw_state;
+	int				rc_cpu;
 	int				cpu;
 	u8				arch;
 	u8				nr_pe;

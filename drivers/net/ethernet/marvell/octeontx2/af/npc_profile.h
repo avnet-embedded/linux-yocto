@@ -8,7 +8,7 @@
 #ifndef NPC_PROFILE_H
 #define NPC_PROFILE_H
 
-#define NPC_KPU_PROFILE_VER	0x0000000100060000
+#define NPC_KPU_PROFILE_VER	0x0000000100070000
 #define NPC_KPU_VER_MAJ(ver)	((u16)(((ver) >> 32) & 0xFFFF))
 #define NPC_KPU_VER_MIN(ver)	((u16)(((ver) >> 16) & 0xFFFF))
 #define NPC_KPU_VER_PATCH(ver)	((u16)((ver) & 0xFFFF))
@@ -30,11 +30,14 @@
 #define NPC_ETYPE_PTP		0x88f7
 #define NPC_ETYPE_FCOE		0x8906
 #define NPC_ETYPE_QINQ		0x9100
+#define NPC_ETYPE_QINQ2		0x9200
 #define NPC_ETYPE_TRANS_ETH_BR	0x6558
 #define NPC_ETYPE_PPP		0x880b
 #define NPC_ETYPE_NSH		0x894f
 #define NPC_ETYPE_DSA		0xdada
 #define NPC_ETYPE_PPPOE		0x8864
+#define NPC_ETYPE_ERSPA		0x88be
+#define NPC_ETYPE_FP		0x8903
 
 #define NPC_PPP_IP		0x0021
 #define NPC_PPP_IP6		0x0057
@@ -59,6 +62,9 @@
 #define NPC_IPNH_MPLS		137
 #define NPC_IPNH_HOSTID		139
 #define NPC_IPNH_SHIM6		140
+#define NPC_IPNH_CUSTOM		253
+
+#define NPC_IP6_ROUTE_TYPE	4
 
 #define NPC_UDP_PORT_PTP_E	319
 #define NPC_UDP_PORT_PTP_G	320
@@ -155,7 +161,7 @@
 
 /* Rx parse key extract nibble enable */
 #define NPC_PARSE_NIBBLE_INTF_RX	(NPC_PARSE_NIBBLE_CHAN | \
-					 NPC_PARSE_NIBBLE_ERRCODE | \
+					 NPC_PARSE_NIBBLE_L2L3_BCAST | \
 					 NPC_PARSE_NIBBLE_LA_LTYPE | \
 					 NPC_PARSE_NIBBLE_LB_LTYPE | \
 					 NPC_PARSE_NIBBLE_LC_LTYPE | \
@@ -184,10 +190,12 @@ enum npc_kpu_parser_state {
 	NPC_S_KPU2_SBTAG,
 	NPC_S_KPU2_QINQ,
 	NPC_S_KPU2_ETAG,
-	NPC_S_KPU2_PREHEADER,
 	NPC_S_KPU2_EXDSA,
 	NPC_S_KPU2_CPT_CTAG,
 	NPC_S_KPU2_CPT_QINQ,
+	NPC_S_KPU2_CPT_CTAG2,
+	NPC_S_KPU2_CPT_SBTAG,
+	NPC_S_KPU2_MT,
 	NPC_S_KPU3_CTAG,
 	NPC_S_KPU3_STAG,
 	NPC_S_KPU3_QINQ,
@@ -196,6 +204,9 @@ enum npc_kpu_parser_state {
 	NPC_S_KPU3_QINQ_C,
 	NPC_S_KPU3_DSA,
 	NPC_S_KPU3_VLAN_EXDSA,
+	NPC_S_KPU3_CPT_QINQ,
+	NPC_S_KPU3_CPT_CTAG,
+	NPC_S_KPU3_CPT_STAG,
 	NPC_S_KPU4_MPLS,
 	NPC_S_KPU4_NSH,
 	NPC_S_KPU4_FDSA,
@@ -232,6 +243,7 @@ enum npc_kpu_parser_state {
 	NPC_S_KPU8_ICMP6,
 	NPC_S_KPU8_GRE,
 	NPC_S_KPU8_AH,
+	NPC_S_KPU8_CUSTOM,
 	NPC_S_KPU9_TU_MPLS_IN_GRE,
 	NPC_S_KPU9_TU_MPLS_IN_NSH,
 	NPC_S_KPU9_TU_MPLS_IN_IP,
@@ -243,6 +255,7 @@ enum npc_kpu_parser_state {
 	NPC_S_KPU9_GTPC,
 	NPC_S_KPU9_GTPU,
 	NPC_S_KPU9_ESP,
+	NPC_S_KPU9_CUSTOM,
 	NPC_S_KPU10_TU_MPLS_IN_VXLANGPE,
 	NPC_S_KPU10_TU_MPLS_PL,
 	NPC_S_KPU10_TU_MPLS,
@@ -319,10 +332,10 @@ enum npc_kpu_lc_uflag {
 	NPC_F_LC_U_UNK_PROTO = 0x10,
 	NPC_F_LC_U_IP_FRAG = 0x20,
 	NPC_F_LC_U_IP6_FRAG = 0x40,
+	NPC_F_LC_L_6TO4 = 0x80,
 };
 enum npc_kpu_lc_lflag {
 	NPC_F_LC_L_IP_IN_IP = 1,
-	NPC_F_LC_L_6TO4,
 	NPC_F_LC_L_MPLS_IN_IP,
 	NPC_F_LC_L_IP6_TUN_IP6,
 	NPC_F_LC_L_IP6_MPLS_IN_IP,
@@ -335,6 +348,8 @@ enum npc_kpu_lc_lflag {
 	NPC_F_LC_L_EXT_MOBILITY,
 	NPC_F_LC_L_EXT_HOSTID,
 	NPC_F_LC_L_EXT_SHIM6,
+	NPC_F_LC_L_IP6_SRH_SEG_1,
+	NPC_F_LC_L_IP6_SRH_SEG_2,
 };
 
 enum npc_kpu_ld_lflag {
@@ -481,10 +496,487 @@ enum NPC_ERRLEV_E {
 		0, 0, 0, 0,			\
 	}
 
-static struct npc_kpu_profile_action ikpu_action_entries[] = {
+static struct npc_kpu_profile_action ikpu_action_entries[] __maybe_unused = {
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
+		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_LID_LA, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 28, 0, 0,
 		NPC_S_KPU1_ETHER, 0, 0,
 		NPC_LID_LA, NPC_LT_NA,
 		0,
@@ -494,487 +986,10 @@ static struct npc_kpu_profile_action ikpu_action_entries[] = {
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
+		NPC_S_KPU1_CPT_HDR, 48, 0,
 		NPC_LID_LA, NPC_LT_NA,
 		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 16, 20, 0, 0,
-		NPC_S_KPU1_ETHER, 0, 0,
-		NPC_LID_LA, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
+		0, 7, 0, 0,
 
 	},
 	{
@@ -1010,7 +1025,7 @@ static struct npc_kpu_profile_action ikpu_action_entries[] = {
 		NPC_S_KPU1_CPT_HDR, 40, 0,
 		NPC_LID_LA, NPC_LT_NA,
 		0,
-		7, 7, 0, 0,
+		0, 7, 0, 0,
 
 	},
 	{
@@ -1063,6 +1078,145 @@ static struct npc_kpu_profile_action ikpu_action_entries[] = {
 static struct npc_kpu_profile_cam kpu1_cam_entries[] = {
 	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	{
+		NPC_S_KPU1_ETHER, 0xff,
+		NPC_ETYPE_FP,
+		0xffff,
+		0x0000,
+		0x0000,
+		NPC_ETYPE_IP,
+		0xffff,
+	},
+	{
+		NPC_S_KPU1_ETHER, 0xff,
+		NPC_ETYPE_FP,
+		0xffff,
+		0x0000,
+		0x0000,
+		NPC_ETYPE_IP6,
+		0xffff,
+	},
+	{
+		NPC_S_KPU1_ETHER, 0xff,
+		NPC_ETYPE_FP,
+		0xffff,
+		0x0000,
+		0x0000,
+		NPC_ETYPE_ARP,
+		0xffff,
+	},
+	{
+		NPC_S_KPU1_ETHER, 0xff,
+		NPC_ETYPE_FP,
+		0xffff,
+		0x0000,
+		0x0000,
+		NPC_ETYPE_RARP,
+		0xffff,
+	},
+	{
+		NPC_S_KPU1_ETHER, 0xff,
+		NPC_ETYPE_FP,
+		0xffff,
+		0x0000,
+		0x0000,
+		NPC_ETYPE_PTP,
+		0xffff,
+	},
+	{
+		NPC_S_KPU1_ETHER, 0xff,
+		NPC_ETYPE_FP,
+		0xffff,
+		0x0000,
+		0x0000,
+		NPC_ETYPE_FCOE,
+		0xffff,
+	},
+	{
+		NPC_S_KPU1_ETHER, 0xff,
+		NPC_ETYPE_FP,
+		0xffff,
+		0x0000,
+		0x0000,
+		NPC_ETYPE_CTAG,
+		0xffff,
+	},
+	{
+		NPC_S_KPU1_ETHER, 0xff,
+		NPC_ETYPE_FP,
+		0xffff,
+		0x0000,
+		0x0000,
+		NPC_ETYPE_SBTAG,
+		0xffff,
+	},
+	{
+		NPC_S_KPU1_ETHER, 0xff,
+		NPC_ETYPE_FP,
+		0xffff,
+		0x0000,
+		0x0000,
+		NPC_ETYPE_QINQ,
+		0xffff,
+	},
+	{
+		NPC_S_KPU1_ETHER, 0xff,
+		NPC_ETYPE_FP,
+		0xffff,
+		0x0000,
+		0x0000,
+		NPC_ETYPE_ETAG,
+		0xffff,
+	},
+	{
+		NPC_S_KPU1_ETHER, 0xff,
+		NPC_ETYPE_FP,
+		0xffff,
+		0x0000,
+		0x0000,
+		NPC_ETYPE_MPLSU,
+		0xffff,
+	},
+	{
+		NPC_S_KPU1_ETHER, 0xff,
+		NPC_ETYPE_FP,
+		0xffff,
+		0x0000,
+		0x0000,
+		NPC_ETYPE_MPLSM,
+		0xffff,
+	},
+	{
+		NPC_S_KPU1_ETHER, 0xff,
+		NPC_ETYPE_FP,
+		0xffff,
+		0x0000,
+		0x0000,
+		NPC_ETYPE_NSH,
+		0xffff,
+	},
+	{
+		NPC_S_KPU1_ETHER, 0xff,
+		NPC_ETYPE_FP,
+		0xffff,
+		0x0000,
+		0x0000,
+		NPC_ETYPE_DSA,
+		0xffff,
+	},
+	{
+		NPC_S_KPU1_ETHER, 0xff,
+		NPC_ETYPE_FP,
+		0xffff,
+		0x0000,
+		0x0000,
+		NPC_ETYPE_PPPOE,
+		0xffff,
+	},
 	{
 		NPC_S_KPU1_ETHER, 0xff,
 		NPC_ETYPE_IP,
@@ -1147,6 +1301,15 @@ static struct npc_kpu_profile_cam kpu1_cam_entries[] = {
 	{
 		NPC_S_KPU1_ETHER, 0xff,
 		NPC_ETYPE_QINQ,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU1_ETHER, 0xff,
+		NPC_ETYPE_QINQ2,
 		0xffff,
 		0x0000,
 		0x0000,
@@ -1371,33 +1534,6 @@ static struct npc_kpu_profile_cam kpu1_cam_entries[] = {
 	},
 	{
 		NPC_S_KPU1_IH, 0xff,
-		NPC_IH_W | NPC_IH_UTAG,
-		NPC_IH_W | NPC_IH_UTAG,
-		0x0000,
-		0x0000,
-		0x0000,
-		0x0000,
-	},
-	{
-		NPC_S_KPU1_IH, 0xff,
-		NPC_IH_W,
-		NPC_IH_W | NPC_IH_UTAG,
-		0x0000,
-		0x0000,
-		0x0000,
-		0x0000,
-	},
-	{
-		NPC_S_KPU1_IH, 0xff,
-		0x0000,
-		NPC_IH_W | NPC_IH_UTAG,
-		0x0000,
-		0x0000,
-		0x0000,
-		0x0000,
-	},
-	{
-		NPC_S_KPU1_IH, 0xff,
 		0x0000,
 		0x0000,
 		0x0000,
@@ -1859,6 +1995,15 @@ static struct npc_kpu_profile_cam kpu1_cam_entries[] = {
 		NPC_S_KPU1_CPT_HDR, 0xff,
 		NPC_ETYPE_CTAG,
 		0xffff,
+		NPC_ETYPE_CTAG,
+		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU1_CPT_HDR, 0xff,
+		NPC_ETYPE_CTAG,
+		0xffff,
 		0x0000,
 		0x0000,
 		0x0000,
@@ -1867,6 +2012,24 @@ static struct npc_kpu_profile_cam kpu1_cam_entries[] = {
 	{
 		NPC_S_KPU1_CPT_HDR, 0xff,
 		NPC_ETYPE_QINQ,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU1_CPT_HDR, 0xff,
+		NPC_ETYPE_QINQ2,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU1_CPT_HDR, 0xff,
+		NPC_ETYPE_SBTAG,
 		0xffff,
 		0x0000,
 		0x0000,
@@ -1894,6 +2057,10 @@ static struct npc_kpu_profile_cam kpu1_cam_entries[] = {
 };
 
 static struct npc_kpu_profile_cam kpu2_cam_entries[] = {
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	{
@@ -2006,6 +2173,33 @@ static struct npc_kpu_profile_cam kpu2_cam_entries[] = {
 	},
 	{
 		NPC_S_KPU2_CTAG, 0xff,
+		NPC_ETYPE_SBTAG,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_CTAG, 0xff,
+		NPC_ETYPE_QINQ,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_CTAG, 0xff,
+		NPC_ETYPE_QINQ2,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_CTAG, 0xff,
 		0x0000,
 		0x0000,
 		0x0000,
@@ -2223,6 +2417,24 @@ static struct npc_kpu_profile_cam kpu2_cam_entries[] = {
 	{
 		NPC_S_KPU2_SBTAG, 0xff,
 		NPC_ETYPE_ITAG,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_SBTAG, 0xff,
+		NPC_ETYPE_IP,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_SBTAG, 0xff,
+		NPC_ETYPE_IP6,
 		0xffff,
 		0x0000,
 		0x0000,
@@ -2348,6 +2560,24 @@ static struct npc_kpu_profile_cam kpu2_cam_entries[] = {
 	},
 	{
 		NPC_S_KPU2_QINQ, 0xff,
+		NPC_ETYPE_IP,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_QINQ, 0xff,
+		NPC_ETYPE_IP6,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_QINQ, 0xff,
 		0x0000,
 		0x0000,
 		0x0000,
@@ -2620,114 +2850,6 @@ static struct npc_kpu_profile_cam kpu2_cam_entries[] = {
 		NPC_S_KPU2_CTAG2, 0xff,
 		0x0000,
 		0x0000,
-		0x0000,
-		0x0000,
-		0x0000,
-		0x0000,
-	},
-	{
-		NPC_S_KPU2_PREHEADER, 0xff,
-		NPC_ETYPE_IP,
-		0xffff,
-		0x0000,
-		0x0000,
-		0x0000,
-		0x0000,
-	},
-	{
-		NPC_S_KPU2_PREHEADER, 0xff,
-		NPC_ETYPE_IP6,
-		0xffff,
-		0x0000,
-		0x0000,
-		0x0000,
-		0x0000,
-	},
-	{
-		NPC_S_KPU2_PREHEADER, 0xff,
-		NPC_ETYPE_ARP,
-		0xffff,
-		0x0000,
-		0x0000,
-		0x0000,
-		0x0000,
-	},
-	{
-		NPC_S_KPU2_PREHEADER, 0xff,
-		NPC_ETYPE_RARP,
-		0xffff,
-		0x0000,
-		0x0000,
-		0x0000,
-		0x0000,
-	},
-	{
-		NPC_S_KPU2_PREHEADER, 0xff,
-		NPC_ETYPE_PTP,
-		0xffff,
-		0x0000,
-		0x0000,
-		0x0000,
-		0x0000,
-	},
-	{
-		NPC_S_KPU2_PREHEADER, 0xff,
-		NPC_ETYPE_FCOE,
-		0xffff,
-		0x0000,
-		0x0000,
-		0x0000,
-		0x0000,
-	},
-	{
-		NPC_S_KPU2_PREHEADER, 0xff,
-		NPC_ETYPE_CTAG,
-		0xffff,
-		0x0000,
-		0x0000,
-		0x0000,
-		0x0000,
-	},
-	{
-		NPC_S_KPU2_PREHEADER, 0xff,
-		NPC_ETYPE_SBTAG,
-		0xffff,
-		0x0000,
-		0x0000,
-		0x0000,
-		0x0000,
-	},
-	{
-		NPC_S_KPU2_PREHEADER, 0xff,
-		NPC_ETYPE_QINQ,
-		0xffff,
-		0x0000,
-		0x0000,
-		0x0000,
-		0x0000,
-	},
-	{
-		NPC_S_KPU2_PREHEADER, 0xff,
-		NPC_ETYPE_MPLSU,
-		0xffff,
-		0x0000,
-		0x0000,
-		0x0000,
-		0x0000,
-	},
-	{
-		NPC_S_KPU2_PREHEADER, 0xff,
-		NPC_ETYPE_MPLSM,
-		0xffff,
-		0x0000,
-		0x0000,
-		0x0000,
-		0x0000,
-	},
-	{
-		NPC_S_KPU2_PREHEADER, 0xff,
-		NPC_ETYPE_NSH,
-		0xffff,
 		0x0000,
 		0x0000,
 		0x0000,
@@ -2910,6 +3032,123 @@ static struct npc_kpu_profile_cam kpu2_cam_entries[] = {
 		0xffff,
 		NPC_ETYPE_IP6,
 		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_CPT_QINQ, 0xff,
+		NPC_ETYPE_IP,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_CPT_QINQ, 0xff,
+		NPC_ETYPE_IP6,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_CPT_CTAG2, 0xff,
+		NPC_ETYPE_IP,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_CPT_CTAG2, 0xff,
+		NPC_ETYPE_IP6,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_CPT_CTAG2, 0xff,
+		NPC_ETYPE_CTAG,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_CPT_CTAG2, 0xff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_CPT_SBTAG, 0xff,
+		NPC_ETYPE_CTAG,
+		0xffff,
+		NPC_ETYPE_IP,
+		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_CPT_SBTAG, 0xff,
+		NPC_ETYPE_CTAG,
+		0xffff,
+		NPC_ETYPE_IP6,
+		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_CPT_SBTAG, 0xff,
+		NPC_ETYPE_SBTAG,
+		0xffff,
+		NPC_ETYPE_CTAG,
+		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_CPT_SBTAG, 0xff,
+		NPC_ETYPE_IP,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_CPT_SBTAG, 0xff,
+		NPC_ETYPE_IP6,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_MT, 0xff,
+		NPC_ETYPE_CTAG,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU2_MT, 0xff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
 		0x0000,
 		0x0000,
 	},
@@ -2925,6 +3164,10 @@ static struct npc_kpu_profile_cam kpu2_cam_entries[] = {
 };
 
 static struct npc_kpu_profile_cam kpu3_cam_entries[] = {
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	{
@@ -3891,6 +4134,105 @@ static struct npc_kpu_profile_cam kpu3_cam_entries[] = {
 		0x0000,
 	},
 	{
+		NPC_S_KPU3_CPT_QINQ, 0xff,
+		NPC_ETYPE_CTAG,
+		0xffff,
+		NPC_ETYPE_IP,
+		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU3_CPT_QINQ, 0xff,
+		NPC_ETYPE_CTAG,
+		0xffff,
+		NPC_ETYPE_IP6,
+		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU3_CPT_QINQ, 0xff,
+		NPC_ETYPE_IP,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU3_CPT_QINQ, 0xff,
+		NPC_ETYPE_IP6,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU3_CPT_QINQ, 0xff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU3_CPT_CTAG, 0xff,
+		NPC_ETYPE_IP,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU3_CPT_CTAG, 0xff,
+		NPC_ETYPE_IP6,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU3_CPT_STAG, 0xff,
+		NPC_ETYPE_CTAG,
+		0xffff,
+		NPC_ETYPE_IP,
+		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU3_CPT_STAG, 0xff,
+		NPC_ETYPE_CTAG,
+		0xffff,
+		NPC_ETYPE_IP6,
+		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU3_CPT_STAG, 0xff,
+		NPC_ETYPE_IP,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU3_CPT_STAG, 0xff,
+		NPC_ETYPE_IP6,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
 		NPC_S_NA, 0X00,
 		0x0000,
 		0x0000,
@@ -3902,6 +4244,10 @@ static struct npc_kpu_profile_cam kpu3_cam_entries[] = {
 };
 
 static struct npc_kpu_profile_cam kpu4_cam_entries[] = {
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	{
@@ -4213,6 +4559,10 @@ static struct npc_kpu_profile_cam kpu4_cam_entries[] = {
 };
 
 static struct npc_kpu_profile_cam kpu5_cam_entries[] = {
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	{
@@ -4617,6 +4967,24 @@ static struct npc_kpu_profile_cam kpu5_cam_entries[] = {
 		0xff00,
 		NPC_IP_VER_6,
 		NPC_IP_VER_MASK,
+		(NPC_IP6_ROUTE_TYPE << 8) | 1,
+		0xffff,
+	},
+	{
+		NPC_S_KPU5_IP6, 0xff,
+		NPC_IPNH_ROUT << 8,
+		0xff00,
+		NPC_IP_VER_6,
+		NPC_IP_VER_MASK,
+		(NPC_IP6_ROUTE_TYPE << 8) | 2,
+		0xffff,
+	},
+	{
+		NPC_S_KPU5_IP6, 0xff,
+		NPC_IPNH_ROUT << 8,
+		0xff00,
+		NPC_IP_VER_6,
+		NPC_IP_VER_MASK,
 		0x0000,
 		0x0000,
 	},
@@ -4892,6 +5260,15 @@ static struct npc_kpu_profile_cam kpu5_cam_entries[] = {
 	},
 	{
 		NPC_S_KPU5_CPT_IP, 0xff,
+		NPC_IPNH_CUSTOM,
+		0x00ff,
+		NPC_IP_VER_4 | NPC_IP_HDR_LEN_5,
+		NPC_IP_VER_MASK | NPC_IP_HDR_LEN_MASK,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU5_CPT_IP, 0xff,
 		0x0000,
 		0x0000,
 		NPC_IP_VER_4 | NPC_IP_HDR_LEN_5,
@@ -4992,6 +5369,15 @@ static struct npc_kpu_profile_cam kpu5_cam_entries[] = {
 	{
 		NPC_S_KPU5_CPT_IP, 0xff,
 		NPC_IPNH_MPLS,
+		0x00ff,
+		NPC_IP_VER_4,
+		NPC_IP_VER_MASK,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU5_CPT_IP, 0xff,
+		NPC_IPNH_CUSTOM,
 		0x00ff,
 		NPC_IP_VER_4,
 		NPC_IP_VER_MASK,
@@ -5180,6 +5566,15 @@ static struct npc_kpu_profile_cam kpu5_cam_entries[] = {
 	},
 	{
 		NPC_S_KPU5_CPT_IP6, 0xff,
+		NPC_IPNH_CUSTOM << 8,
+		0xff00,
+		NPC_IP_VER_6,
+		NPC_IP_VER_MASK,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU5_CPT_IP6, 0xff,
 		0x0000,
 		0x0000,
 		NPC_IP_VER_6,
@@ -5217,6 +5612,10 @@ static struct npc_kpu_profile_cam kpu5_cam_entries[] = {
 };
 
 static struct npc_kpu_profile_cam kpu6_cam_entries[] = {
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	{
@@ -5320,6 +5719,15 @@ static struct npc_kpu_profile_cam kpu6_cam_entries[] = {
 	},
 	{
 		NPC_S_KPU6_IP6_FRAG, 0xff,
+		NPC_IPNH_CUSTOM << 8,
+		0xff00,
+		0x0000,
+		NPC_IP6_FRAG_FRAGOFF,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU6_IP6_FRAG, 0xff,
 		0x0000,
 		0x0000,
 		0x0000,
@@ -5437,6 +5845,15 @@ static struct npc_kpu_profile_cam kpu6_cam_entries[] = {
 	},
 	{
 		NPC_S_KPU6_IP6_HOP_DEST, 0xff,
+		NPC_IPNH_CUSTOM << 8,
+		0xff00,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU6_IP6_HOP_DEST, 0xff,
 		0x0000,
 		0x0000,
 		0x0000,
@@ -5545,6 +5962,15 @@ static struct npc_kpu_profile_cam kpu6_cam_entries[] = {
 	},
 	{
 		NPC_S_KPU6_IP6_ROUT, 0xff,
+		NPC_IPNH_CUSTOM << 8,
+		0xff00,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU6_IP6_ROUT, 0xff,
 		0x0000,
 		0x0000,
 		0x0000,
@@ -5636,6 +6062,15 @@ static struct npc_kpu_profile_cam kpu6_cam_entries[] = {
 	{
 		NPC_S_KPU6_IP6_CPT_FRAG, 0xff,
 		NPC_IPNH_MPLS << 8,
+		0xff00,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU6_IP6_CPT_FRAG, 0xff,
+		NPC_IPNH_CUSTOM << 8,
 		0xff00,
 		0x0000,
 		0x0000,
@@ -5761,6 +6196,15 @@ static struct npc_kpu_profile_cam kpu6_cam_entries[] = {
 	},
 	{
 		NPC_S_KPU6_IP6_CPT_HOP_DEST, 0xff,
+		NPC_IPNH_CUSTOM << 8,
+		0xff00,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU6_IP6_CPT_HOP_DEST, 0xff,
 		0x0000,
 		0x0000,
 		0x0000,
@@ -5861,6 +6305,15 @@ static struct npc_kpu_profile_cam kpu6_cam_entries[] = {
 	{
 		NPC_S_KPU6_IP6_CPT_ROUT, 0xff,
 		NPC_IPNH_FRAG << 8,
+		0xff00,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU6_IP6_CPT_ROUT, 0xff,
+		NPC_IPNH_CUSTOM << 8,
 		0xff00,
 		0x0000,
 		0x0000,
@@ -5888,6 +6341,10 @@ static struct npc_kpu_profile_cam kpu6_cam_entries[] = {
 };
 
 static struct npc_kpu_profile_cam kpu7_cam_entries[] = {
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	{
@@ -5991,6 +6448,15 @@ static struct npc_kpu_profile_cam kpu7_cam_entries[] = {
 	},
 	{
 		NPC_S_KPU7_IP6_ROUT, 0xff,
+		NPC_IPNH_CUSTOM << 8,
+		0xff00,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU7_IP6_ROUT, 0xff,
 		0x0000,
 		0x0000,
 		0x0000,
@@ -6090,6 +6556,15 @@ static struct npc_kpu_profile_cam kpu7_cam_entries[] = {
 	},
 	{
 		NPC_S_KPU7_IP6_FRAG, 0xff,
+		NPC_IPNH_CUSTOM << 8,
+		0xff00,
+		0x0000,
+		NPC_IP6_FRAG_FRAGOFF,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU7_IP6_FRAG, 0xff,
 		0x0000,
 		0x0000,
 		0x0000,
@@ -6181,6 +6656,15 @@ static struct npc_kpu_profile_cam kpu7_cam_entries[] = {
 	{
 		NPC_S_KPU7_CPT_IP6_FRAG, 0xff,
 		NPC_IPNH_MPLS << 8,
+		0xff00,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU7_CPT_IP6_FRAG, 0xff,
+		NPC_IPNH_CUSTOM << 8,
 		0xff00,
 		0x0000,
 		0x0000,
@@ -6208,6 +6692,10 @@ static struct npc_kpu_profile_cam kpu7_cam_entries[] = {
 };
 
 static struct npc_kpu_profile_cam kpu8_cam_entries[] = {
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	{
@@ -6407,6 +6895,15 @@ static struct npc_kpu_profile_cam kpu8_cam_entries[] = {
 		0x0000,
 		0x0000,
 		0x0000,
+	},
+	{
+		NPC_S_KPU8_UDP, 0xff,
+		NPC_UDP_PORT_ESP,
+		0xffff,
+		0x0000,
+		0x0000,
+		0x0009,
+		0xffff,
 	},
 	{
 		NPC_S_KPU8_UDP, 0xff,
@@ -6860,6 +7357,78 @@ static struct npc_kpu_profile_cam kpu8_cam_entries[] = {
 	},
 	{
 		NPC_S_KPU8_GRE, 0xff,
+		NPC_ETYPE_ERSPA,
+		0xffff,
+		0x0000,
+		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU8_GRE, 0xff,
+		NPC_ETYPE_ERSPA,
+		0xffff,
+		NPC_GRE_F_CSUM,
+		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU8_GRE, 0xff,
+		NPC_ETYPE_ERSPA,
+		0xffff,
+		NPC_GRE_F_KEY,
+		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU8_GRE, 0xff,
+		NPC_ETYPE_ERSPA,
+		0xffff,
+		NPC_GRE_F_SEQ,
+		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU8_GRE, 0xff,
+		NPC_ETYPE_ERSPA,
+		0xffff,
+		NPC_GRE_F_CSUM | NPC_GRE_F_KEY,
+		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU8_GRE, 0xff,
+		NPC_ETYPE_ERSPA,
+		0xffff,
+		NPC_GRE_F_CSUM | NPC_GRE_F_SEQ,
+		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU8_GRE, 0xff,
+		NPC_ETYPE_ERSPA,
+		0xffff,
+		NPC_GRE_F_KEY | NPC_GRE_F_SEQ,
+		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU8_GRE, 0xff,
+		NPC_ETYPE_ERSPA,
+		0xffff,
+		NPC_GRE_F_CSUM | NPC_GRE_F_KEY | NPC_GRE_F_SEQ,
+		0xffff,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU8_GRE, 0xff,
 		0x0000,
 		0xffff,
 		NPC_GRE_F_ROUTE,
@@ -6940,6 +7509,15 @@ static struct npc_kpu_profile_cam kpu8_cam_entries[] = {
 		0x0000,
 	},
 	{
+		NPC_S_KPU8_CUSTOM, 0xff,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
 		NPC_S_NA, 0X00,
 		0x0000,
 		0x0000,
@@ -6951,6 +7529,10 @@ static struct npc_kpu_profile_cam kpu8_cam_entries[] = {
 };
 
 static struct npc_kpu_profile_cam kpu9_cam_entries[] = {
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	{
@@ -7353,15 +7935,6 @@ static struct npc_kpu_profile_cam kpu9_cam_entries[] = {
 		NPC_S_KPU9_GTPU, 0xff,
 		0x0000,
 		0x0000,
-		NPC_GTP_PT_GTP | NPC_GTP_VER1 | NPC_GTP_MT_G_PDU,
-		NPC_GTP_PT_MASK | NPC_GTP_VER_MASK | NPC_GTP_MT_MASK,
-		0x0000,
-		0x0000,
-	},
-	{
-		NPC_S_KPU9_GTPU, 0xff,
-		0x0000,
-		0x0000,
 		NPC_GTP_PT_GTP | NPC_GTP_VER1,
 		NPC_GTP_PT_MASK | NPC_GTP_VER_MASK,
 		0x0000,
@@ -7413,6 +7986,24 @@ static struct npc_kpu_profile_cam kpu9_cam_entries[] = {
 		0x0000,
 	},
 	{
+		NPC_S_KPU9_CUSTOM, 0xff,
+		0x4000,
+		0xf000,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
+		NPC_S_KPU9_CUSTOM, 0xff,
+		0x6000,
+		0xf000,
+		0x0000,
+		0x0000,
+		0x0000,
+		0x0000,
+	},
+	{
 		NPC_S_NA, 0X00,
 		0x0000,
 		0x0000,
@@ -7424,6 +8015,10 @@ static struct npc_kpu_profile_cam kpu9_cam_entries[] = {
 };
 
 static struct npc_kpu_profile_cam kpu10_cam_entries[] = {
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	{
@@ -7591,6 +8186,10 @@ static struct npc_kpu_profile_cam kpu10_cam_entries[] = {
 };
 
 static struct npc_kpu_profile_cam kpu11_cam_entries[] = {
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	{
@@ -7904,6 +8503,10 @@ static struct npc_kpu_profile_cam kpu11_cam_entries[] = {
 static struct npc_kpu_profile_cam kpu12_cam_entries[] = {
 	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
 	{
 		NPC_S_KPU12_TU_IP, 0xff,
 		NPC_IPNH_TCP,
@@ -8161,6 +8764,10 @@ static struct npc_kpu_profile_cam kpu12_cam_entries[] = {
 static struct npc_kpu_profile_cam kpu13_cam_entries[] = {
 	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
 	{
 		NPC_S_KPU13_TU_IP6_EXT, 0xff,
 		0x0000,
@@ -8175,6 +8782,10 @@ static struct npc_kpu_profile_cam kpu13_cam_entries[] = {
 static struct npc_kpu_profile_cam kpu14_cam_entries[] = {
 	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
 	{
 		NPC_S_KPU14_TU_IP6_EXT, 0xff,
 		0x0000,
@@ -8187,6 +8798,10 @@ static struct npc_kpu_profile_cam kpu14_cam_entries[] = {
 };
 
 static struct npc_kpu_profile_cam kpu15_cam_entries[] = {
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
 	{
@@ -8392,6 +9007,10 @@ static struct npc_kpu_profile_cam kpu15_cam_entries[] = {
 static struct npc_kpu_profile_cam kpu16_cam_entries[] = {
 	NPC_KPU_NOP_CAM,
 	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
+	NPC_KPU_NOP_CAM,
 	{
 		NPC_S_KPU16_TCP_DATA, 0xff,
 		0x0000,
@@ -8451,6 +9070,130 @@ static struct npc_kpu_profile_cam kpu16_cam_entries[] = {
 static struct npc_kpu_profile_action kpu1_action_entries[] = {
 	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 0, 6, 3, 0,
+		NPC_S_KPU5_IP, 30, 1,
+		NPC_LID_LA, NPC_LT_LA_FP_ETHER,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		6, 0, 42, 3, 0,
+		NPC_S_KPU5_IP6, 30, 1,
+		NPC_LID_LA, NPC_LT_LA_FP_ETHER,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 3, 0,
+		NPC_S_KPU5_ARP, 30, 1,
+		NPC_LID_LA, NPC_LT_LA_FP_ETHER,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 3, 0,
+		NPC_S_KPU5_RARP, 30, 1,
+		NPC_LID_LA, NPC_LT_LA_FP_ETHER,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 3, 0,
+		NPC_S_KPU5_PTP, 30, 1,
+		NPC_LID_LA, NPC_LT_LA_FP_ETHER,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 3, 0,
+		NPC_S_KPU5_FCOE, 30, 1,
+		NPC_LID_LA, NPC_LT_LA_FP_ETHER,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		4, 8, 12, 0, 0,
+		NPC_S_KPU2_CTAG, 28, 1,
+		NPC_LID_LA, NPC_LT_LA_FP_ETHER,
+		NPC_F_LA_U_HAS_TAG | NPC_F_LA_L_WITH_VLAN,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		4, 8, 22, 0, 0,
+		NPC_S_KPU2_SBTAG, 28, 1,
+		NPC_LID_LA, NPC_LT_LA_FP_ETHER,
+		NPC_F_LA_U_HAS_TAG | NPC_F_LA_L_WITH_VLAN,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		4, 8, 0, 0, 0,
+		NPC_S_KPU2_QINQ, 28, 1,
+		NPC_LID_LA, NPC_LT_LA_FP_ETHER,
+		NPC_F_LA_U_HAS_TAG | NPC_F_LA_L_WITH_VLAN,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 12, 26, 0, 0,
+		NPC_S_KPU2_ETAG, 28, 1,
+		NPC_LID_LA, NPC_LT_LA_FP_ETHER,
+		NPC_F_LA_U_HAS_TAG | NPC_F_LA_L_WITH_ETAG,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		2, 6, 10, 2, 0,
+		NPC_S_KPU4_MPLS, 30, 1,
+		NPC_LID_LA, NPC_LT_LA_FP_ETHER,
+		NPC_F_LA_L_WITH_MPLS,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		2, 6, 10, 2, 0,
+		NPC_S_KPU4_MPLS, 30, 1,
+		NPC_LID_LA, NPC_LT_LA_FP_ETHER,
+		NPC_F_LA_L_WITH_MPLS,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		2, 0, 0, 2, 0,
+		NPC_S_KPU4_NSH, 30, 1,
+		NPC_LID_LA, NPC_LT_LA_FP_ETHER,
+		NPC_F_LA_L_WITH_NSH,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 12, 0, 1, 0,
+		NPC_S_KPU3_DSA, 28, 1,
+		NPC_LID_LA, NPC_LT_LA_FP_ETHER,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 12, 0, 2, 0,
+		NPC_S_KPU4_PPPOE, 28, 1,
+		NPC_LID_LA, NPC_LT_LA_FP_ETHER,
+		0,
+		0, 0, 0, 0,
+	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		8, 0, 6, 3, 0,
@@ -8461,7 +9204,7 @@ static struct npc_kpu_profile_action kpu1_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 3, 0,
+		6, 0, 42, 3, 0,
 		NPC_S_KPU5_IP6, 14, 1,
 		NPC_LID_LA, NPC_LT_LA_ETHER,
 		0,
@@ -8519,6 +9262,14 @@ static struct npc_kpu_profile_action kpu1_action_entries[] = {
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		4, 8, 22, 0, 0,
 		NPC_S_KPU2_SBTAG, 12, 1,
+		NPC_LID_LA, NPC_LT_LA_ETHER,
+		NPC_F_LA_U_HAS_TAG | NPC_F_LA_L_WITH_VLAN,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		4, 8, 0, 0, 0,
+		NPC_S_KPU2_QINQ, 12, 1,
 		NPC_LID_LA, NPC_LT_LA_ETHER,
 		NPC_F_LA_U_HAS_TAG | NPC_F_LA_L_WITH_VLAN,
 		0, 0, 0, 0,
@@ -8613,7 +9364,7 @@ static struct npc_kpu_profile_action kpu1_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 3, 0,
+		6, 0, 42, 3, 0,
 		NPC_S_KPU5_IP6, 22, 1,
 		NPC_LID_LA, NPC_LT_LA_IH_NIX_ETHER,
 		NPC_F_LA_U_HAS_IH_NIX,
@@ -8729,30 +9480,6 @@ static struct npc_kpu_profile_action kpu1_action_entries[] = {
 		0, 0, 0, 0,
 	},
 	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 14, 16, 0, 0,
-		NPC_S_KPU2_PREHEADER, 8, 1,
-		NPC_LID_LA, NPC_LT_LA_IH_8_ETHER,
-		0,
-		1, 0xff, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 14, 16, 0, 0,
-		NPC_S_KPU2_PREHEADER, 4, 1,
-		NPC_LID_LA, NPC_LT_LA_IH_4_ETHER,
-		0,
-		1, 0xff, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		12, 14, 16, 0, 0,
-		NPC_S_KPU2_PREHEADER, 2, 1,
-		NPC_LID_LA, NPC_LT_LA_IH_2_ETHER,
-		0,
-		1, 0xff, 0, 0,
-	},
-	{
 		NPC_ERRLEV_LA, NPC_EC_IH_LENGTH,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 1,
@@ -8794,7 +9521,7 @@ static struct npc_kpu_profile_action kpu1_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 3, 0,
+		6, 0, 42, 3, 0,
 		NPC_S_KPU5_IP6, 30, 1,
 		NPC_LID_LA, NPC_LT_LA_HIGIG2_ETHER,
 		NPC_F_LA_U_HAS_HIGIG2,
@@ -8919,7 +9646,7 @@ static struct npc_kpu_profile_action kpu1_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 3, 0,
+		6, 0, 42, 3, 0,
 		NPC_S_KPU5_IP6, 38, 1,
 		NPC_LID_LA, NPC_LT_LA_IH_NIX_HIGIG2_ETHER,
 		NPC_F_LA_U_HAS_IH_NIX | NPC_F_LA_U_HAS_HIGIG2,
@@ -9048,7 +9775,7 @@ static struct npc_kpu_profile_action kpu1_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 3, 0,
+		6, 0, 42, 3, 0,
 		NPC_S_KPU5_IP6, 14, 0,
 		NPC_LID_LA, NPC_LT_NA,
 		0,
@@ -9176,6 +9903,14 @@ static struct npc_kpu_profile_action kpu1_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 12, 0, 0, 0,
+		NPC_S_KPU2_CPT_CTAG2, 12, 1,
+		NPC_LID_LA, NPC_LT_LA_CPT_HDR,
+		NPC_F_LA_U_HAS_TAG | NPC_F_LA_L_WITH_VLAN,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		4, 8, 0, 0, 0,
 		NPC_S_KPU2_CPT_CTAG, 12, 1,
 		NPC_LID_LA, NPC_LT_LA_CPT_HDR,
@@ -9186,6 +9921,22 @@ static struct npc_kpu_profile_action kpu1_action_entries[] = {
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		4, 8, 0, 0, 0,
 		NPC_S_KPU2_CPT_QINQ, 12, 1,
+		NPC_LID_LA, NPC_LT_LA_CPT_HDR,
+		NPC_F_LA_U_HAS_TAG | NPC_F_LA_L_WITH_VLAN,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		4, 8, 0, 0, 0,
+		NPC_S_KPU2_CPT_QINQ, 12, 1,
+		NPC_LID_LA, NPC_LT_LA_CPT_HDR,
+		NPC_F_LA_U_HAS_TAG | NPC_F_LA_L_WITH_VLAN,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		4, 8, 22, 0, 0,
+		NPC_S_KPU2_CPT_SBTAG, 12, 1,
 		NPC_LID_LA, NPC_LT_LA_CPT_HDR,
 		NPC_F_LA_U_HAS_TAG | NPC_F_LA_L_WITH_VLAN,
 		0, 0, 0, 0,
@@ -9211,6 +9962,10 @@ static struct npc_kpu_profile_action kpu1_action_entries[] = {
 static struct npc_kpu_profile_action kpu2_action_entries[] = {
 	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		8, 0, 6, 2, 0,
@@ -9221,7 +9976,7 @@ static struct npc_kpu_profile_action kpu2_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 2, 0,
+		6, 0, 42, 2, 0,
 		NPC_S_KPU5_IP6, 6, 1,
 		NPC_LID_LB, NPC_LT_LB_CTAG,
 		0,
@@ -9301,7 +10056,7 @@ static struct npc_kpu_profile_action kpu2_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 2, 0,
+		6, 0, 42, 2, 0,
 		NPC_S_KPU5_IP6, 14, 1,
 		NPC_LID_LB, NPC_LT_LB_PPPOE,
 		0,
@@ -9309,8 +10064,32 @@ static struct npc_kpu_profile_action kpu2_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		2, 6, 0, 0, 0,
+		NPC_S_KPU3_STAG, 6, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_STAG_STAG,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		2, 6, 0, 0, 0,
+		NPC_S_KPU3_STAG, 6, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_STAG_STAG,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		2, 6, 0, 0, 0,
+		NPC_S_KPU3_STAG, 6, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_STAG_STAG,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
-		NPC_S_NA, 0, 1,
+		NPC_S_NA, 6, 1,
 		NPC_LID_LB, NPC_LT_LB_CTAG,
 		NPC_F_LB_U_UNK_ETYPE,
 		0, 0, 0, 0,
@@ -9325,7 +10104,7 @@ static struct npc_kpu_profile_action kpu2_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 2, 0,
+		6, 0, 42, 2, 0,
 		NPC_S_KPU5_IP6, 10, 1,
 		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
 		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_CTAG,
@@ -9421,7 +10200,7 @@ static struct npc_kpu_profile_action kpu2_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 2, 0,
+		6, 0, 42, 2, 0,
 		NPC_S_KPU5_IP6, 24, 1,
 		NPC_LID_LB, NPC_LT_LB_BTAG,
 		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_ITAG,
@@ -9509,6 +10288,22 @@ static struct npc_kpu_profile_action kpu2_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 0, 6, 2, 0,
+		NPC_S_KPU5_IP, 6, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_CTAG,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		6, 0, 42, 2, 0,
+		NPC_S_KPU5_IP6, 6, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_CTAG,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 1,
 		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
@@ -9525,7 +10320,7 @@ static struct npc_kpu_profile_action kpu2_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 2, 0,
+		6, 0, 42, 2, 0,
 		NPC_S_KPU5_IP6, 10, 1,
 		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
 		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_CTAG,
@@ -9613,6 +10408,22 @@ static struct npc_kpu_profile_action kpu2_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 0, 6, 2, 0,
+		NPC_S_KPU5_IP, 6, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_CTAG,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		6, 0, 42, 2, 0,
+		NPC_S_KPU5_IP6, 6, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_CTAG,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 1,
 		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
@@ -9629,7 +10440,7 @@ static struct npc_kpu_profile_action kpu2_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 2, 0,
+		6, 0, 42, 2, 0,
 		NPC_S_KPU5_IP6, 10, 1,
 		NPC_LID_LB, NPC_LT_LB_ETAG,
 		0,
@@ -9725,7 +10536,7 @@ static struct npc_kpu_profile_action kpu2_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 2, 0,
+		6, 0, 42, 2, 0,
 		NPC_S_KPU5_IP6, 28, 1,
 		NPC_LID_LB, NPC_LT_LB_ETAG,
 		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_ITAG,
@@ -9781,7 +10592,7 @@ static struct npc_kpu_profile_action kpu2_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 2, 0,
+		6, 0, 42, 2, 0,
 		NPC_S_KPU5_IP6, 10, 1,
 		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
 		0,
@@ -9854,105 +10665,9 @@ static struct npc_kpu_profile_action kpu2_action_entries[] = {
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
-		NPC_S_NA, 0, 1,
+		NPC_S_NA, 8, 1,
 		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
 		NPC_F_LB_U_UNK_ETYPE,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		8, 0, 6, 2, 0,
-		NPC_S_KPU5_IP, 14, 0,
-		NPC_LID_LB, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 2, 0,
-		NPC_S_KPU5_IP6, 14, 0,
-		NPC_LID_LB, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 2, 0,
-		NPC_S_KPU5_ARP, 14, 0,
-		NPC_LID_LB, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 2, 0,
-		NPC_S_KPU5_RARP, 14, 0,
-		NPC_LID_LB, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 2, 0,
-		NPC_S_KPU5_PTP, 14, 0,
-		NPC_LID_LB, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 2, 0,
-		NPC_S_KPU5_FCOE, 14, 0,
-		NPC_LID_LB, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		2, 6, 0, 0, 0,
-		NPC_S_KPU3_CTAG_C, 14, 0,
-		NPC_LID_LB, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		2, 6, 20, 0, 0,
-		NPC_S_KPU3_STAG_C, 14, 0,
-		NPC_LID_LB, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		2, 6, 0, 0, 0,
-		NPC_S_KPU3_QINQ_C, 14, 0,
-		NPC_LID_LB, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		2, 6, 10, 1, 0,
-		NPC_S_KPU4_MPLS, 14, 0,
-		NPC_LID_LB, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		2, 6, 10, 1, 0,
-		NPC_S_KPU4_MPLS, 14, 0,
-		NPC_LID_LB, NPC_LT_NA,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		2, 0, 0, 1, 0,
-		NPC_S_KPU4_NSH, 14, 0,
-		NPC_LID_LB, NPC_LT_NA,
-		0,
 		0, 0, 0, 0,
 	},
 	{
@@ -9965,7 +10680,7 @@ static struct npc_kpu_profile_action kpu2_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 2, 0,
+		6, 0, 42, 2, 0,
 		NPC_S_KPU5_IP6, 18, 1,
 		NPC_LID_LB, NPC_LT_LB_EDSA,
 		NPC_F_LB_L_EDSA,
@@ -10029,7 +10744,7 @@ static struct npc_kpu_profile_action kpu2_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 2, 0,
+		6, 0, 42, 2, 0,
 		NPC_S_KPU5_IP6, 10, 1,
 		NPC_LID_LB, NPC_LT_LB_EXDSA,
 		NPC_F_LB_L_EXDSA,
@@ -10116,6 +10831,110 @@ static struct npc_kpu_profile_action kpu2_action_entries[] = {
 		0, 0, 0, 0,
 	},
 	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 0, 6, 2, 0,
+		NPC_S_KPU5_CPT_IP, 6, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_CTAG,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		6, 0, 42, 2, 0,
+		NPC_S_KPU5_CPT_IP6, 6, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_CTAG,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 0, 6, 2, 0,
+		NPC_S_KPU5_CPT_IP, 10, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		6, 0, 42, 2, 0,
+		NPC_S_KPU5_CPT_IP6, 10, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		2, 6, 0, 0, 0,
+		NPC_S_KPU3_CPT_QINQ, 10, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_QINQ_QINQ,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		2, 6, 0, 0, 1,
+		NPC_S_KPU3_CPT_QINQ, 10, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_QINQ_QINQ,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 0, 6, 2, 0,
+		NPC_S_KPU5_CPT_IP, 10, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_CTAG,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		6, 0, 42, 2, 0,
+		NPC_S_KPU5_CPT_IP6, 10, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_CTAG,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		2, 6, 0, 0, 0,
+		NPC_S_KPU3_CPT_CTAG, 10, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_STAG_CTAG,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 0, 6, 2, 0,
+		NPC_S_KPU5_CPT_IP, 6, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_CTAG,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		6, 0, 42, 2, 0,
+		NPC_S_KPU5_CPT_IP6, 6, 1,
+		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
+		NPC_F_LB_U_MORE_TAG | NPC_F_LB_L_WITH_CTAG,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		4, 0, 0, 0, 0,
+		NPC_S_KPU3_CTAG, 0, 1,
+		NPC_LID_LB, NPC_LT_LB_CTAG,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 0, 0,
+		NPC_S_KPU3_CTAG_C, 0, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
 		NPC_ERRLEV_LB, NPC_EC_L2_K3,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 0,
@@ -10128,6 +10947,10 @@ static struct npc_kpu_profile_action kpu2_action_entries[] = {
 static struct npc_kpu_profile_action kpu3_action_entries[] = {
 	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		8, 0, 6, 1, 0,
@@ -10138,7 +10961,7 @@ static struct npc_kpu_profile_action kpu3_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 1, 0,
+		6, 0, 42, 1, 0,
 		NPC_S_KPU5_IP6, 6, 0,
 		NPC_LID_LB, NPC_LT_NA,
 		0,
@@ -10218,7 +11041,7 @@ static struct npc_kpu_profile_action kpu3_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 1, 0,
+		6, 0, 42, 1, 0,
 		NPC_S_KPU5_IP6, 8, 0,
 		NPC_LID_LB, NPC_LT_NA,
 		0,
@@ -10290,7 +11113,7 @@ static struct npc_kpu_profile_action kpu3_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 1, 0,
+		6, 0, 42, 1, 0,
 		NPC_S_KPU5_IP6, 4, 0,
 		NPC_LID_LB, NPC_LT_NA,
 		0,
@@ -10354,7 +11177,7 @@ static struct npc_kpu_profile_action kpu3_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 1, 0,
+		6, 0, 42, 1, 0,
 		NPC_S_KPU5_IP6, 8, 0,
 		NPC_LID_LB, NPC_LT_NA,
 		0,
@@ -10426,7 +11249,7 @@ static struct npc_kpu_profile_action kpu3_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 1, 0,
+		6, 0, 42, 1, 0,
 		NPC_S_KPU5_IP6, 4, 0,
 		NPC_LID_LB, NPC_LT_NA,
 		0,
@@ -10489,6 +11312,86 @@ static struct npc_kpu_profile_action kpu3_action_entries[] = {
 		0, 0, 0, 0,
 	},
 	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 0, 1,
+		NPC_S_NA, 0, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 0, 6, 1, 0,
+		NPC_S_KPU5_IP, 2, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		6, 0, 42, 1, 0,
+		NPC_S_KPU5_IP6, 2, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 1, 0,
+		NPC_S_KPU5_ARP, 2, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 1, 0,
+		NPC_S_KPU5_RARP, 2, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 1, 0,
+		NPC_S_KPU5_PTP, 2, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 1, 0,
+		NPC_S_KPU5_FCOE, 2, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		2, 6, 10, 0, 0,
+		NPC_S_KPU4_MPLS, 2, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		2, 6, 10, 0, 0,
+		NPC_S_KPU4_MPLS, 2, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		2, 0, 0, 0, 0,
+		NPC_S_KPU4_NSH, 2, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
 		NPC_ERRLEV_LB, NPC_EC_L2_K3_ETYPE_UNK,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 0,
@@ -10499,86 +11402,6 @@ static struct npc_kpu_profile_action kpu3_action_entries[] = {
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		8, 0, 6, 1, 0,
-		NPC_S_KPU5_IP, 4, 1,
-		NPC_LID_LB, NPC_LT_LB_CTAG,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 1, 0,
-		NPC_S_KPU5_IP6, 4, 1,
-		NPC_LID_LB, NPC_LT_LB_CTAG,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 1, 0,
-		NPC_S_KPU5_ARP, 4, 1,
-		NPC_LID_LB, NPC_LT_LB_CTAG,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 1, 0,
-		NPC_S_KPU5_RARP, 4, 1,
-		NPC_LID_LB, NPC_LT_LB_CTAG,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 1, 0,
-		NPC_S_KPU5_PTP, 4, 1,
-		NPC_LID_LB, NPC_LT_LB_CTAG,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 1, 0,
-		NPC_S_KPU5_FCOE, 4, 1,
-		NPC_LID_LB, NPC_LT_LB_CTAG,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		2, 6, 10, 0, 0,
-		NPC_S_KPU4_MPLS, 4, 1,
-		NPC_LID_LB, NPC_LT_LB_CTAG,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		2, 6, 10, 0, 0,
-		NPC_S_KPU4_MPLS, 4, 1,
-		NPC_LID_LB, NPC_LT_LB_CTAG,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		2, 0, 0, 0, 0,
-		NPC_S_KPU4_NSH, 4, 1,
-		NPC_LID_LB, NPC_LT_LB_CTAG,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_LB, NPC_EC_L2_K3_ETYPE_UNK,
-		0, 0, 0, 0, 1,
-		NPC_S_NA, 0, 1,
-		NPC_LID_LB, NPC_LT_LB_CTAG,
-		0,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		8, 0, 6, 1, 0,
 		NPC_S_KPU5_IP, 8, 1,
 		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
 		0,
@@ -10586,7 +11409,7 @@ static struct npc_kpu_profile_action kpu3_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 1, 0,
+		6, 0, 42, 1, 0,
 		NPC_S_KPU5_IP6, 8, 1,
 		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
 		0,
@@ -10658,7 +11481,7 @@ static struct npc_kpu_profile_action kpu3_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 1, 0,
+		6, 0, 42, 1, 0,
 		NPC_S_KPU5_IP6, 4, 1,
 		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
 		0,
@@ -10722,7 +11545,7 @@ static struct npc_kpu_profile_action kpu3_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 1, 0,
+		6, 0, 42, 1, 0,
 		NPC_S_KPU5_IP6, 8, 1,
 		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
 		0,
@@ -10794,7 +11617,7 @@ static struct npc_kpu_profile_action kpu3_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 1, 0,
+		6, 0, 42, 1, 0,
 		NPC_S_KPU5_IP6, 4, 1,
 		NPC_LID_LB, NPC_LT_LB_STAG_QINQ,
 		0,
@@ -10874,7 +11697,7 @@ static struct npc_kpu_profile_action kpu3_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 1, 0,
+		6, 0, 42, 1, 0,
 		NPC_S_KPU5_IP6, 10, 1,
 		NPC_LID_LB, NPC_LT_LB_DSA,
 		NPC_F_LB_L_DSA,
@@ -10922,7 +11745,7 @@ static struct npc_kpu_profile_action kpu3_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 1, 0,
+		6, 0, 42, 1, 0,
 		NPC_S_KPU5_IP6, 14, 1,
 		NPC_LID_LB, NPC_LT_LB_DSA_VLAN,
 		NPC_F_LB_L_DSA_VLAN,
@@ -10985,6 +11808,94 @@ static struct npc_kpu_profile_action kpu3_action_entries[] = {
 		0, 0, 0, 0,
 	},
 	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 0, 6, 1, 0,
+		NPC_S_KPU5_CPT_IP, 8, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		6, 0, 42, 1, 0,
+		NPC_S_KPU5_CPT_IP6, 8, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 0, 6, 1, 0,
+		NPC_S_KPU5_CPT_IP, 4, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		6, 0, 42, 1, 0,
+		NPC_S_KPU5_CPT_IP6, 4, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		6, 0, 42, 1, 1,
+		NPC_S_KPU5_CPT_IP6, 4, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 0, 6, 1, 0,
+		NPC_S_KPU5_CPT_IP, 6, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		6, 0, 42, 1, 0,
+		NPC_S_KPU5_CPT_IP6, 6, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 0, 6, 1, 0,
+		NPC_S_KPU5_CPT_IP, 8, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		6, 0, 42, 1, 0,
+		NPC_S_KPU5_CPT_IP6, 8, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 0, 6, 1, 0,
+		NPC_S_KPU5_CPT_IP, 4, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		6, 0, 42, 1, 0,
+		NPC_S_KPU5_CPT_IP6, 4, 0,
+		NPC_LID_LB, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
 		NPC_ERRLEV_LB, NPC_EC_L2_K3,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 0,
@@ -10995,6 +11906,10 @@ static struct npc_kpu_profile_action kpu3_action_entries[] = {
 };
 
 static struct npc_kpu_profile_action kpu4_action_entries[] = {
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
 	{
@@ -11079,7 +11994,7 @@ static struct npc_kpu_profile_action kpu4_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 0, 0,
+		6, 0, 42, 0, 0,
 		NPC_S_KPU5_IP6, 6, 1,
 		NPC_LID_LB, NPC_LT_LB_FDSA,
 		NPC_F_LB_L_FDSA,
@@ -11127,7 +12042,7 @@ static struct npc_kpu_profile_action kpu4_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 0, 0,
+		6, 0, 42, 0, 0,
 		NPC_S_KPU5_IP6, 10, 1,
 		NPC_LID_LB, NPC_LT_LB_FDSA,
 		NPC_F_LB_L_FDSA,
@@ -11175,7 +12090,7 @@ static struct npc_kpu_profile_action kpu4_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 0, 0,
+		6, 0, 42, 0, 0,
 		NPC_S_KPU5_IP6, 14, 1,
 		NPC_LID_LB, NPC_LT_LB_PPPOE,
 		0,
@@ -11199,7 +12114,7 @@ static struct npc_kpu_profile_action kpu4_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 0, 0,
+		6, 0, 42, 0, 0,
 		NPC_S_KPU5_IP6, 2, 0,
 		NPC_LID_LC, NPC_LT_NA,
 		0,
@@ -11248,15 +12163,15 @@ static struct npc_kpu_profile_action kpu4_action_entries[] = {
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		8, 0, 6, 0, 0,
-		NPC_S_KPU5_IP, 10, 0,
+		NPC_S_KPU5_IP, 10, 1,
 		NPC_LID_LB, NPC_LT_LB_PPPOE,
 		0,
 		0, 0, 0, 0,
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		6, 0, 0, 0, 0,
-		NPC_S_KPU5_IP6, 10, 0,
+		6, 0, 42, 0, 0,
+		NPC_S_KPU5_IP6, 10, 1,
 		NPC_LID_LB, NPC_LT_LB_PPPOE,
 		0,
 		0, 0, 0, 0,
@@ -11272,6 +12187,10 @@ static struct npc_kpu_profile_action kpu4_action_entries[] = {
 };
 
 static struct npc_kpu_profile_action kpu5_action_entries[] = {
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
 	{
@@ -11300,7 +12219,7 @@ static struct npc_kpu_profile_action kpu5_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		2, 0, 0, 2, 0,
+		2, 0, 4, 2, 0,
 		NPC_S_KPU8_UDP, 20, 1,
 		NPC_LID_LC, NPC_LT_LC_IP,
 		0,
@@ -11404,7 +12323,7 @@ static struct npc_kpu_profile_action kpu5_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		2, 8, 10, 2, 0,
+		2, 8, 4, 2, 0,
 		NPC_S_KPU8_UDP, 0, 1,
 		NPC_LID_LC, NPC_LT_LC_IP_OPT,
 		0,
@@ -11588,7 +12507,7 @@ static struct npc_kpu_profile_action kpu5_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 2, 0,
+		2, 0, 0, 2, 0,
 		NPC_S_KPU8_GRE, 40, 1,
 		NPC_LID_LC, NPC_LT_LC_IP6,
 		0,
@@ -11624,6 +12543,22 @@ static struct npc_kpu_profile_action kpu5_action_entries[] = {
 		NPC_S_KPU6_IP6_HOP_DEST, 40, 1,
 		NPC_LID_LC, NPC_LT_LC_IP6_EXT,
 		NPC_F_LC_L_EXT_DEST,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 0, 0,
+		NPC_S_KPU6_IP6_ROUT, 40, 1,
+		NPC_LID_LC, NPC_LT_LC_IP6_EXT,
+		NPC_F_LC_L_IP6_SRH_SEG_1,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 0, 0,
+		NPC_S_KPU6_IP6_ROUT, 40, 1,
+		NPC_LID_LC, NPC_LT_LC_IP6_EXT,
+		NPC_F_LC_L_IP6_SRH_SEG_2,
 		0, 0, 0, 0,
 	},
 	{
@@ -11876,6 +12811,14 @@ static struct npc_kpu_profile_action kpu5_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 2, 0,
+		NPC_S_KPU8_CUSTOM, 20, 1,
+		NPC_LID_LC, NPC_LT_LC_IP,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 1,
 		NPC_LID_LC, NPC_LT_LC_IP,
@@ -11972,6 +12915,14 @@ static struct npc_kpu_profile_action kpu5_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 2, 0,
+		NPC_S_KPU8_CUSTOM, 0, 1,
+		NPC_LID_LC, NPC_LT_LC_IP_OPT,
+		0,
+		0, 0xf, 0, 2,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 1,
 		NPC_LID_LC, NPC_LT_LC_IP_OPT,
@@ -12036,7 +12987,7 @@ static struct npc_kpu_profile_action kpu5_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 2, 0,
+		2, 0, 0, 2, 0,
 		NPC_S_KPU8_GRE, 40, 1,
 		NPC_LID_LC, NPC_LT_LC_IP6,
 		0,
@@ -12132,6 +13083,14 @@ static struct npc_kpu_profile_action kpu5_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 2, 0,
+		NPC_S_KPU8_CUSTOM, 40, 1,
+		NPC_LID_LC, NPC_LT_LC_IP6,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 1,
 		NPC_LID_LC, NPC_LT_LC_IP6,
@@ -12167,6 +13126,10 @@ static struct npc_kpu_profile_action kpu5_action_entries[] = {
 static struct npc_kpu_profile_action kpu6_action_entries[] = {
 	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
@@ -12251,6 +13214,14 @@ static struct npc_kpu_profile_action kpu6_action_entries[] = {
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 0,
+		NPC_LID_LC, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 1, 0,
+		NPC_S_KPU8_CUSTOM, 8, 0,
 		NPC_LID_LC, NPC_LT_NA,
 		0,
 		0, 0, 0, 0,
@@ -12321,7 +13292,7 @@ static struct npc_kpu_profile_action kpu6_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 1, 0,
+		2, 0, 0, 1, 0,
 		NPC_S_KPU8_GRE, 8, 0,
 		NPC_LID_LC, NPC_LT_NA,
 		0,
@@ -12361,6 +13332,14 @@ static struct npc_kpu_profile_action kpu6_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 1, 0,
+		NPC_S_KPU8_CUSTOM, 8, 0,
+		NPC_LID_LC, NPC_LT_NA,
+		0,
+		1, 0xff, 0, 3,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 0,
 		NPC_LID_LC, NPC_LT_NA,
@@ -12425,7 +13404,7 @@ static struct npc_kpu_profile_action kpu6_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 1, 0,
+		2, 0, 0, 1, 0,
 		NPC_S_KPU8_GRE, 8, 0,
 		NPC_LID_LC, NPC_LT_NA,
 		0,
@@ -12457,6 +13436,14 @@ static struct npc_kpu_profile_action kpu6_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 1, 0,
+		NPC_S_KPU8_CUSTOM, 8, 0,
+		NPC_LID_LC, NPC_LT_NA,
+		0,
+		1, 0xff, 0, 3,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 0,
 		NPC_LID_LC, NPC_LT_NA,
@@ -12521,7 +13508,7 @@ static struct npc_kpu_profile_action kpu6_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 1, 0,
+		2, 0, 0, 1, 0,
 		NPC_S_KPU8_GRE, 8, 0,
 		NPC_LID_LC, NPC_LT_NA,
 		0,
@@ -12545,6 +13532,14 @@ static struct npc_kpu_profile_action kpu6_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 1, 0,
+		NPC_S_KPU8_CUSTOM, 8, 0,
+		NPC_LID_LC, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 0,
 		NPC_LID_LC, NPC_LT_NA,
@@ -12609,7 +13604,7 @@ static struct npc_kpu_profile_action kpu6_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 1, 0,
+		2, 0, 0, 1, 0,
 		NPC_S_KPU8_GRE, 8, 0,
 		NPC_LID_LC, NPC_LT_NA,
 		0,
@@ -12649,6 +13644,14 @@ static struct npc_kpu_profile_action kpu6_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 1, 0,
+		NPC_S_KPU8_CUSTOM, 8, 0,
+		NPC_LID_LC, NPC_LT_NA,
+		0,
+		1, 0xff, 0, 3,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 0,
 		NPC_LID_LC, NPC_LT_NA,
@@ -12713,7 +13716,7 @@ static struct npc_kpu_profile_action kpu6_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 1, 0,
+		2, 0, 0, 1, 0,
 		NPC_S_KPU8_GRE, 8, 0,
 		NPC_LID_LC, NPC_LT_NA,
 		0,
@@ -12739,6 +13742,14 @@ static struct npc_kpu_profile_action kpu6_action_entries[] = {
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 2, 0, 0, 0,
 		NPC_S_KPU7_CPT_IP6_FRAG, 8, 0,
+		NPC_LID_LC, NPC_LT_NA,
+		0,
+		1, 0xff, 0, 3,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 1, 0,
+		NPC_S_KPU8_CUSTOM, 8, 0,
 		NPC_LID_LC, NPC_LT_NA,
 		0,
 		1, 0xff, 0, 3,
@@ -12764,6 +13775,10 @@ static struct npc_kpu_profile_action kpu6_action_entries[] = {
 static struct npc_kpu_profile_action kpu7_action_entries[] = {
 	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
@@ -12830,7 +13845,7 @@ static struct npc_kpu_profile_action kpu7_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 0, 0,
+		2, 0, 0, 0, 0,
 		NPC_S_KPU8_GRE, 8, 0,
 		NPC_LID_LC, NPC_LT_NA,
 		0,
@@ -12854,11 +13869,11 @@ static struct npc_kpu_profile_action kpu7_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 0, 1,
-		NPC_S_NA, 0, 0,
+		0, 0, 0, 0, 0,
+		NPC_S_KPU8_CUSTOM, 8, 0,
 		NPC_LID_LC, NPC_LT_NA,
 		0,
-		0, 0, 0, 0,
+		1, 0xff, 0, 3,
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
@@ -12936,6 +13951,22 @@ static struct npc_kpu_profile_action kpu7_action_entries[] = {
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 0,
+		NPC_LID_LC, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 0, 1,
+		NPC_S_NA, 0, 0,
+		NPC_LID_LC, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 0, 0,
+		NPC_S_KPU8_CUSTOM, 8, 0,
 		NPC_LID_LC, NPC_LT_NA,
 		0,
 		0, 0, 0, 0,
@@ -13006,7 +14037,7 @@ static struct npc_kpu_profile_action kpu7_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		0, 0, 0, 0, 0,
+		2, 0, 0, 0, 0,
 		NPC_S_KPU8_GRE, 8, 0,
 		NPC_LID_LC, NPC_LT_NA,
 		0,
@@ -13024,6 +14055,14 @@ static struct npc_kpu_profile_action kpu7_action_entries[] = {
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		2, 6, 10, 1, 0,
 		NPC_S_KPU9_TU_MPLS_IN_IP, 8, 0,
+		NPC_LID_LC, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 0, 0,
+		NPC_S_KPU8_CUSTOM, 8, 0,
 		NPC_LID_LC, NPC_LT_NA,
 		0,
 		0, 0, 0, 0,
@@ -13047,6 +14086,10 @@ static struct npc_kpu_profile_action kpu7_action_entries[] = {
 };
 
 static struct npc_kpu_profile_action kpu8_action_entries[] = {
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
 	{
@@ -13227,6 +14270,14 @@ static struct npc_kpu_profile_action kpu8_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		0, 0, 0, 0, 1,
+		NPC_S_NA, 8, 1,
+		NPC_LID_LD, NPC_LT_LD_UDP,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 0,
 		NPC_S_KPU9_ESP, 8, 1,
 		NPC_LID_LD, NPC_LT_LD_UDP,
@@ -13298,10 +14349,10 @@ static struct npc_kpu_profile_action kpu8_action_entries[] = {
 		0, 0, 0, 0,
 	},
 	{
-		NPC_ERRLEV_LD, NPC_EC_NVGRE,
-		0, 0, 0, 0, 1,
-		NPC_S_NA, 0, 0,
-		NPC_LID_LD, NPC_LT_NA,
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 20, 2, 0,
+		NPC_S_KPU11_TU_ETHER, 4, 1,
+		NPC_LID_LD, NPC_LT_LD_GRE,
 		0,
 		0, 0, 0, 0,
 	},
@@ -13627,6 +14678,70 @@ static struct npc_kpu_profile_action kpu8_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 20, 2, 0,
+		NPC_S_KPU11_TU_ETHER, 12, 1,
+		NPC_LID_LD, NPC_LT_LD_GRE,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 20, 2, 0,
+		NPC_S_KPU11_TU_ETHER, 16, 1,
+		NPC_LID_LD, NPC_LT_LD_GRE,
+		NPC_F_LD_L_GRE_HAS_CSUM,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 20, 2, 0,
+		NPC_S_KPU11_TU_ETHER, 16, 1,
+		NPC_LID_LD, NPC_LT_LD_GRE,
+		NPC_F_LD_L_GRE_HAS_KEY,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 20, 2, 0,
+		NPC_S_KPU11_TU_ETHER, 16, 1,
+		NPC_LID_LD, NPC_LT_LD_GRE,
+		NPC_F_LD_L_GRE_HAS_SEQ,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 20, 2, 0,
+		NPC_S_KPU11_TU_ETHER, 20, 1,
+		NPC_LID_LD, NPC_LT_LD_GRE,
+		NPC_F_LD_L_GRE_HAS_CSUM_KEY,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 20, 2, 0,
+		NPC_S_KPU11_TU_ETHER, 20, 1,
+		NPC_LID_LD, NPC_LT_LD_GRE,
+		NPC_F_LD_L_GRE_HAS_CSUM_SEQ,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 20, 2, 0,
+		NPC_S_KPU11_TU_ETHER, 20, 1,
+		NPC_LID_LD, NPC_LT_LD_GRE,
+		NPC_F_LD_L_GRE_HAS_KEY_SEQ,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		12, 16, 20, 2, 0,
+		NPC_S_KPU11_TU_ETHER, 24, 1,
+		NPC_LID_LD, NPC_LT_LD_GRE,
+		NPC_F_LD_L_GRE_HAS_CSUM_KEY_SEQ,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 1,
 		NPC_LID_LD, NPC_LT_LD_GRE,
@@ -13698,6 +14813,14 @@ static struct npc_kpu_profile_action kpu8_action_entries[] = {
 		0, 0, 0, 0,
 	},
 	{
+		NPC_ERRLEV_LD, NPC_EC_NOERR,
+		0, 0, 0, 0, 0,
+		NPC_S_KPU9_CUSTOM, 0, 1,
+		NPC_LID_LF, NPC_LT_LF_CUSTOM0,
+		0,
+		0, 0xff, 0, 0,
+	},
+	{
 		NPC_ERRLEV_LD, NPC_EC_UNK,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 0,
@@ -13708,6 +14831,10 @@ static struct npc_kpu_profile_action kpu8_action_entries[] = {
 };
 
 static struct npc_kpu_profile_action kpu9_action_entries[] = {
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
 	{
@@ -14064,16 +15191,8 @@ static struct npc_kpu_profile_action kpu9_action_entries[] = {
 	},
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		8, 0, 6, 2, 0,
-		NPC_S_KPU12_TU_IP, 8, 1,
-		NPC_LID_LE, NPC_LT_LE_GTPU,
-		NPC_F_LE_L_GTPU_G_PDU,
-		0, 0, 0, 0,
-	},
-	{
-		NPC_ERRLEV_RE, NPC_EC_NOERR,
-		8, 0, 6, 2, 0,
-		NPC_S_KPU12_TU_IP, 8, 1,
+		8, 0, 6, 2, 1,
+		NPC_S_NA, 0, 1,
 		NPC_LID_LE, NPC_LT_LE_GTPU,
 		0,
 		0, 0, 0, 0,
@@ -14119,6 +15238,22 @@ static struct npc_kpu_profile_action kpu9_action_entries[] = {
 		0, 0, 0, 0,
 	},
 	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		8, 0, 6, 2, 0,
+		NPC_S_KPU12_TU_IP, 0, 0,
+		NPC_LID_LE, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
+		NPC_ERRLEV_RE, NPC_EC_NOERR,
+		6, 0, 0, 2, 0,
+		NPC_S_KPU12_TU_IP6, 0, 0,
+		NPC_LID_LE, NPC_LT_NA,
+		0,
+		0, 0, 0, 0,
+	},
+	{
 		NPC_ERRLEV_LE, NPC_EC_UNK,
 		0, 0, 0, 0, 1,
 		NPC_S_NA, 0, 0,
@@ -14129,6 +15264,10 @@ static struct npc_kpu_profile_action kpu9_action_entries[] = {
 };
 
 static struct npc_kpu_profile_action kpu10_action_entries[] = {
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
 	{
@@ -14278,6 +15417,10 @@ static struct npc_kpu_profile_action kpu10_action_entries[] = {
 };
 
 static struct npc_kpu_profile_action kpu11_action_entries[] = {
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
 	{
@@ -14557,6 +15700,10 @@ static struct npc_kpu_profile_action kpu11_action_entries[] = {
 static struct npc_kpu_profile_action kpu12_action_entries[] = {
 	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		2, 12, 0, 2, 0,
@@ -14786,6 +15933,10 @@ static struct npc_kpu_profile_action kpu12_action_entries[] = {
 static struct npc_kpu_profile_action kpu13_action_entries[] = {
 	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
@@ -14799,6 +15950,10 @@ static struct npc_kpu_profile_action kpu13_action_entries[] = {
 static struct npc_kpu_profile_action kpu14_action_entries[] = {
 	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
@@ -14810,6 +15965,10 @@ static struct npc_kpu_profile_action kpu14_action_entries[] = {
 };
 
 static struct npc_kpu_profile_action kpu15_action_entries[] = {
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
 	{
@@ -14993,6 +16152,10 @@ static struct npc_kpu_profile_action kpu15_action_entries[] = {
 static struct npc_kpu_profile_action kpu16_action_entries[] = {
 	NPC_KPU_NOP_ACTION,
 	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
+	NPC_KPU_NOP_ACTION,
 	{
 		NPC_ERRLEV_RE, NPC_EC_NOERR,
 		0, 0, 0, 0, 1,
@@ -15043,7 +16206,7 @@ static struct npc_kpu_profile_action kpu16_action_entries[] = {
 	},
 };
 
-static struct npc_kpu_profile npc_kpu_profiles[] = {
+static struct npc_kpu_profile npc_kpu_profiles[] __maybe_unused = {
 	{
 		ARRAY_SIZE(kpu1_cam_entries),
 		ARRAY_SIZE(kpu1_action_entries),
@@ -15142,7 +16305,7 @@ static struct npc_kpu_profile npc_kpu_profiles[] = {
 	},
 };
 
-static struct npc_lt_def_cfg npc_lt_defaults = {
+static struct npc_lt_def_cfg npc_lt_defaults __maybe_unused = {
 	.rx_ol2 = {
 		.lid = NPC_LID_LA,
 		.ltype_match = NPC_LT_LA_ETHER,
@@ -15250,7 +16413,9 @@ static struct npc_lt_def_cfg npc_lt_defaults = {
 	},
 	.rx_et = {
 		{
-			.lid = NPC_LID_LB,
+			.offset = -2,
+			.valid = 1,
+			.lid = NPC_LID_LC,
 			.ltype_match = NPC_LT_NA,
 			.ltype_mask = 0x0,
 		},
@@ -15262,13 +16427,14 @@ static struct npc_lt_def_cfg npc_lt_defaults = {
 	},
 };
 
-static struct npc_mcam_kex npc_mkex_default = {
+static struct npc_mcam_kex npc_mkex_default __maybe_unused = {
 	.mkex_sign = MKEX_SIGN,
 	.name = "default",
 	.kpu_version = NPC_KPU_PROFILE_VER,
 	.keyx_cfg = {
 		/* nibble: LA..LE (ltype only) + Error code + Channel */
-		[NIX_INTF_RX] = ((u64)NPC_MCAM_KEY_X2 << 32) | NPC_PARSE_NIBBLE_INTF_RX,
+		[NIX_INTF_RX] = ((u64)NPC_MCAM_KEY_X2 << 32) | NPC_PARSE_NIBBLE_INTF_RX |
+						(u64)NPC_EXACT_NIBBLE_HIT,
 		/* nibble: LA..LE (ltype only) */
 		[NIX_INTF_TX] = ((u64)NPC_MCAM_KEY_X2 << 32) | NPC_PARSE_NIBBLE_INTF_TX,
 	},
@@ -15278,6 +16444,12 @@ static struct npc_mcam_kex npc_mkex_default = {
 		[NPC_LID_LA] = {
 			/* Layer A: Ethernet: */
 			[NPC_LT_LA_ETHER] = {
+				/* DMAC: 6 bytes, KW1[55:8] */
+				KEX_LD_CFG(0x05, 0x0, 0x1, 0x0, NPC_KEXOF_DMAC),
+				/* Ethertype: 2 bytes, KW0[55:40] */
+				KEX_LD_CFG(0x01, 0xc, 0x1, 0x0, 0x5),
+			},
+			[NPC_LT_LA_CPT_HDR] = {
 				/* DMAC: 6 bytes, KW1[55:8] */
 				KEX_LD_CFG(0x05, 0x0, 0x1, 0x0, NPC_KEXOF_DMAC),
 				/* Ethertype: 2 bytes, KW0[55:40] */

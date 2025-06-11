@@ -7,6 +7,7 @@
 #ifndef _CRYPTO_ALGAPI_H
 #define _CRYPTO_ALGAPI_H
 
+#include <asm/cache.h>
 #include <linux/crypto.h>
 #include <linux/list.h>
 #include <linux/kernel.h>
@@ -21,6 +22,14 @@
 #define MAX_ALGAPI_ALIGNMASK		63
 #define MAX_CIPHER_BLOCKSIZE		16
 #define MAX_CIPHER_ALIGNMASK		15
+
+#ifdef ARCH_DMA_MINALIGN
+#define CRYPTO_DMA_ALIGN ARCH_DMA_MINALIGN
+#else
+#define CRYPTO_DMA_ALIGN CRYPTO_MINALIGN
+#endif
+
+#define CRYPTO_DMA_PADDING ((CRYPTO_DMA_ALIGN - 1) & ~(CRYPTO_MINALIGN - 1))
 
 struct crypto_aead;
 struct crypto_instance;
@@ -183,10 +192,33 @@ static inline void crypto_xor_cpy(u8 *dst, const u8 *src1, const u8 *src2,
 	}
 }
 
+static inline void *crypto_tfm_ctx_align(struct crypto_tfm *tfm,
+					 unsigned int align)
+{
+	if (align <= crypto_tfm_ctx_alignment())
+		align = 1;
+
+	return PTR_ALIGN(crypto_tfm_ctx(tfm), align);
+}
+
 static inline void *crypto_tfm_ctx_aligned(struct crypto_tfm *tfm)
 {
-	return PTR_ALIGN(crypto_tfm_ctx(tfm),
-			 crypto_tfm_alg_alignmask(tfm) + 1);
+	return crypto_tfm_ctx_align(tfm, crypto_tfm_alg_alignmask(tfm) + 1);
+}
+
+static inline unsigned int crypto_dma_align(void)
+{
+	return CRYPTO_DMA_ALIGN;
+}
+
+static inline unsigned int crypto_dma_padding(void)
+{
+	return (crypto_dma_align() - 1) & ~(crypto_tfm_ctx_alignment() - 1);
+}
+
+static inline void *crypto_tfm_ctx_dma(struct crypto_tfm *tfm)
+{
+	return crypto_tfm_ctx_align(tfm, crypto_dma_align());
 }
 
 static inline struct crypto_instance *crypto_tfm_alg_instance(

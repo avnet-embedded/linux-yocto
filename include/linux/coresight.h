@@ -6,6 +6,8 @@
 #ifndef _LINUX_CORESIGHT_H
 #define _LINUX_CORESIGHT_H
 
+#include <linux/amba/bus.h>
+#include <linux/clk.h>
 #include <linux/device.h>
 #include <linux/io.h>
 #include <linux/perf_event.h>
@@ -276,11 +278,19 @@ static struct coresight_dev_list (var) = {				\
 
 #define to_coresight_device(d) container_of(d, struct coresight_device, dev)
 
+enum cs_mode {
+	CS_MODE_DISABLED,
+	CS_MODE_SYSFS,
+	CS_MODE_PERF,
+	CS_MODE_READ_PREVBOOT,
+};
+
 #define source_ops(csdev)	csdev->ops->source_ops
 #define sink_ops(csdev)		csdev->ops->sink_ops
 #define link_ops(csdev)		csdev->ops->link_ops
 #define helper_ops(csdev)	csdev->ops->helper_ops
 #define ect_ops(csdev)		csdev->ops->ect_ops
+#define panic_ops(csdev)	csdev->ops->panic_ops
 
 /**
  * struct coresight_ops_sink - basic operations for a sink
@@ -292,7 +302,8 @@ static struct coresight_dev_list (var) = {				\
  * @update_buffer:	update buffer pointers after a trace session.
  */
 struct coresight_ops_sink {
-	int (*enable)(struct coresight_device *csdev, u32 mode, void *data);
+	int (*enable)(struct coresight_device *csdev, enum cs_mode mode,
+		      void *data);
 	int (*disable)(struct coresight_device *csdev);
 	void *(*alloc_buffer)(struct coresight_device *csdev,
 			      struct perf_event *event, void **pages,
@@ -327,8 +338,8 @@ struct coresight_ops_link {
 struct coresight_ops_source {
 	int (*cpu_id)(struct coresight_device *csdev);
 	int (*trace_id)(struct coresight_device *csdev);
-	int (*enable)(struct coresight_device *csdev,
-		      struct perf_event *event,  u32 mode);
+	int (*enable)(struct coresight_device *csdev, struct perf_event *event,
+		      enum cs_mode mode);
 	void (*disable)(struct coresight_device *csdev,
 			struct perf_event *event);
 };
@@ -348,6 +359,15 @@ struct coresight_ops_helper {
 };
 
 /**
+ * struct coresight_ops_panic - Generic device ops for panic handing
+ *
+ * @sync	: Sync the device register state/trace data
+ */
+struct coresight_ops_panic {
+	int (*sync)(struct coresight_device *csdev);
+};
+ 
+/**
  * struct coresight_ops_ect - Ops for an embedded cross trigger device
  *
  * @enable	: Enable the device
@@ -364,6 +384,7 @@ struct coresight_ops {
 	const struct coresight_ops_source *source_ops;
 	const struct coresight_ops_helper *helper_ops;
 	const struct coresight_ops_ect *ect_ops;
+	const struct coresight_ops_panic *panic_ops;
 };
 
 #if IS_ENABLED(CONFIG_CORESIGHT)
@@ -375,6 +396,63 @@ static inline u32 csdev_access_relaxed_read32(struct csdev_access *csa,
 		return readl_relaxed(csa->base + offset);
 
 	return csa->read(offset, true, false);
+}
+
+#define CORESIGHT_CIDRn(i)	(0xFF0 + ((i) * 4))
+
+static inline u32 coresight_get_cid(void __iomem *base)
+{
+	u32 i, cid = 0;
+
+	for (i = 0; i < 4; i++)
+		cid |= readl(base + CORESIGHT_CIDRn(i)) << (i * 8);
+
+	return cid;
+}
+
+static inline bool is_coresight_device(void __iomem *base)
+{
+	u32 cid = coresight_get_cid(base);
+
+	return cid == CORESIGHT_CID;
+}
+
+/*
+ * Attempt to find and enable "APB clock" for the given device
+ *
+ * Returns:
+ *
+ * clk   - Clock is found and enabled
+ * NULL  - clock is not found
+ * ERROR - Clock is found but failed to enable
+ */
+static inline struct clk *coresight_get_enable_apb_pclk(struct device *dev)
+{
+	struct clk *pclk;
+	int ret;
+
+	pclk = clk_get(dev, "apb_pclk");
+	if (IS_ERR(pclk))
+		return NULL;
+
+	ret = clk_prepare_enable(pclk);
+	if (ret) {
+		clk_put(pclk);
+		return ERR_PTR(ret);
+	}
+	return pclk;
+}
+
+#define CORESIGHT_PIDRn(i)	(0xFE0 + ((i) * 4))
+
+static inline u32 coresight_get_pid(struct csdev_access *csa)
+{
+	u32 i, pid = 0;
+
+	for (i = 0; i < 4; i++)
+		pid |= csdev_access_relaxed_read32(csa, CORESIGHT_PIDRn(i)) << (i * 8);
+
+	return pid;
 }
 
 static inline u32 csdev_access_read32(struct csdev_access *csa, u32 offset)
@@ -505,6 +583,7 @@ u64 coresight_read64(struct coresight_device *csdev, u32 offset);
 void coresight_relaxed_write64(struct coresight_device *csdev,
 			       u64 val, u32 offset);
 void coresight_write64(struct coresight_device *csdev, u64 val, u32 offset);
+extern void print_arch_cpu_state(int cpu);
 
 #else
 static inline struct coresight_device *
@@ -580,6 +659,8 @@ static inline void coresight_relaxed_write64(struct coresight_device *csdev,
 static inline void coresight_write64(struct coresight_device *csdev, u64 val, u32 offset)
 {
 }
+
+static void print_arch_cpu_state(int cpu) {};
 
 #endif		/* IS_ENABLED(CONFIG_CORESIGHT) */
 

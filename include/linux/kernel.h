@@ -221,6 +221,12 @@ int vsscanf(const char *, const char *, va_list);
 
 extern int no_hash_pointers_enable(char *str);
 
+#ifdef CONFIG_MRVL_OCTEONTX_EL0_INTR
+struct task_struct;
+int task_cleanup_handler_add(void (*handler)(struct task_struct *));
+int task_cleanup_handler_remove(void (*handler)(struct task_struct *));
+#endif
+
 extern int get_option(char **str, int *pint);
 extern char *get_options(const char *str, int nints, int *ints);
 extern unsigned long long memparse(const char *ptr, char **retptr);

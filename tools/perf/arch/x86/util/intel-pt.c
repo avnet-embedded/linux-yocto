@@ -654,6 +654,7 @@ static int intel_pt_recording_options(struct auxtrace_record *itr,
 			evsel->core.attr.sample_period = 1;
 			evsel->core.attr.exclude_guest = intel_pt_exclude_guest();
 			evsel->no_aux_samples = true;
+			evsel->needs_auxtrace_mmap = true;
 			intel_pt_evsel = evsel;
 			opts->full_auxtrace = true;
 		}

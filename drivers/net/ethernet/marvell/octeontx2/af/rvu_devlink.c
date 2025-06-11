@@ -5,34 +5,26 @@
  *
  */
 
-#include<linux/bitfield.h>
+#include <linux/bitfield.h>
 
 #include "rvu.h"
 #include "rvu_reg.h"
 #include "rvu_struct.h"
+#include "rvu_npc_hash.h"
+#include "cn20k/npc.h"
 
 #define DRV_NAME "octeontx2-af"
 
-static int rvu_report_pair_start(struct devlink_fmsg *fmsg, const char *name)
+static void rvu_report_pair_start(struct devlink_fmsg *fmsg, const char *name)
 {
-	int err;
-
-	err = devlink_fmsg_pair_nest_start(fmsg, name);
-	if (err)
-		return err;
-
-	return  devlink_fmsg_obj_nest_start(fmsg);
+	devlink_fmsg_pair_nest_start(fmsg, name);
+	devlink_fmsg_obj_nest_start(fmsg);
 }
 
-static int rvu_report_pair_end(struct devlink_fmsg *fmsg)
+static void rvu_report_pair_end(struct devlink_fmsg *fmsg)
 {
-	int err;
-
-	err = devlink_fmsg_obj_nest_end(fmsg);
-	if (err)
-		return err;
-
-	return devlink_fmsg_pair_nest_end(fmsg);
+	devlink_fmsg_obj_nest_end(fmsg);
+	devlink_fmsg_pair_nest_end(fmsg);
 }
 
 static bool rvu_common_request_irq(struct rvu *rvu, int offset,
@@ -41,7 +33,7 @@ static bool rvu_common_request_irq(struct rvu *rvu, int offset,
 	struct rvu_devlink *rvu_dl = rvu->rvu_dl;
 	int rc;
 
-	sprintf(&rvu->irq_name[offset * NAME_SIZE], name);
+	sprintf(&rvu->irq_name[offset * NAME_SIZE], "%s", name);
 	rc = request_irq(pci_irq_vector(rvu->pdev, offset), fn, 0,
 			 &rvu->irq_name[offset * NAME_SIZE], rvu_dl);
 	if (rc)
@@ -283,175 +275,81 @@ static int rvu_nix_report_show(struct devlink_fmsg *fmsg, void *ctx,
 {
 	struct rvu_nix_event_ctx *nix_event_context;
 	u64 intr_val;
-	int err;
 
 	nix_event_context = ctx;
 	switch (health_reporter) {
 	case NIX_AF_RVU_INTR:
 		intr_val = nix_event_context->nix_af_rvu_int;
-		err = rvu_report_pair_start(fmsg, "NIX_AF_RVU");
-		if (err)
-			return err;
-		err = devlink_fmsg_u64_pair_put(fmsg, "\tNIX RVU Interrupt Reg ",
-						nix_event_context->nix_af_rvu_int);
-		if (err)
-			return err;
-		if (intr_val & BIT_ULL(0)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tUnmap Slot Error");
-			if (err)
-				return err;
-		}
-		err = rvu_report_pair_end(fmsg);
-		if (err)
-			return err;
+		rvu_report_pair_start(fmsg, "NIX_AF_RVU");
+		devlink_fmsg_u64_pair_put(fmsg, "\tNIX RVU Interrupt Reg ",
+					  nix_event_context->nix_af_rvu_int);
+		if (intr_val & BIT_ULL(0))
+			devlink_fmsg_string_put(fmsg, "\n\tUnmap Slot Error");
+		rvu_report_pair_end(fmsg);
 		break;
 	case NIX_AF_RVU_GEN:
 		intr_val = nix_event_context->nix_af_rvu_gen;
-		err = rvu_report_pair_start(fmsg, "NIX_AF_GENERAL");
-		if (err)
-			return err;
-		err = devlink_fmsg_u64_pair_put(fmsg, "\tNIX General Interrupt Reg ",
-						nix_event_context->nix_af_rvu_gen);
-		if (err)
-			return err;
-		if (intr_val & BIT_ULL(0)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tRx multicast pkt drop");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(1)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tRx mirror pkt drop");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(4)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tSMQ flush done");
-			if (err)
-				return err;
-		}
-		err = rvu_report_pair_end(fmsg);
-		if (err)
-			return err;
+		rvu_report_pair_start(fmsg, "NIX_AF_GENERAL");
+		devlink_fmsg_u64_pair_put(fmsg, "\tNIX General Interrupt Reg ",
+					  nix_event_context->nix_af_rvu_gen);
+		if (intr_val & BIT_ULL(0))
+			devlink_fmsg_string_put(fmsg, "\n\tRx multicast pkt drop");
+		if (intr_val & BIT_ULL(1))
+			devlink_fmsg_string_put(fmsg, "\n\tRx mirror pkt drop");
+		if (intr_val & BIT_ULL(4))
+			devlink_fmsg_string_put(fmsg, "\n\tSMQ flush done");
+		rvu_report_pair_end(fmsg);
 		break;
 	case NIX_AF_RVU_ERR:
 		intr_val = nix_event_context->nix_af_rvu_err;
-		err = rvu_report_pair_start(fmsg, "NIX_AF_ERR");
-		if (err)
-			return err;
-		err = devlink_fmsg_u64_pair_put(fmsg, "\tNIX Error Interrupt Reg ",
-						nix_event_context->nix_af_rvu_err);
-		if (err)
-			return err;
-		if (intr_val & BIT_ULL(14)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tFault on NIX_AQ_INST_S read");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(13)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tFault on NIX_AQ_RES_S write");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(12)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tAQ Doorbell Error");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(6)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tRx on unmapped PF_FUNC");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(5)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tRx multicast replication error");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(4)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tFault on NIX_RX_MCE_S read");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(3)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tFault on multicast WQE read");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(2)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tFault on mirror WQE read");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(1)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tFault on mirror pkt write");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(0)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tFault on multicast pkt write");
-			if (err)
-				return err;
-		}
-		err = rvu_report_pair_end(fmsg);
-		if (err)
-			return err;
+		rvu_report_pair_start(fmsg, "NIX_AF_ERR");
+		devlink_fmsg_u64_pair_put(fmsg, "\tNIX Error Interrupt Reg ",
+					  nix_event_context->nix_af_rvu_err);
+		if (intr_val & BIT_ULL(14))
+			devlink_fmsg_string_put(fmsg, "\n\tFault on NIX_AQ_INST_S read");
+		if (intr_val & BIT_ULL(13))
+			devlink_fmsg_string_put(fmsg, "\n\tFault on NIX_AQ_RES_S write");
+		if (intr_val & BIT_ULL(12))
+			devlink_fmsg_string_put(fmsg, "\n\tAQ Doorbell Error");
+		if (intr_val & BIT_ULL(6))
+			devlink_fmsg_string_put(fmsg, "\n\tRx on unmapped PF_FUNC");
+		if (intr_val & BIT_ULL(5))
+			devlink_fmsg_string_put(fmsg, "\n\tRx multicast replication error");
+		if (intr_val & BIT_ULL(4))
+			devlink_fmsg_string_put(fmsg, "\n\tFault on NIX_RX_MCE_S read");
+		if (intr_val & BIT_ULL(3))
+			devlink_fmsg_string_put(fmsg, "\n\tFault on multicast WQE read");
+		if (intr_val & BIT_ULL(2))
+			devlink_fmsg_string_put(fmsg, "\n\tFault on mirror WQE read");
+		if (intr_val & BIT_ULL(1))
+			devlink_fmsg_string_put(fmsg, "\n\tFault on mirror pkt write");
+		if (intr_val & BIT_ULL(0))
+			devlink_fmsg_string_put(fmsg, "\n\tFault on multicast pkt write");
+		rvu_report_pair_end(fmsg);
 		break;
 	case NIX_AF_RVU_RAS:
 		intr_val = nix_event_context->nix_af_rvu_err;
-		err = rvu_report_pair_start(fmsg, "NIX_AF_RAS");
-		if (err)
-			return err;
-		err = devlink_fmsg_u64_pair_put(fmsg, "\tNIX RAS Interrupt Reg ",
-						nix_event_context->nix_af_rvu_err);
-		if (err)
-			return err;
-		err = devlink_fmsg_string_put(fmsg, "\n\tPoison Data on:");
-		if (err)
-			return err;
-		if (intr_val & BIT_ULL(34)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tNIX_AQ_INST_S");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(33)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tNIX_AQ_RES_S");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(32)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tHW ctx");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(4)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tPacket from mirror buffer");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(3)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tPacket from multicast buffer");
-
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(2)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tWQE read from mirror buffer");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(1)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tWQE read from multicast buffer");
-			if (err)
-				return err;
-		}
-		if (intr_val & BIT_ULL(0)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tNIX_RX_MCE_S read");
-			if (err)
-				return err;
-		}
-		err = rvu_report_pair_end(fmsg);
-		if (err)
-			return err;
+		rvu_report_pair_start(fmsg, "NIX_AF_RAS");
+		devlink_fmsg_u64_pair_put(fmsg, "\tNIX RAS Interrupt Reg ",
+					  nix_event_context->nix_af_rvu_err);
+		devlink_fmsg_string_put(fmsg, "\n\tPoison Data on:");
+		if (intr_val & BIT_ULL(34))
+			devlink_fmsg_string_put(fmsg, "\n\tNIX_AQ_INST_S");
+		if (intr_val & BIT_ULL(33))
+			devlink_fmsg_string_put(fmsg, "\n\tNIX_AQ_RES_S");
+		if (intr_val & BIT_ULL(32))
+			devlink_fmsg_string_put(fmsg, "\n\tHW ctx");
+		if (intr_val & BIT_ULL(4))
+			devlink_fmsg_string_put(fmsg, "\n\tPacket from mirror buffer");
+		if (intr_val & BIT_ULL(3))
+			devlink_fmsg_string_put(fmsg, "\n\tPacket from multicast buffer");
+		if (intr_val & BIT_ULL(2))
+			devlink_fmsg_string_put(fmsg, "\n\tWQE read from mirror buffer");
+		if (intr_val & BIT_ULL(1))
+			devlink_fmsg_string_put(fmsg, "\n\tWQE read from multicast buffer");
+		if (intr_val & BIT_ULL(0))
+			devlink_fmsg_string_put(fmsg, "\n\tNIX_RX_MCE_S read");
+		rvu_report_pair_end(fmsg);
 		break;
 	default:
 		return -EINVAL;
@@ -918,181 +816,87 @@ static int rvu_npa_report_show(struct devlink_fmsg *fmsg, void *ctx,
 	struct rvu_npa_event_ctx *npa_event_context;
 	unsigned int alloc_dis, free_dis;
 	u64 intr_val;
-	int err;
 
 	npa_event_context = ctx;
 	switch (health_reporter) {
 	case NPA_AF_RVU_GEN:
 		intr_val = npa_event_context->npa_af_rvu_gen;
-		err = rvu_report_pair_start(fmsg, "NPA_AF_GENERAL");
-		if (err)
-			return err;
-		err = devlink_fmsg_u64_pair_put(fmsg, "\tNPA General Interrupt Reg ",
-						npa_event_context->npa_af_rvu_gen);
-		if (err)
-			return err;
-		if (intr_val & BIT_ULL(32)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tUnmap PF Error");
-			if (err)
-				return err;
-		}
+		rvu_report_pair_start(fmsg, "NPA_AF_GENERAL");
+		devlink_fmsg_u64_pair_put(fmsg, "\tNPA General Interrupt Reg ",
+					  npa_event_context->npa_af_rvu_gen);
+		if (intr_val & BIT_ULL(32))
+			devlink_fmsg_string_put(fmsg, "\n\tUnmap PF Error");
 
 		free_dis = FIELD_GET(GENMASK(15, 0), intr_val);
-		if (free_dis & BIT(NPA_INPQ_NIX0_RX)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tNIX0: free disabled RX");
-			if (err)
-				return err;
-		}
-		if (free_dis & BIT(NPA_INPQ_NIX0_TX)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tNIX0:free disabled TX");
-			if (err)
-				return err;
-		}
-		if (free_dis & BIT(NPA_INPQ_NIX1_RX)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tNIX1: free disabled RX");
-			if (err)
-				return err;
-		}
-		if (free_dis & BIT(NPA_INPQ_NIX1_TX)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tNIX1:free disabled TX");
-			if (err)
-				return err;
-		}
-		if (free_dis & BIT(NPA_INPQ_SSO)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tFree Disabled for SSO");
-			if (err)
-				return err;
-		}
-		if (free_dis & BIT(NPA_INPQ_TIM)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tFree Disabled for TIM");
-			if (err)
-				return err;
-		}
-		if (free_dis & BIT(NPA_INPQ_DPI)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tFree Disabled for DPI");
-			if (err)
-				return err;
-		}
-		if (free_dis & BIT(NPA_INPQ_AURA_OP)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tFree Disabled for AURA");
-			if (err)
-				return err;
-		}
+		if (free_dis & BIT(NPA_INPQ_NIX0_RX))
+			devlink_fmsg_string_put(fmsg, "\n\tNIX0: free disabled RX");
+		if (free_dis & BIT(NPA_INPQ_NIX0_TX))
+			devlink_fmsg_string_put(fmsg, "\n\tNIX0:free disabled TX");
+		if (free_dis & BIT(NPA_INPQ_NIX1_RX))
+			devlink_fmsg_string_put(fmsg, "\n\tNIX1: free disabled RX");
+		if (free_dis & BIT(NPA_INPQ_NIX1_TX))
+			devlink_fmsg_string_put(fmsg, "\n\tNIX1:free disabled TX");
+		if (free_dis & BIT(NPA_INPQ_SSO))
+			devlink_fmsg_string_put(fmsg, "\n\tFree Disabled for SSO");
+		if (free_dis & BIT(NPA_INPQ_TIM))
+			devlink_fmsg_string_put(fmsg, "\n\tFree Disabled for TIM");
+		if (free_dis & BIT(NPA_INPQ_DPI))
+			devlink_fmsg_string_put(fmsg, "\n\tFree Disabled for DPI");
+		if (free_dis & BIT(NPA_INPQ_AURA_OP))
+			devlink_fmsg_string_put(fmsg, "\n\tFree Disabled for AURA");
 
 		alloc_dis = FIELD_GET(GENMASK(31, 16), intr_val);
-		if (alloc_dis & BIT(NPA_INPQ_NIX0_RX)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tNIX0: alloc disabled RX");
-			if (err)
-				return err;
-		}
-		if (alloc_dis & BIT(NPA_INPQ_NIX0_TX)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tNIX0:alloc disabled TX");
-			if (err)
-				return err;
-		}
-		if (alloc_dis & BIT(NPA_INPQ_NIX1_RX)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tNIX1: alloc disabled RX");
-			if (err)
-				return err;
-		}
-		if (alloc_dis & BIT(NPA_INPQ_NIX1_TX)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tNIX1:alloc disabled TX");
-			if (err)
-				return err;
-		}
-		if (alloc_dis & BIT(NPA_INPQ_SSO)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tAlloc Disabled for SSO");
-			if (err)
-				return err;
-		}
-		if (alloc_dis & BIT(NPA_INPQ_TIM)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tAlloc Disabled for TIM");
-			if (err)
-				return err;
-		}
-		if (alloc_dis & BIT(NPA_INPQ_DPI)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tAlloc Disabled for DPI");
-			if (err)
-				return err;
-		}
-		if (alloc_dis & BIT(NPA_INPQ_AURA_OP)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tAlloc Disabled for AURA");
-			if (err)
-				return err;
-		}
-		err = rvu_report_pair_end(fmsg);
-		if (err)
-			return err;
+		if (alloc_dis & BIT(NPA_INPQ_NIX0_RX))
+			devlink_fmsg_string_put(fmsg, "\n\tNIX0: alloc disabled RX");
+		if (alloc_dis & BIT(NPA_INPQ_NIX0_TX))
+			devlink_fmsg_string_put(fmsg, "\n\tNIX0:alloc disabled TX");
+		if (alloc_dis & BIT(NPA_INPQ_NIX1_RX))
+			devlink_fmsg_string_put(fmsg, "\n\tNIX1: alloc disabled RX");
+		if (alloc_dis & BIT(NPA_INPQ_NIX1_TX))
+			devlink_fmsg_string_put(fmsg, "\n\tNIX1:alloc disabled TX");
+		if (alloc_dis & BIT(NPA_INPQ_SSO))
+			devlink_fmsg_string_put(fmsg, "\n\tAlloc Disabled for SSO");
+		if (alloc_dis & BIT(NPA_INPQ_TIM))
+			devlink_fmsg_string_put(fmsg, "\n\tAlloc Disabled for TIM");
+		if (alloc_dis & BIT(NPA_INPQ_DPI))
+			devlink_fmsg_string_put(fmsg, "\n\tAlloc Disabled for DPI");
+		if (alloc_dis & BIT(NPA_INPQ_AURA_OP))
+			devlink_fmsg_string_put(fmsg, "\n\tAlloc Disabled for AURA");
+
+		rvu_report_pair_end(fmsg);
 		break;
 	case NPA_AF_RVU_ERR:
-		err = rvu_report_pair_start(fmsg, "NPA_AF_ERR");
-		if (err)
-			return err;
-		err = devlink_fmsg_u64_pair_put(fmsg, "\tNPA Error Interrupt Reg ",
-						npa_event_context->npa_af_rvu_err);
-		if (err)
-			return err;
-
-		if (npa_event_context->npa_af_rvu_err & BIT_ULL(14)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tFault on NPA_AQ_INST_S read");
-			if (err)
-				return err;
-		}
-		if (npa_event_context->npa_af_rvu_err & BIT_ULL(13)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tFault on NPA_AQ_RES_S write");
-			if (err)
-				return err;
-		}
-		if (npa_event_context->npa_af_rvu_err & BIT_ULL(12)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tAQ Doorbell Error");
-			if (err)
-				return err;
-		}
-		err = rvu_report_pair_end(fmsg);
-		if (err)
-			return err;
+		rvu_report_pair_start(fmsg, "NPA_AF_ERR");
+		devlink_fmsg_u64_pair_put(fmsg, "\tNPA Error Interrupt Reg ",
+					  npa_event_context->npa_af_rvu_err);
+		if (npa_event_context->npa_af_rvu_err & BIT_ULL(14))
+			devlink_fmsg_string_put(fmsg, "\n\tFault on NPA_AQ_INST_S read");
+		if (npa_event_context->npa_af_rvu_err & BIT_ULL(13))
+			devlink_fmsg_string_put(fmsg, "\n\tFault on NPA_AQ_RES_S write");
+		if (npa_event_context->npa_af_rvu_err & BIT_ULL(12))
+			devlink_fmsg_string_put(fmsg, "\n\tAQ Doorbell Error");
+		rvu_report_pair_end(fmsg);
 		break;
 	case NPA_AF_RVU_RAS:
-		err = rvu_report_pair_start(fmsg, "NPA_AF_RVU_RAS");
-		if (err)
-			return err;
-		err = devlink_fmsg_u64_pair_put(fmsg, "\tNPA RAS Interrupt Reg ",
-						npa_event_context->npa_af_rvu_ras);
-		if (err)
-			return err;
-		if (npa_event_context->npa_af_rvu_ras & BIT_ULL(34)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tPoison data on NPA_AQ_INST_S");
-			if (err)
-				return err;
-		}
-		if (npa_event_context->npa_af_rvu_ras & BIT_ULL(33)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tPoison data on NPA_AQ_RES_S");
-			if (err)
-				return err;
-		}
-		if (npa_event_context->npa_af_rvu_ras & BIT_ULL(32)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tPoison data on HW context");
-			if (err)
-				return err;
-		}
-		err = rvu_report_pair_end(fmsg);
-		if (err)
-			return err;
+		rvu_report_pair_start(fmsg, "NPA_AF_RVU_RAS");
+		devlink_fmsg_u64_pair_put(fmsg, "\tNPA RAS Interrupt Reg ",
+					  npa_event_context->npa_af_rvu_ras);
+		if (npa_event_context->npa_af_rvu_ras & BIT_ULL(34))
+			devlink_fmsg_string_put(fmsg, "\n\tPoison data on NPA_AQ_INST_S");
+		if (npa_event_context->npa_af_rvu_ras & BIT_ULL(33))
+			devlink_fmsg_string_put(fmsg, "\n\tPoison data on NPA_AQ_RES_S");
+		if (npa_event_context->npa_af_rvu_ras & BIT_ULL(32))
+			devlink_fmsg_string_put(fmsg, "\n\tPoison data on HW context");
+		rvu_report_pair_end(fmsg);
 		break;
 	case NPA_AF_RVU_INTR:
-		err = rvu_report_pair_start(fmsg, "NPA_AF_RVU");
-		if (err)
-			return err;
-		err = devlink_fmsg_u64_pair_put(fmsg, "\tNPA RVU Interrupt Reg ",
-						npa_event_context->npa_af_rvu_int);
-		if (err)
-			return err;
-		if (npa_event_context->npa_af_rvu_int & BIT_ULL(0)) {
-			err = devlink_fmsg_string_put(fmsg, "\n\tUnmap Slot Error");
-			if (err)
-				return err;
-		}
-		return rvu_report_pair_end(fmsg);
+		rvu_report_pair_start(fmsg, "NPA_AF_RVU");
+		devlink_fmsg_u64_pair_put(fmsg, "\tNPA RVU Interrupt Reg ",
+					  npa_event_context->npa_af_rvu_int);
+		if (npa_event_context->npa_af_rvu_int & BIT_ULL(0))
+			devlink_fmsg_string_put(fmsg, "\n\tUnmap Slot Error");
+		rvu_report_pair_end(fmsg);
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -1358,6 +1162,73 @@ static void rvu_health_reporters_destroy(struct rvu *rvu)
 	rvu_nix_health_reporters_destroy(rvu_dl);
 }
 
+enum rvu_af_dl_param_id {
+	RVU_AF_DEVLINK_PARAM_ID_BASE = DEVLINK_PARAM_GENERIC_ID_MAX,
+	RVU_AF_DEVLINK_PARAM_ID_DWRR_MTU,
+	RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_TIMERS,
+	RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_TENNS,
+	RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_GPIOS,
+	RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_GTI,
+	RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_PTP,
+	RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_SYNC,
+	RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_BTS,
+	RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_EXT_GTI,
+	RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_TIMERS,
+	RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_TENNS,
+	RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_GPIOS,
+	RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_GTI,
+	RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_PTP,
+	RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_BTS,
+	RVU_AF_DEVLINK_PARAM_ID_NPC_MCAM_ZONE_PERCENT,
+	RVU_AF_DEVLINK_PARAM_ID_NPC_EXACT_FEATURE_DISABLE,
+	RVU_AF_DEVLINK_PARAM_ID_NPC_DEF_RULE_CNTR_ENABLE,
+	RVU_AF_DEVLINK_PARAM_ID_NPC_DEFRAG,
+	RVU_AF_DEVLINK_PARAM_ID_NIX_MAXLF,
+};
+
+static u64 rvu_af_dl_tim_param_id_to_offset(u32 id)
+{
+	u64 offset = 0;
+
+	switch (id) {
+	case RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_TENNS:
+		offset = TIM_AF_CAPTURE_TENNS;
+		break;
+	case RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_GPIOS:
+		offset = TIM_AF_CAPTURE_GPIOS;
+		break;
+	case RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_GTI:
+		offset = TIM_AF_CAPTURE_GTI;
+		break;
+	case RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_PTP:
+		offset = TIM_AF_CAPTURE_PTP;
+		break;
+	case RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_BTS:
+		offset = TIM_AF_CAPTURE_BTS;
+		break;
+	case RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_EXT_GTI:
+		offset = TIM_AF_CAPTURE_EXT_GTI;
+		break;
+	case RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_TENNS:
+		offset = TIM_AF_ADJUST_TENNS;
+		break;
+	case RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_GPIOS:
+		offset = TIM_AF_ADJUST_GPIOS;
+		break;
+	case RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_GTI:
+		offset = TIM_AF_ADJUST_GTI;
+		break;
+	case RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_PTP:
+		offset = TIM_AF_ADJUST_PTP;
+		break;
+	case RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_BTS:
+		offset = TIM_AF_ADJUST_BTS;
+		break;
+	}
+
+	return offset;
+}
+
 /* Devlink Params APIs */
 static int rvu_af_dl_dwrr_mtu_validate(struct devlink *devlink, u32 id,
 				       union devlink_param_value val,
@@ -1406,7 +1277,8 @@ static int rvu_af_dl_dwrr_mtu_set(struct devlink *devlink, u32 id,
 	u64 dwrr_mtu;
 
 	dwrr_mtu = convert_bytes_to_dwrr_mtu(ctx->val.vu32);
-	rvu_write64(rvu, BLKADDR_NIX0, NIX_AF_DWRR_RPM_MTU, dwrr_mtu);
+	rvu_write64(rvu, BLKADDR_NIX0,
+		    nix_get_dwrr_mtu_reg(rvu->hw, SMQ_LINK_TYPE_RPM), dwrr_mtu);
 
 	return 0;
 }
@@ -1421,16 +1293,424 @@ static int rvu_af_dl_dwrr_mtu_get(struct devlink *devlink, u32 id,
 	if (!rvu->hw->cap.nix_common_dwrr_mtu)
 		return -EOPNOTSUPP;
 
-	dwrr_mtu = rvu_read64(rvu, BLKADDR_NIX0, NIX_AF_DWRR_RPM_MTU);
+	dwrr_mtu = rvu_read64(rvu, BLKADDR_NIX0,
+			      nix_get_dwrr_mtu_reg(rvu->hw, SMQ_LINK_TYPE_RPM));
 	ctx->val.vu32 = convert_dwrr_mtu_to_bytes(dwrr_mtu);
 
 	return 0;
 }
 
-enum rvu_af_dl_param_id {
-	RVU_AF_DEVLINK_PARAM_ID_BASE = DEVLINK_PARAM_GENERIC_ID_MAX,
-	RVU_AF_DEVLINK_PARAM_ID_DWRR_MTU,
-};
+static int rvu_af_dl_tim_capture_timers_get(struct devlink *devlink, u32 id,
+					    struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+	u64 capt_timers = rvu_read64(rvu, BLKADDR_TIM, TIM_AF_CAPTURE_TIMERS);
+
+	ctx->val.vu8 = (u8)(capt_timers & TIM_AF_CAPTURE_TIMERS_MASK);
+
+	return 0;
+}
+
+static int rvu_af_dl_tim_capture_timers_set(struct devlink *devlink, u32 id,
+					    struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+
+	rvu_write64(rvu, BLKADDR_TIM, TIM_AF_CAPTURE_TIMERS, (u64)ctx->val.vu8);
+
+	return 0;
+}
+
+static int rvu_af_dl_tim_capture_timers_validate(struct devlink *devlink,
+						 u32 id,
+						 union devlink_param_value val,
+						 struct netlink_ext_ack *extack)
+{
+	if (val.vu8 > TIM_AF_CAPTURE_TIMERS_MASK) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Invalid value to set tim capture timers");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int rvu_af_dl_tim_capture_time_get(struct devlink *devlink, u32 id,
+					  struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+	u64 time, offset;
+
+	offset = rvu_af_dl_tim_param_id_to_offset(id);
+	time = rvu_read64(rvu, BLKADDR_TIM, offset);
+	if (offset == TIM_AF_CAPTURE_PTP && rvu_tim_ptp_has_errata(rvu->pdev))
+		time = rvu_tim_ptp_rollover_errata_fix(rvu, time);
+	snprintf(ctx->val.vstr, sizeof(ctx->val.vstr), "%llu", time);
+
+	return 0;
+}
+
+static int rvu_af_dl_tim_capture_time_set(struct devlink __always_unused *devlink,
+					  u32 __always_unused id,
+					  struct devlink_param_gset_ctx __always_unused *ctx)
+{
+	return 0;
+}
+
+static int rvu_af_dl_tim_adjust_timers_get(struct devlink *devlink, u32 id,
+					   struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+	u64 adjust_timer = rvu_read64(rvu, BLKADDR_TIM, TIM_AF_ADJUST_TIMERS);
+
+	if (adjust_timer & TIM_AF_ADJUST_TIMERS_MASK)
+		ctx->val.vbool = true;
+	else
+		ctx->val.vbool = false;
+
+	return 0;
+}
+
+static int rvu_af_dl_tim_adjust_timers_set(struct devlink *devlink, u32 id,
+					   struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+	u64 adjust_timer = ctx->val.vbool ? BIT_ULL(0) : 0;
+
+	rvu_write64(rvu, BLKADDR_TIM, TIM_AF_ADJUST_TIMERS, adjust_timer);
+
+	return 0;
+}
+
+static bool cn10k_tim_adjust_gti_errata(struct pci_dev *pdev)
+{
+	if ((pdev->subsystem_device == PCI_SUBSYS_DEVID_CNF10K_A &&
+	     (pdev->revision & 0x0F) >= 0x1) ||
+	    (pdev->subsystem_device == PCI_SUBSYS_DEVID_CNF10K_B &&
+	     (pdev->revision & 0x0F) >= 0x4) ||
+	    (pdev->subsystem_device == PCI_SUBSYS_DEVID_CN10K_A &&
+	     (pdev->revision & 0x0F) >= 0x4) ||
+	    pdev->subsystem_device == PCI_SUBSYS_DEVID_CN10K_B)
+		return true;
+	return false;
+}
+
+static int rvu_af_dl_tim_adjust_timer_get(struct devlink *devlink, u32 id,
+					  struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+	u64 offset, delta;
+
+	offset = rvu_af_dl_tim_param_id_to_offset(id);
+	delta = rvu_read64(rvu, BLKADDR_TIM, offset);
+	snprintf(ctx->val.vstr, sizeof(ctx->val.vstr), "%llu", delta);
+
+	return 0;
+}
+
+static int rvu_af_dl_tim_adjust_timer_set(struct devlink *devlink, u32 id,
+					  struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+	u64 offset, delta;
+
+	if (kstrtoull(ctx->val.vstr, 10, &delta))
+		return -EINVAL;
+
+	offset = rvu_af_dl_tim_param_id_to_offset(id);
+	rvu_write64(rvu, BLKADDR_TIM, offset, delta);
+
+	return 0;
+}
+
+static int rvu_af_dl_tim_adjust_timer_validate(struct devlink *devlink, u32 id,
+					       union devlink_param_value val,
+					       struct netlink_ext_ack *extack)
+{
+	u64 delta;
+
+	if (kstrtoull(val.vstr, 10, &delta)) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Invalid value to set tim adjust timer");
+		return -EINVAL;
+	}
+
+	return 0;
+}
+
+static int rvu_af_npc_defrag_feature_get(struct devlink *devlink, u32 id,
+					 struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+	bool enabled;
+
+	enabled = is_cn20k(rvu->pdev);
+
+	snprintf(ctx->val.vstr, sizeof(ctx->val.vstr), "%s",
+		 enabled ? "enabled" : "disabled");
+
+	return 0;
+}
+
+static int rvu_af_npc_defrag(struct devlink *devlink, u32 id,
+			     struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+
+	npc_cn20k_defrag(rvu);
+
+	return 0;
+}
+
+static int rvu_af_npc_defrag_feature_validate(struct devlink *devlink, u32 id,
+					      union devlink_param_value val,
+					      struct netlink_ext_ack *extack)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+	u64 enable;
+
+	if (kstrtoull(val.vstr, 10, &enable)) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Only 1 value is supported");
+		return -EINVAL;
+	}
+
+	if (enable != 1) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Only initiating defrag is supported");
+		return -EINVAL;
+	}
+
+	if (is_cn20k(rvu->pdev))
+		return 0;
+
+	NL_SET_ERR_MSG_MOD(extack,
+			   "Can defrag NPC only in cn20k silicon");
+	return -EFAULT;
+}
+
+static int rvu_af_npc_exact_feature_get(struct devlink *devlink, u32 id,
+					struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+	bool enabled;
+
+	enabled = rvu_npc_exact_has_match_table(rvu);
+
+	snprintf(ctx->val.vstr, sizeof(ctx->val.vstr), "%s",
+		 enabled ? "enabled" : "disabled");
+
+	return 0;
+}
+
+static int rvu_af_npc_exact_feature_disable(struct devlink *devlink, u32 id,
+					    struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+
+	rvu_npc_exact_disable_feature(rvu);
+
+	return 0;
+}
+
+static int rvu_af_npc_exact_feature_validate(struct devlink *devlink, u32 id,
+					     union devlink_param_value val,
+					     struct netlink_ext_ack *extack)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+	u64 enable;
+
+	if (kstrtoull(val.vstr, 10, &enable)) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Only 1 value is supported");
+		return -EINVAL;
+	}
+
+	if (enable != 1) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "Only disabling exact match feature is supported");
+		return -EINVAL;
+	}
+
+	if (rvu_npc_exact_can_disable_feature(rvu))
+		return 0;
+
+	NL_SET_ERR_MSG_MOD(extack,
+			   "Can't disable exact match feature; Please try before any configuration");
+	return -EFAULT;
+}
+
+static int rvu_af_dl_npc_mcam_high_zone_percent_get(struct devlink *devlink, u32 id,
+						    struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+	struct npc_mcam *mcam;
+	u32 percent;
+
+	mcam = &rvu->hw->mcam;
+	percent = (mcam->hprio_count * 100) / mcam->bmap_entries;
+	ctx->val.vu8 = (u8)percent;
+
+	return 0;
+}
+
+static int rvu_af_dl_npc_mcam_high_zone_percent_set(struct devlink *devlink, u32 id,
+						    struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+	struct npc_mcam *mcam;
+	u32 percent;
+
+	percent = ctx->val.vu8;
+	mcam = &rvu->hw->mcam;
+	mcam->hprio_count = (mcam->bmap_entries * percent) / 100;
+	mcam->hprio_end = mcam->hprio_count;
+	mcam->lprio_count = (mcam->bmap_entries - mcam->hprio_count) / 2;
+	mcam->lprio_start = mcam->bmap_entries - mcam->lprio_count;
+
+	return 0;
+}
+
+static int rvu_af_dl_npc_mcam_high_zone_percent_validate(struct devlink *devlink, u32 id,
+							 union devlink_param_value val,
+							 struct netlink_ext_ack *extack)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+	struct npc_mcam *mcam;
+
+	/* The percent of high prio zone must range from 12% to 100% of unreserved mcam space */
+	if (val.vu8 < 12 || val.vu8 > 100) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "mcam high zone percent must be between 12% to 100%");
+		return -EINVAL;
+	}
+
+	/* Do not allow user to modify the high priority zone entries while mcam entries
+	 * have already been assigned.
+	 */
+	mcam = &rvu->hw->mcam;
+	if (mcam->bmap_fcnt < mcam->bmap_entries) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "mcam entries have already been assigned, can't resize");
+		return -EPERM;
+	}
+
+	return 0;
+}
+
+static int rvu_af_dl_npc_def_rule_cntr_get(struct devlink *devlink, u32 id,
+					   struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+
+	ctx->val.vbool = rvu->def_rule_cntr_en;
+
+	return 0;
+}
+
+static int rvu_af_dl_npc_def_rule_cntr_set(struct devlink *devlink, u32 id,
+					   struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+	int err;
+
+	err = npc_config_cntr_default_entries(rvu, ctx->val.vbool);
+	if (!err)
+		rvu->def_rule_cntr_en = ctx->val.vbool;
+
+	return err;
+}
+
+static int rvu_af_dl_nix_maxlf_get(struct devlink *devlink, u32 id,
+				   struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+
+	ctx->val.vu16 = (u16)rvu_get_nixlf_count(rvu);
+
+	return 0;
+}
+
+static int rvu_af_dl_nix_maxlf_set(struct devlink *devlink, u32 id,
+				   struct devlink_param_gset_ctx *ctx)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+	struct rvu_block *block;
+	int blkaddr = 0;
+
+	npc_mcam_rsrcs_deinit(rvu);
+	blkaddr = rvu_get_next_nix_blkaddr(rvu, blkaddr);
+	while (blkaddr) {
+		block = &rvu->hw->block[blkaddr];
+		block->lf.max = ctx->val.vu16;
+		blkaddr = rvu_get_next_nix_blkaddr(rvu, blkaddr);
+	}
+
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NPC, 0);
+	npc_mcam_rsrcs_init(rvu, blkaddr);
+
+	return 0;
+}
+
+static int rvu_af_dl_nix_maxlf_validate(struct devlink *devlink, u32 id,
+					union devlink_param_value val,
+					struct netlink_ext_ack *extack)
+{
+	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
+	struct rvu *rvu = rvu_dl->rvu;
+	u16 max_nix0_lf, max_nix1_lf;
+	struct npc_mcam *mcam;
+	u64 cfg;
+
+	cfg = rvu_read64(rvu, BLKADDR_NIX0, NIX_AF_CONST2);
+	max_nix0_lf = cfg & 0xFFF;
+	cfg = rvu_read64(rvu, BLKADDR_NIX1, NIX_AF_CONST2);
+	max_nix1_lf = cfg & 0xFFF;
+
+	/* Do not allow user to modify maximum NIX LFs while mcam entries
+	 * have already been assigned.
+	 */
+	mcam = &rvu->hw->mcam;
+	if (mcam->bmap_fcnt < mcam->bmap_entries) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "mcam entries have already been assigned, can't resize");
+		return -EPERM;
+	}
+
+	if (max_nix0_lf && val.vu16 > max_nix0_lf) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "requested nixlf is greater than the max supported nix0_lf");
+		return -EPERM;
+	}
+
+	if (max_nix1_lf && val.vu16 > max_nix1_lf) {
+		NL_SET_ERR_MSG_MOD(extack,
+				   "requested nixlf is greater than the max supported nix1_lf");
+		return -EINVAL;
+	}
+
+	return 0;
+}
 
 static const struct devlink_param rvu_af_dl_params[] = {
 	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_DWRR_MTU,
@@ -1438,6 +1718,120 @@ static const struct devlink_param rvu_af_dl_params[] = {
 			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
 			     rvu_af_dl_dwrr_mtu_get, rvu_af_dl_dwrr_mtu_set,
 			     rvu_af_dl_dwrr_mtu_validate),
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_TIMERS,
+			     "tim_capture_timers", DEVLINK_PARAM_TYPE_U8,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_tim_capture_timers_get,
+			     rvu_af_dl_tim_capture_timers_set,
+			     rvu_af_dl_tim_capture_timers_validate),
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_TENNS,
+			     "tim_capture_tenns", DEVLINK_PARAM_TYPE_STRING,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_tim_capture_time_get,
+			     rvu_af_dl_tim_capture_time_set, NULL),
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_GPIOS,
+			     "tim_capture_gpios", DEVLINK_PARAM_TYPE_STRING,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_tim_capture_time_get,
+			     rvu_af_dl_tim_capture_time_set, NULL),
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_GTI,
+			     "tim_capture_gti", DEVLINK_PARAM_TYPE_STRING,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_tim_capture_time_get,
+			     rvu_af_dl_tim_capture_time_set, NULL),
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_PTP,
+			     "tim_capture_ptp", DEVLINK_PARAM_TYPE_STRING,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_tim_capture_time_get,
+			     rvu_af_dl_tim_capture_time_set, NULL),
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_SYNC,
+			     "tim_capture_sync", DEVLINK_PARAM_TYPE_STRING,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_tim_capture_time_get,
+			     rvu_af_dl_tim_capture_time_set, NULL),
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_BTS,
+			     "tim_capture_bts", DEVLINK_PARAM_TYPE_STRING,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_tim_capture_time_get,
+			     rvu_af_dl_tim_capture_time_set, NULL),
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_TIM_CAPTURE_EXT_GTI,
+			     "tim_capture_ext_gti", DEVLINK_PARAM_TYPE_STRING,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_tim_capture_time_get,
+			     rvu_af_dl_tim_capture_time_set, NULL),
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_TIMERS,
+			     "tim_adjust_timers", DEVLINK_PARAM_TYPE_BOOL,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_tim_adjust_timers_get,
+			     rvu_af_dl_tim_adjust_timers_set, NULL),
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_TENNS,
+			     "tim_adjust_tenns", DEVLINK_PARAM_TYPE_STRING,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_tim_adjust_timer_get,
+			     rvu_af_dl_tim_adjust_timer_set,
+			     rvu_af_dl_tim_adjust_timer_validate),
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_GPIOS,
+			     "tim_adjust_gpios", DEVLINK_PARAM_TYPE_STRING,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_tim_adjust_timer_get,
+			     rvu_af_dl_tim_adjust_timer_set,
+			     rvu_af_dl_tim_adjust_timer_validate),
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_PTP,
+			     "tim_adjust_ptp", DEVLINK_PARAM_TYPE_STRING,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_tim_adjust_timer_get,
+			     rvu_af_dl_tim_adjust_timer_set,
+			     rvu_af_dl_tim_adjust_timer_validate),
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_BTS,
+			     "tim_adjust_bts", DEVLINK_PARAM_TYPE_STRING,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_tim_adjust_timer_get,
+			     rvu_af_dl_tim_adjust_timer_set,
+			     rvu_af_dl_tim_adjust_timer_validate),
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_NPC_MCAM_ZONE_PERCENT,
+			     "npc_mcam_high_zone_percent", DEVLINK_PARAM_TYPE_U8,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_npc_mcam_high_zone_percent_get,
+			     rvu_af_dl_npc_mcam_high_zone_percent_set,
+			     rvu_af_dl_npc_mcam_high_zone_percent_validate),
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_NPC_DEF_RULE_CNTR_ENABLE,
+			     "npc_def_rule_cntr", DEVLINK_PARAM_TYPE_BOOL,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_npc_def_rule_cntr_get,
+			     rvu_af_dl_npc_def_rule_cntr_set, NULL),
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_NIX_MAXLF,
+			     "nix_maxlf", DEVLINK_PARAM_TYPE_U16,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_nix_maxlf_get,
+			     rvu_af_dl_nix_maxlf_set,
+			     rvu_af_dl_nix_maxlf_validate),
+};
+
+static const struct devlink_param rvu_af_dl_param_tim_adj_gti[] = {
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_TIM_ADJUST_GTI,
+			     "tim_adjust_gti", DEVLINK_PARAM_TYPE_STRING,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_dl_tim_adjust_timer_get,
+			     rvu_af_dl_tim_adjust_timer_set,
+			     rvu_af_dl_tim_adjust_timer_validate),
+};
+
+static const struct devlink_param rvu_af_dl_param_exact_match[] = {
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_NPC_EXACT_FEATURE_DISABLE,
+			     "npc_exact_feature_disable", DEVLINK_PARAM_TYPE_STRING,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_npc_exact_feature_get,
+			     rvu_af_npc_exact_feature_disable,
+			     rvu_af_npc_exact_feature_validate),
+};
+
+static const struct devlink_param rvu_af_dl_param_defrag[] = {
+	DEVLINK_PARAM_DRIVER(RVU_AF_DEVLINK_PARAM_ID_NPC_DEFRAG,
+			     "npc_defrag", DEVLINK_PARAM_TYPE_STRING,
+			     BIT(DEVLINK_PARAM_CMODE_RUNTIME),
+			     rvu_af_npc_defrag_feature_get,
+			     rvu_af_npc_defrag,
+			     rvu_af_npc_defrag_feature_validate),
 };
 
 /* Devlink switch mode */
@@ -1446,6 +1840,9 @@ static int rvu_devlink_eswitch_mode_get(struct devlink *devlink, u16 *mode)
 	struct rvu_devlink *rvu_dl = devlink_priv(devlink);
 	struct rvu *rvu = rvu_dl->rvu;
 	struct rvu_switch *rswitch;
+
+	if (rvu->rep_mode)
+		return -EOPNOTSUPP;
 
 	rswitch = &rvu->rswitch;
 	*mode = rswitch->mode;
@@ -1504,13 +1901,6 @@ int rvu_register_dl(struct rvu *rvu)
 		return -ENOMEM;
 	}
 
-	err = devlink_register(dl);
-	if (err) {
-		dev_err(rvu->dev, "devlink register failed with error %d\n", err);
-		devlink_free(dl);
-		return err;
-	}
-
 	rvu_dl = devlink_priv(dl);
 	rvu_dl->dl = dl;
 	rvu_dl->rvu = rvu;
@@ -1523,21 +1913,58 @@ int rvu_register_dl(struct rvu *rvu)
 		goto err_dl_health;
 	}
 
-	err = devlink_params_register(dl, rvu_af_dl_params,
-				      ARRAY_SIZE(rvu_af_dl_params));
+	err = devlink_params_register(dl, rvu_af_dl_params, ARRAY_SIZE(rvu_af_dl_params));
 	if (err) {
 		dev_err(rvu->dev,
 			"devlink params register failed with error %d", err);
 		goto err_dl_health;
 	}
 
-	devlink_params_publish(dl);
+	if (!cn10k_tim_adjust_gti_errata(rvu->pdev)) {
+		err = devlink_params_register(dl, rvu_af_dl_param_tim_adj_gti,
+					      ARRAY_SIZE(rvu_af_dl_param_tim_adj_gti));
+		if (err) {
+			dev_err(rvu->dev,
+				"devlink TIM adjust GTI param register failed with error %d", err);
+			goto err_dl_tim_gti;
+		}
+	}
 
+	if (is_cn20k(rvu->pdev)) {
+		err = devlink_params_register(dl, rvu_af_dl_param_defrag,
+					      ARRAY_SIZE(rvu_af_dl_param_defrag));
+		if (err) {
+			dev_err(rvu->dev,
+				"devlink defrag params register failed with error %d", err);
+			goto err_dl_exact_match;
+		}
+	}
+
+	/* Register exact match devlink only for CN10K-B */
+	if (!rvu_npc_exact_has_match_table(rvu))
+		goto done;
+
+	err = devlink_params_register(dl, rvu_af_dl_param_exact_match,
+				      ARRAY_SIZE(rvu_af_dl_param_exact_match));
+	if (err) {
+		dev_err(rvu->dev,
+			"devlink exact match params register failed with error %d", err);
+		goto err_dl_exact_match;
+	}
+
+done:
+	devlink_register(dl);
 	return 0;
+
+err_dl_exact_match:
+	if (!cn10k_tim_adjust_gti_errata(rvu->pdev))
+		devlink_params_unregister(dl, rvu_af_dl_param_tim_adj_gti,
+					  ARRAY_SIZE(rvu_af_dl_param_tim_adj_gti));
+err_dl_tim_gti:
+	devlink_params_unregister(dl, rvu_af_dl_params, ARRAY_SIZE(rvu_af_dl_params));
 
 err_dl_health:
 	rvu_health_reporters_destroy(rvu);
-	devlink_unregister(dl);
 	devlink_free(dl);
 	return err;
 }
@@ -1547,12 +1974,19 @@ void rvu_unregister_dl(struct rvu *rvu)
 	struct rvu_devlink *rvu_dl = rvu->rvu_dl;
 	struct devlink *dl = rvu_dl->dl;
 
-	if (!dl)
-		return;
-
-	devlink_params_unregister(dl, rvu_af_dl_params,
-				  ARRAY_SIZE(rvu_af_dl_params));
-	rvu_health_reporters_destroy(rvu);
 	devlink_unregister(dl);
+
+	devlink_params_unregister(dl, rvu_af_dl_params, ARRAY_SIZE(rvu_af_dl_params));
+
+	if (!cn10k_tim_adjust_gti_errata(rvu->pdev))
+		devlink_params_unregister(dl, rvu_af_dl_param_tim_adj_gti,
+					  ARRAY_SIZE(rvu_af_dl_param_tim_adj_gti));
+
+	/* Unregister exact match devlink only for CN10K-B */
+	if (rvu_npc_exact_has_match_table(rvu))
+		devlink_params_unregister(dl, rvu_af_dl_param_exact_match,
+					  ARRAY_SIZE(rvu_af_dl_param_exact_match));
+
+	rvu_health_reporters_destroy(rvu);
 	devlink_free(dl);
 }

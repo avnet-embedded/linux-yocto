@@ -24,6 +24,7 @@
 #define CORESIGHT_LSR		0xfb4
 #define CORESIGHT_DEVARCH	0xfbc
 #define CORESIGHT_AUTHSTATUS	0xfb8
+#define CORESIGHT_DEVID1	0xfc4
 #define CORESIGHT_DEVID		0xfc8
 #define CORESIGHT_DEVTYPE	0xfcc
 
@@ -34,7 +35,10 @@
  */
 #define CORESIGHT_CLAIM_SELF_HOSTED	BIT(1)
 
-#define TIMEOUT_US		100
+/* Timeout is in ms to accommodate longer time taken
+ * by ETR hardware on OcteonTX2 implementation.
+ */
+#define TIMEOUT_US		5000
 #define BMVAL(val, lsb, msb)	((val & GENMASK(msb, lsb)) >> lsb)
 
 #define ETM_MODE_EXCL_KERN	BIT(30)
@@ -75,12 +79,6 @@ enum etm_addr_type {
 	ETM_ADDR_TYPE_RANGE,
 	ETM_ADDR_TYPE_START,
 	ETM_ADDR_TYPE_STOP,
-};
-
-enum cs_mode {
-	CS_MODE_DISABLED,
-	CS_MODE_SYSFS,
-	CS_MODE_PERF,
 };
 
 /**
@@ -147,7 +145,8 @@ static inline void coresight_write_reg_pair(void __iomem *addr, u64 val,
 }
 
 void coresight_disable_path(struct list_head *path);
-int coresight_enable_path(struct list_head *path, u32 mode, void *sink_data);
+int coresight_enable_path(struct list_head *path, enum cs_mode mode,
+			  void *sink_data);
 struct coresight_device *coresight_get_sink(struct list_head *path);
 struct coresight_device *
 coresight_get_enabled_sink(struct coresight_device *source);
@@ -207,12 +206,27 @@ extern void coresight_remove_cti_ops(void);
 	}
 
 /* coresight AMBA ID, full UCI structure: id table entry. */
-#define CS_AMBA_UCI_ID(pid, uci_ptr)		\
+#define __CS_AMBA_UCI_ID(pid, m, uci_ptr)	\
 	{					\
 		.id	= pid,			\
-		.mask	= 0x000fffff,		\
+		.mask	= m,			\
 		.data	= (void *)uci_ptr	\
 	}
+#define CS_AMBA_UCI_ID(pid, uci)	__CS_AMBA_UCI_ID(pid, 0x000fffff, uci)
+/*
+ * PIDR2[JEDEC], BIT(3) must be 1 (Read As One) to indicate that rest of the
+ * PIDR1, PIDR2 DES_* fields follow JEDEC encoding for the designer. Use that
+ * as a match value for blanket matching all devices in the given CoreSight
+ * device type and architecture.
+ */
+#define PIDR2_JEDEC			BIT(3)
+#define PID_PIDR2_JEDEC			(PIDR2_JEDEC << 16)
+/*
+ * Match all PIDs in a given CoreSight device type and architecture, defined
+ * by the uci.
+ */
+#define CS_AMBA_MATCH_ALL_UCI(uci)					\
+	__CS_AMBA_UCI_ID(PID_PIDR2_JEDEC, PID_PIDR2_JEDEC, uci)
 
 /* extract the data value from a UCI structure given amba_id pointer. */
 static inline void *coresight_get_uci_data(const struct amba_id *id)
