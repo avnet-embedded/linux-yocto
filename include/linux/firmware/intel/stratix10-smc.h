@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2017-2018, Intel Corporation
+ * Copyright (C) 2017-2024, Intel Corporation
  */
 
 #ifndef __STRATIX10_SMC_H
@@ -47,6 +47,10 @@
 	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL, ARM_SMCCC_SMC_64, \
 	ARM_SMCCC_OWNER_SIP, (func_num))
 
+#define INTEL_SIP_SMC_ASYNC_VAL(func_name)	\
+	ARM_SMCCC_CALL_VAL(ARM_SMCCC_STD_CALL, ARM_SMCCC_SMC_64, \
+	ARM_SMCCC_OWNER_SIP, (func_name))
+
 /**
  * Return values in INTEL_SIP_SMC_* call
  *
@@ -62,18 +66,27 @@
  * INTEL_SIP_SMC_STATUS_REJECTED:
  * Secure monitor software reject the service client's request.
  *
+ * INTEL_SIP_SMC_STATUS_NO_RESPONSE:
+ * Secure monitor software doesn't recieve any response for the
+ * service client's request yet.
+ *
  * INTEL_SIP_SMC_STATUS_ERROR:
  * There is error during the process of service request.
  *
  * INTEL_SIP_SMC_RSU_ERROR:
  * There is error during the process of remote status update request.
+ *
+ * INTEL_SIP_SMC_STATUS_NOT_SUPPORTED:
+ * Secure monitor software doesn't support the request
  */
 #define INTEL_SIP_SMC_RETURN_UNKNOWN_FUNCTION		0xFFFFFFFF
 #define INTEL_SIP_SMC_STATUS_OK				0x0
 #define INTEL_SIP_SMC_STATUS_BUSY			0x1
 #define INTEL_SIP_SMC_STATUS_REJECTED			0x2
+#define INTEL_SIP_SMC_STATUS_NO_RESPONSE		0x3
 #define INTEL_SIP_SMC_STATUS_ERROR			0x4
 #define INTEL_SIP_SMC_RSU_ERROR				0x7
+#define INTEL_SIP_SMC_STATUS_NOT_SUPPORTED		0x8
 
 /**
  * Request INTEL_SIP_SMC_FPGA_CONFIG_START
@@ -425,6 +438,29 @@ INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FPGA_CONFIG_COMPLETED_WRITE)
 	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_RSU_DCMF_STATUS)
 
 /**
+ * Request INTEL_SIP_SMC_RSU_GET_DEVICE_INFO
+ *
+ * Sync call used by service driver at EL1 to query QSPI device info from FW
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_RSU_GET_DEVICE_INFO
+ * a1-7 not used
+ *
+ * Return status
+ * a0 INTEL_SIP_SMC_STATUS_OK
+ * a1 erasesize0 | size0
+ * a2 erasesize1 | size1
+ * a3 erasesize2 | size2
+ * a4 erasesize3 | size3
+ * Or
+ *
+ * a0 INTEL_SIP_SMC_RSU_ERROR
+ */
+#define INTEL_SIP_SMC_FUNCID_RSU_GET_DEVICE_INFO 22
+#define INTEL_SIP_SMC_RSU_GET_DEVICE_INFO \
+	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_RSU_GET_DEVICE_INFO)
+
+/**
  * Request INTEL_SIP_SMC_SERVICE_COMPLETED
  * Sync call to check if the secure world have completed service request
  * or not.
@@ -434,7 +470,8 @@ INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FPGA_CONFIG_COMPLETED_WRITE)
  * a1: this register is optional. If used, it is the physical address for
  *     secure firmware to put output data
  * a2: this register is optional. If used, it is the size of output data
- * a3-a7: not used
+ * a3: this register is optional. Set to 0x00004F4E for asynchronous mode
+ * a4-a7: not used
  *
  * Return status:
  * a0: INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_ERROR,
@@ -510,6 +547,25 @@ INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FPGA_CONFIG_COMPLETED_WRITE)
 	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_SVC_FUNCID_VERSION)
 
 /**
+ * Request INTEL_SIP_SMC_ATF_BUILD_VER
+ *
+ * Sync call used to query the ATF Build Version
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ATF_BUILD_VER
+ * a1-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK
+ * a1 Major
+ * a2 Minor
+ * a3 Patch
+ */
+#define INTEL_SIP_SMC_ATF_BUILD_VERSION 155
+#define INTEL_SIP_SMC_ATF_BUILD_VER \
+		INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_ATF_BUILD_VERSION)
+
+/**
  * SMC call protocol for FPGA Crypto Service (FCS)
  * FUNCID starts from 90
  */
@@ -582,7 +638,7 @@ INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FPGA_CONFIG_COMPLETED_WRITE)
 
 /**
  * Request INTEL_SIP_SMC_FUNCID_FCS_SEND_CERTIFICATE
- * Sync call to send a signed certificate
+ * Async call to send a signed certificate
  *
  * Call register usage:
  * a0 INTEL_SIP_SMC_FCS_SEND_CERTIFICATE
@@ -591,7 +647,7 @@ INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FPGA_CONFIG_COMPLETED_WRITE)
  * a3-a7 not used
  *
  * Return status:
- * a0 INTEL_SIP_SMC_STATUS_OK or INTEL_SIP_SMC_FCS_REJECTED
+ * a0 INTEL_SIP_SMC_STATUS_OK or INTEL_SIP_SMC_REJECTED
  * a1-a3 not used
  */
 #define INTEL_SIP_SMC_FUNCID_FCS_SEND_CERTIFICATE 93
@@ -604,20 +660,2444 @@ INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FPGA_CONFIG_COMPLETED_WRITE)
  *
  * Call register usage:
  * a0 INTEL_SIP_SMC_FCS_GET_PROVISION_DATA
- * a1 the physical address for firmware to write structure of fuse and
- *    key hashes
+ * a1-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_ERROR or
+ *	INTEL_SIP_SMC_STATUS_REJECTED
+ * a1-a3 not used
+ *
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_GET_PROVISION_DATA 94
+#define INTEL_SIP_SMC_FCS_GET_PROVISION_DATA \
+	INTEL_SIP_SMC_STD_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_GET_PROVISION_DATA)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_COUNTER_SET_PREAUTHORIZED
+ * Sync call to update counter value w/o signed certificate
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_COUNTER_SET_PREAUTHORIZED
+ * a1 counter type
+ * a2 counter value
+ * a3 test bit
+ * a3-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK or INTEL_SIP_SMC_STATUS_ERROR
+ * a1-a4 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_COUNTER_SET_PREAUTHORIZED 95
+#define INTEL_SIP_SMC_FCS_COUNTER_SET_PREAUTHORIZED \
+	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_COUNTER_SET_PREAUTHORIZED)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_PSGSIGMA_TEARDOWN
+ * Sync call to tear down all previous black key provision sessions and to
+ * delete keys assicated with those sessions
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_PSGSIGMA_TEARDOWN
+ * a1 the session ID
+ * a2-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_ERROR or
+ *    INTEL_SIP_SMC_STATUS_REJECTED
+ * a1 mailbox error if a0 is INTEL_SIP_SMC_STATUS_ERROR,
+ *    not used if a0 is INTEL_SIP_SMC_STATUS_OK or
+ *    INTEL_SIP_SMC_STATUS_REJECTED
+ * a2-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_PSGSIGMA_TEARDOWN 100
+#define INTEL_SIP_SMC_FCS_PSGSIGMA_TEARDOWN \
+	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_PSGSIGMA_TEARDOWN)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_CHIP_ID
+ * Sync call to get the device ID
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_CHIP_ID
+ * a1-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_ERROR or
+ *    INTEL_SIP_SMC_STATUS_REJECTED
+ * a1 mailbox error if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 retrieved chipID value low 32 bits
+ * a3 retrieved chipID value high 32 bits
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_CHIP_ID 101
+#define INTEL_SIP_SMC_FCS_CHIP_ID \
+	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_CHIP_ID)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ATTESTATION_SUBKEY
+ * Sync call to the device attestation subkey
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ATTESTATION_SUBKEY
+ * a1 physical address of subkey command data
+ * a2 subkey command data size
+ * a3 physical address of to be filled subkey response data
+ * a4 subkey response data size
+ * a5-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, or INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox error if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of the filled subkey response data
+ * a3 size of the filled subkey response dat
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_ATTESTATION_SUBKEY 102
+#define INTEL_SIP_SMC_FCS_ATTESTATION_SUBKEY \
+	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_ATTESTATION_SUBKEY)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ATTESTATION_MEASUREMENTS
+ * Async call to get device attestation measurements
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ATTESTATION_MEASUREMENTS
+ * a1 physical address of measurement command data
+ * a2 measurement command data size
+ * a3 physical address of to be filled measurement response data
+ * a4 measurement response data size
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, or INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox error if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of the filled subkey measurement data
+ * a3 size of the filled subkey measurement data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_ATTESTATION_MEASUREMENTS 103
+#define INTEL_SIP_SMC_FCS_ATTESTATION_MEASUREMENTS \
+	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_ATTESTATION_MEASUREMENTS)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_GET_ATTESTATION_CERTIFICATE
+ * Sync call to get device attestation certificate
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_GET_ATTESTATION_CERTIFICATE
+ * a1 the type of certificate request
+ * a2 the physical address which holds certificate response data
+ * a3 the size of the certificate response data
+ * a4-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox error if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of the requested certificate
+ * a3 sized of the requested certificate
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_GET_ATTESTATION_CERTIFICATE 104
+#define INTEL_SIP_SMC_FCS_GET_ATTESTATION_CERTIFICATE \
+	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_GET_ATTESTATION_CERTIFICATE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_CREATE_CERTIFICATE_ON_RELOAD
+ * Sync call to specify what certificate is to be generated
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_CREATE_CERTIFICATE_ON_RELOAD
+ * a1 the type of certificat request
+ * a2-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox error if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_CREATE_CERTIFICATE_ON_RELOAD 105
+#define INTEL_SIP_SMC_FCS_CREATE_CERTIFICATE_ON_RELOAD \
+	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_CREATE_CERTIFICATE_ON_RELOAD)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_GET_ROM_PATCH_SHA384
+ *
+ * Sync call used to dump the SHA384 hash of the rom patch
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_GET_ROM_PATCH_SHA384
+ * a1 the physical address for firmware to write generated SHA384 data
  * a2-a7 not used
  *
  * Return status:
  * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_FCS_ERROR or
  *      INTEL_SIP_SMC_FCS_REJECTED
  * a1 mailbox error
- * a2 physical address for the structure of fuse and key hashes
- * a3 the size of structure
+ * a2 the physical address of the SHA384 checksum
+ * a3 size of the SHA384 checksum
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_GET_ROM_PATCH_SHA384 64
+#define INTEL_SIP_SMC_FCS_GET_ROM_PATCH_SHA384 \
+	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_GET_ROM_PATCH_SHA384)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_OPEN_CRYPTO_SERVICE_SESSION
+ * Sync call to open and establish a crypto service session with firmware
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_OPEN_CRYPTO_SERVICE_SESSION
+ * a1-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox error if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 session ID
+ * a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_OPEN_CRYPTO_SERVICE_SESSION 110
+#define INTEL_SIP_SMC_FCS_OPEN_CRYPTO_SERVICE_SESSION \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_OPEN_CRYPTO_SERVICE_SESSION)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_CLOSE_CRYPTO_SERVICE_SESSION
+ * Sync call to close a service session
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_CLOSE_CRYPTO_SERVICE_SESSION
+ * a1 session ID
+ * a2-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox error if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_CLOSE_CRYPTO_SERVICE_SESSION 111
+#define INTEL_SIP_SMC_FCS_CLOSE_CRYPTO_SERVICE_SESSION \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_CLOSE_CRYPTO_SERVICE_SESSION)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_IMPORT_CRYPTO_SERVICE_KEY
+ * Async call to import crypto service key to the device
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_IMPORT_CRYPTO_SERVICE_KEY
+ * a1 physical address of the service key object with header
+ * a3 size of the service key object
+ * a4-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_ERROR or
+ *      INTEL_SIP_SMC_STATUS_REJECTED
+ * a1-3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_IMPORT_CRYPTO_SERVICE_KEY 112
+#define INTEL_SIP_SMC_FCS_IMPORT_CRYPTO_SERVICE_KEY \
+	INTEL_SIP_SMC_STD_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_IMPORT_CRYPTO_SERVICE_KEY)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_EXPORT_CRYPTO_SERVICE_KEY
+ * Sync call to export crypto service key from the device
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_EXPORT_CRYPTO_SERVICE_KEY
+ * a1 session ID
+ * a2 key UID
+ * a3 physical address of the exported service key object
+ * a4 size of the exported service key object, max is (88 words + 3 header words)
+ * a5-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox and status errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ *      31:24 -- reserved
+ *      23:16 -- import/export/removal status error
+ *      15:11 -- reserved
+ *      10:0  -- mailbox error
+ * a2 physical address of the exported service key object
+ * a3 size of the exported service key object
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_EXPORT_CRYPTO_SERVICE_KEY 113
+#define INTEL_SIP_SMC_FCS_EXPORT_CRYPTO_SERVICE_KEY \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_EXPORT_CRYPTO_SERVICE_KEY)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_REMOVE_CRYPTO_SERVICE_KEY
+ * Sync call to remove the crypto service kers from the device
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_REMOVE_CRYPTO_SERVICE_KEY
+ * a1 session ID
+ * a2 key UID
+ * a3-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox and status errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * 	31:24 -- reserved
+ * 	23:16 -- import/export/removal status error
+ * 	15:11 -- reserved
+ * 	10:0  -- mailbox error
+ * a2-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_REMOVE_CRYPTO_SERVICE_KEY 114
+#define INTEL_SIP_SMC_FCS_REMOVE_CRYPTO_SERVICE_KEY \
+	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_REMOVE_CRYPTO_SERVICE_KEY)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_GET_CRYPTO_SERVICE_KEY_INFO
+ * Sync call to query the crypto service keys on the device
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_GET_CRYPTO_SERVICE_KEY_INFO
+ * a1 session ID
+ * a2 key UID
+ * a3 physical address of the reponse data
+ * a4 max size of the response data (36 words with header)
+ * a3-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox and status errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * 	31:24 -- reserved
+ * 	23:16 -- import/export/removal status error
+ * 	15:11 -- reserved
+ * 	10:0  -- mailbox error
+ * a2 physical address of the reponse data
+ * a3 size of the response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_GET_CRYPTO_SERVICE_KEY_INFO 115
+#define INTEL_SIP_SMC_FCS_GET_CRYPTO_SERVICE_KEY_INFO \
+	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_GET_CRYPTO_SERVICE_KEY_INFO)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_AES_CRYPTO_INIT
+ * Sync call to initialize AES crypto operation
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_AES_CRYPTO_INIT
+ * a1 session ID
+ * a2 context ID
+ * a3 key UID
+ * a4 physical address of AES crypto parameter data (include block mode,
+ *    encrypt/decrypt, IV fields
+ * a5 size of of AES crypto parameter data
+ * a6-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_AES_CRYPTO_INIT 116
+#define INTEL_SIP_SMC_FCS_AES_CRYPTO_INIT \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_AES_CRYPTO_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_AES_CRYPTO_UPDATE
+ * Sync call to decrypt/encrypt a data block
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_AES_CRYPTO_UPDATE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destination
+ * a6 size of destination
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_AES_CRYPTO_UPDATE 117
+#define INTEL_SIP_SMC_FCS_AES_CRYPTO_UPDATE \
+        INTEL_SIP_SMC_STD_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_AES_CRYPTO_UPDATE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_AES_CRYPTO_FINALIZE
+ * Sync call to decrypt/encrypt a data block
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_AES_CRYPTO_FINALIZE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destation
+ * a6 size of destation
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_AES_CRYPTO_FINALIZE 118
+#define INTEL_SIP_SMC_FCS_AES_CRYPTO_FINALIZE \
+        INTEL_SIP_SMC_STD_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_AES_CRYPTO_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_GET_DIGEST_INIT
+ * Sync call to request the SHA-2 hash digest on a blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_GET_DIGEST_INIT
+ * a1 session ID
+ * a2 context ID
+ * a3 key UID
+ * a4 size of crypto parameter data
+ * a5 the crypto parameter
+ *      3:0     SHA opeation mode
+ *      7:4     digist size
+ *      63:8    not used
+ * a6-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_GET_DIGEST_INIT 119
+#define INTEL_SIP_SMC_FCS_GET_DIGEST_INIT \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_GET_DIGEST_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_GET_DIGEST_UPDATE
+ * Sync call to request the SHA-2 hash digest on a blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_GET_DIGEST_UPDATE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destination
+ * a6 size of destination
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_GET_DIGEST_UPDATE 120
+#define INTEL_SIP_SMC_FCS_GET_DIGEST_UPDATE \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_GET_DIGEST_UPDATE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_GET_DIGEST_FINALIZE
+ * Sync call to request the SHA-2 hash digest on a blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_GET_DIGEST_FINALIZE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destation
+ * a6 size of destation
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_GET_DIGEST_FINALIZE 121
+#define INTEL_SIP_SMC_FCS_GET_DIGEST_FINALIZE \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_GET_DIGEST_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_MAC_VERIFY_INIT
+ * Sync call to check the integrity and authenticity of a blob by comparing
+ * the calculated MAC with tagged MAC
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_MAC_VERIFY_INIT
+ * a1 session ID
+ * a2 context ID
+ * a3 key UID
+ * a4 size of crypto parameter data
+ * a5 crypto parameter data
+ * 	3:0	not used
+ *      7:4     digist size
+ *      63:8    not used
+ * a6-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_MAC_VERIFY_INIT 122
+#define INTEL_SIP_SMC_FCS_MAC_VERIFY_INIT \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_MAC_VERIFY_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_MAC_VERIFY_UPDATE
+ * Sync call to check the integrity and authenticity of a blob by comparing
+ * the calculated MAC with tagged MAC
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_MAC_VERIFY_UPDATE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destination
+ * a6 size of destination
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_MAC_VERIFY_UPDATE 123
+#define INTEL_SIP_SMC_FCS_MAC_VERIFY_UPDATE \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_MAC_VERIFY_UPDATE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_MAC_VERIFY_FINALIZE
+ * Sync call to check the integrity and authenticity of a blob by comparing
+ * the calculated MAC with tagged MAC
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_MAC_VERIFY_FINALIZE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destation
+ * a6 size of destation
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_MAC_VERIFY_FINALIZE 124
+#define INTEL_SIP_SMC_FCS_MAC_VERIFY_FINALIZE \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_MAC_VERIFY_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDSA_HASH_SIGNING_INIT
+ * Sync call to sends digital signature signing request on a data blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDSA_HASH_SIGNING_INIT
+ * a1 session ID
+ * a2 context ID
+ * a3 key UID
+ * a4 size of crypto parameter data
+ * a5 size of crypto parameter data
+ *      3:0     ECC algoritim
+ *      63:4    not used
+ * a6-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_ECDSA_HASH_SIGNING_INIT 125
+#define INTEL_SIP_SMC_FCS_ECDSA_HASH_SIGNING_INIT \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_ECDSA_HASH_SIGNING_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDSA_HASH_SIGNING_FINALIZE
+ * Sync call to sends digital signature signing request on a data blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDSA_HASH_SIGNING_FINALIZE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destation
+ * a6 size of destation
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_ECDSA_HASH_SIGNING_FINALIZE 127
+#define INTEL_SIP_SMC_FCS_ECDSA_HASH_SIGNING_FINALIZE \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_ECDSA_HASH_SIGNING_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_INIT
+ * Sync call to digital signature signing request on a data blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_INIT
+ * a1 session ID
+ * a2 context ID
+ * a3 key UID
+ * a4 size of crypto parameter data
+ * a5 crypto parameter data
+ *      3:0     ECC algorithm
+ *      63:4    not used
+ * a6-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_ECDSA_SHA2_DATA_SIGNING_INIT 128
+#define INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_INIT \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_ECDSA_SHA2_DATA_SIGNING_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_UPDATE
+ * Sync call to digital signature signing request on a data blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_UPDATE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destination
+ * a6 size of destination
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_ECDSA_SHA2_DATA_SIGNING_UPDATE 129
+#define INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_UPDATE \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_ECDSA_SHA2_DATA_SIGNING_UPDATE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_FINALIZE
+ * Sync call to digital signature signing request on a data blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_FINALIZE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destation
+ * a6 size of destation
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_ECDSA_SHA2_DATA_SIGNING_FINALIZE 130
+#define INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_FINALIZE \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_ECDSA_SHA2_DATA_SIGNING_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDSA_HASH_SIGNATURE_VERIFY_INIT
+ * Sync call to sends digital signature verify request with precalculated hash
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDSA_HASH_SIGNATURE_VERIFY_INIT
+ * a1 session ID
+ * a2 context ID
+ * a3 key UID
+ * a4 size of crypto parameter data
+ * a5 crypto parameter data
+ *      3:0     ECC algorithm
+ *      63:4    not used
+ * a6-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_ECDSA_HASH_SIGNATURE_VERIFY_INIT 131
+#define INTEL_SIP_SMC_FCS_ECDSA_HASH_SIGNATURE_VERIFY_INIT \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_ECDSA_HASH_SIGNATURE_VERIFY_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDSA_HASH_SIGNATURE_VERIFY_FINALIZE
+ * Sync call to sends digital signature verify request with precalculated hash
+ *
+ * a0 INTEL_SIP_SMC_FCS_ECDSA_HASH_SIGNATURE_VERIFY_FINALIZE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destation
+ * a6 size of destation
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_ECDSA_HASH_SIGNATURE_VERIFY_FINALIZE 133
+#define INTEL_SIP_SMC_FCS_ECDSA_HASH_SIGNATURE_VERIFY_FINALIZE \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_ECDSA_HASH_SIGNATURE_VERIFY_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_INIT
+ * Sync call to send digital signature verify request
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_INIT
+ * a1 session ID
+ * a2 context ID
+ * a3 key UID
+ * a4 size of crypto parameter data
+ * a5 crypto parameter data
+ *      3:0     ECC algorithm
+ *      63:4    not used
+ * a6-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_INIT 134
+#define INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_INIT \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_UPDATE
+ * Sync call to send digital signature verify request
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_UPDATE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source (contain user data)
+ * a4 size of source
+ * a5 physical address of destination
+ * a6 size of destination
+ * a7 size of user data
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_UPDATE 135
+#define INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_UPDATE \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_UPDATE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_FINALIZE
+ * Sync call to send digital signature verify request
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_FINALIZE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destation
+ * a6 size of destation
+ * a7 size of user data
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_FINALIZE 136
+#define INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_FINALIZE \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDSA_GET_PUBLIC_KEY_INIT
+ * Sync call to send the request to get the public key
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDSA_GET_PUBLIC_KEY_INIT
+ * a1 session ID
+ * a2 context ID
+ * a3 key UID
+ * a4 size of crypto parameter data
+ * a5 crypto parameter data
+ *      3:0     EE algorithm
+ *      63:4    not used
+ * a6-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_ECDSA_GET_PUBLIC_KEY_INIT 137
+#define INTEL_SIP_SMC_FCS_ECDSA_GET_PUBLIC_KEY_INIT \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_ECDSA_GET_PUBLIC_KEY_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDSA_GET_PUBLIC_KEY_FINALIZE
+ * Sync call to send the request to get the public key
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDSA_GET_PUBLIC_KEY_FINALIZE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of response data
+ * a4 size of response data
+ * a5-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_FCS_ECDSA_GET_PUBLIC_KEY_FINALIZE 139
+#define INTEL_SIP_SMC_FCS_ECDSA_GET_PUBLIC_KEY_FINALIZE \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_FCS_ECDSA_GET_PUBLIC_KEY_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDH_INIT
+ * Sync call to send the request on generating a share secret on
+ * Diffie-Hellman key exchange
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDH_INIT
+ * a1 session ID
+ * a2 context ID
+ * a3 key UID
+ * a4 size of crypto parameter data
+ * a5 crypto parameter data
+ *      3:0     ECC algorithm
+ *      63:4    not used
+ * a6-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_ECDH_INIT 140
+#define INTEL_SIP_SMC_FCS_ECDH_INIT \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_ECDH_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDH_FINALIZE
+ * Sync call to send the request on generating a share secret on
+ * Diffie-Hellman key exchange
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDH_FINALIZE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destation
+ * a6 size of destation
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_ECDH_FINALIZE 142
+#define INTEL_SIP_SMC_FCS_ECDH_FINALIZE \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_ECDH_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_RANDOM_NUMBER_EXT
+ *
+ * Async call used to query the random number generated by the firmware,
+ * the maxim random number is 4080 bytes.
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_RANDOM_NUMBER_EXT
+ * a1 session ID
+ * a2 context ID
+ * a3 size of the requested random data
+ * a4-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_RANDOM_NUMBER_EXT 143
+#define INTEL_SIP_SMC_FCS_RANDOM_NUMBER_EXT \
+        INTEL_SIP_SMC_STD_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_RANDOM_NUMBER_EXT)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_CRYPTION_EXT
+ * Sync call for data encryption or data decryption.
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_CRYPTION_EXT
+ * a1 session ID
+ * a2 context ID
+ * a3 cryption operating mode (1 for encryption and 0 for decryption)
+ * a4 physical address which stores to be encrypted or decrypted data
+ * a5 size of input data
+ * a6 physical address which will hold the encrypted or decrypted output data
+ * a7 size of output data
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of (output) decrypted or encrypted data
+ * a3 size of (output) decrypted or encrypted data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_CRYPTION_EXT 144
+#define INTEL_SIP_SMC_FCS_CRYPTION_EXT \
+        INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_CRYPTION_EXT)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_GET_DIGEST_SMMU_UPDATE
+ * Sync call to request the SHA-2 hash digest on a blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_GET_DIGEST_SMMU_UPDATE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destination
+ * a6 size of destination
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_GET_DIGEST_SMMU_UPDATE 145
+#define INTEL_SIP_SMC_FCS_GET_DIGEST_SMMU_UPDATE \
+	INTEL_SIP_SMC_STD_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_GET_DIGEST_SMMU_UPDATE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_GET_DIGEST_SMMU_FINALIZE
+ * Sync call to request the SHA-2 hash digest on a blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_GET_DIGEST_SMMU_FINALIZE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destation
+ * a6 size of destation
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_GET_DIGEST_SMMU_FINALIZE 146
+#define INTEL_SIP_SMC_FCS_GET_DIGEST_SMMU_FINALIZE \
+	INTEL_SIP_SMC_STD_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_GET_DIGEST_SMMU_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_MAC_VERIFY_SMMU_UPDATE
+ * Sync call to check the integrity and authenticity of a blob by comparing
+ * the calculated MAC with tagged MAC
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_MAC_VERIFY_SMMU_UPDATE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destination
+ * a6 size of destination
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_MAC_VERIFY_SMMU_UPDATE 147
+#define INTEL_SIP_SMC_FCS_MAC_VERIFY_SMMU_UPDATE \
+	INTEL_SIP_SMC_STD_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_MAC_VERIFY_SMMU_UPDATE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_MAC_VERIFY_SMMU_FINALIZE
+ * Sync call to check the integrity and authenticity of a blob by comparing
+ * the calculated MAC with tagged MAC
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_MAC_VERIFY_SMMU_FINALIZE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destation
+ * a6 size of destation
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_MAC_VERIFY_SMMU_FINALIZE 148
+#define INTEL_SIP_SMC_FCS_MAC_VERIFY_SMMU_FINALIZE \
+	INTEL_SIP_SMC_STD_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_MAC_VERIFY_SMMU_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_SMMU_UPDATE
+ * Sync call to digital signature signing request on a data blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_SMMU_UPDATE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destination
+ * a6 size of destination
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_ECDSA_SHA2_DATA_SIGNING_SMMU_UPDATE 149
+#define INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_SMMU_UPDATE \
+	INTEL_SIP_SMC_STD_CALL_VAL(INTEL_SIP_SMC_FUNCID_ECDSA_SHA2_DATA_SIGNING_SMMU_UPDATE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_SMMU_FINALIZE
+ * Sync call to digital signature signing request on a data blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_SMMU_FINALIZE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destation
+ * a6 size of destation
+ * a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_ECDSA_SHA2_DATA_SIGNING_SMMU_FINALIZE 150
+#define INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNING_SMMU_FINALIZE \
+	INTEL_SIP_SMC_STD_CALL_VAL(INTEL_SIP_SMC_FUNCID_ECDSA_SHA2_DATA_SIGNING_SMMU_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_SMMU_UPDATE
+ * Sync call to send digital signature verify request
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_SMMU_UPDATE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source (contain user data)
+ * a4 size of source
+ * a5 physical address of destination
+ * a6 size of destination
+ * a7 size of user data
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_SMMU_UPDATE 151
+#define INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_SMMU_UPDATE \
+	INTEL_SIP_SMC_STD_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_SMMU_UPDATE)
+
+/**
+ * Request INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_SMMU_FINALIZE
+ * Sync call to send digital signature verify request
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_SMMU_FINALIZE
+ * a1 session ID
+ * a2 context ID
+ * a3 physical address of source
+ * a4 size of source
+ * a5 physical address of destation
+ * a6 size of destation
+ * a7 size of user data
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 mailbox errors if a0 is INTEL_SIP_SMC_STATUS_ERROR
+ * a2 physical address of response data
+ * a3 size of response data
+ */
+#define INTEL_SIP_SMC_FUNCID_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_SMMU_FINALIZE 152
+#define INTEL_SIP_SMC_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_SMMU_FINALIZE \
+	INTEL_SIP_SMC_STD_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_ECDSA_SHA2_DATA_SIGNATURE_VERIFY_SMMU_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_SVC_VERSION
+ *
+ * Sync call used to query the SIP SMC API Version
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_SVC_VERSION
+ * a1-a7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK
+ * a1 Major
+ * a2 Minor
+ */
+#define INTEL_SIP_SMC_SVC_FUNCID_VERSION 512
+#define INTEL_SIP_SMC_SVC_VERSION \
+		INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_SVC_FUNCID_VERSION)
+/**
+ * Request INTEL_SIP_SMC_HWMON_READTEMP
+ * Sync call to request temperature
+ *
+ * Call register usage:
+ * a0 Temperature Channel
+ * a1-a7 not used
+ *
+ * Return status
+ * a0 INTEL_SIP_SMC_STATUS_OK
+ * a1 Temperature Value
+ * a2-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_HWMON_READTEMP 32
+#define INTEL_SIP_SMC_HWMON_READTEMP \
+	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_HWMON_READTEMP)
+
+/**
+ * Request INTEL_SIP_SMC_SEU_ERR_STATUS
+ * Sync call to get previous Double Bit ECC error information.
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_SEU_ERR_STATUS
+ * a1-7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1 error count of response data
+ * a2 sector address of response data
+ * a3 error information
+ */
+#define INTEL_SIP_SMC_FUNCID_SEU_ERR_STATUS 153
+#define INTEL_SIP_SMC_SEU_ERR_STATUS \
+		INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_SEU_ERR_STATUS)
+
+/**
+ * Request INTEL_SIP_SMC_SAFE_INJECT_SEU_ERR
+ * Sync call to inject SEU Error.
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FUNCID_SAFE_INJECT_SEU_ERR
+ * a1 Number of words
+ * a2-7 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_NOT_SUPPORTED or
+ *    INTEL_SIP_SMC_STATUS_ERROR
+ * a1-a3 Not used
+ */
+#define INTEL_SIP_SMC_FUNCID_SAFE_INJECT_SEU_ERR 154
+#define INTEL_SIP_SMC_SAFE_INJECT_SEU_ERR \
+		INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_SAFE_INJECT_SEU_ERR)
+
+/**
+ * Request INTEL_SIP_SMC_HWMON_READVOLT
+ * Sync call to request voltage
+ *
+ * Call register usage:
+ * a0 Voltage Channel
+ * a1-a7 not used
+ *
+ * Return status
+ * a0 INTEL_SIP_SMC_STATUS_OK
+ * a1 Voltage Value
+ * a2-a3 not used
+ */
+#define INTEL_SIP_SMC_FUNCID_HWMON_READVOLT 33
+#define INTEL_SIP_SMC_HWMON_READVOLT \
+	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_HWMON_READVOLT)
+
+/**
+ * Request INTEL_SIP_SMC_SDM_REMAPPER_CONFIG
+*
+ * Sync call to configure SDM remapper
+ *
+ * Call register usage:
+ * a0: INTEL_SIP_SMC_SDM_REMAPPER_CONFIG.
+ * a1: Remapper bypass configuration
+ * a2-7: not used.
+ *
+ * Return status:
+ * a0: INTEL_SIP_SMC_STATUS_OK, INTEL_SIP_SMC_STATUS_BUSY or
+ * INTEL_SIP_SMC_STATUS_ERROR.
+ * a1-3: not used.
+ */
+#define INTEL_SIP_SMC_FUNCID_SDM_REMAPPER_CONFIG 513
+#define INTEL_SIP_SMC_SDM_REMAPPER_CONFIG \
+	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_SDM_REMAPPER_CONFIG)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_HWMON_READTEMP
+ * Async call to request temperature
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FUNCID_HWMON_READTEMP
+ * a1 transaction job id
+ * a2 Temperature Channel
+ * a3-a17 not used
+ *
+ * Return status
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNCID_HWMON_READTEMP (0xE8)
+#define INTEL_SIP_SMC_ASYNC_HWMON_READTEMP \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNCID_HWMON_READTEMP)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_HWMON_READVOLT
+ * Async call to request voltage
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_HWMON_READVOLT
+ * a1 transaction job id
+ * a2 Voltage Channel
+ * a3-a17 not used
+ *
+ * Return status
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNCID_HWMON_READVOLT (0xE9)
+#define INTEL_SIP_SMC_ASYNC_HWMON_READVOLT \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNCID_HWMON_READVOLT)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_POLL
+ * Async call used by service driver at EL1 to query mailbox response from SDM.
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_POLL
+ * a1 transaction job id
+ * a2-17 will be used to return the response data
+ *
+ * Return status
+ * a0 INTEL_SIP_SMC_STATUS_OK
+ * a1-17 will contain the response values from mailbox for the previous send transaction
+ * Or
+ * a0 INTEL_SIP_SMC_STATUS_NO_RESPONSE
+ * a1-17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_POLL (0xC8)
+#define INTEL_SIP_SMC_ASYNC_POLL \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_POLL)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_POLL_ON_IRQ
+ * Async call used by service driver at EL1 to read response from SDM mailbox and
+ * to retrieve the transaction id's of the read response's.
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_POLL_ON_IRQ
+ * a1 transaction job id
+ * a2-7 will be used to return the response data
+ *
+ * Return status
+ * a0 INTEL_SIP_SMC_STATUS_OK
+ * a1-a4 will contain bitmap of available responses's transaction id as set bit position.
+ * a5-17 not used
+ * Or
+ * a0 INTEL_SIP_SMC_STATUS_NO_RESPONSE
+ * a1-17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_IRQ_POLL (0xC9)
+#define INTEL_SIP_SMC_ASYNC_POLL_ON_IRQ \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_IRQ_POLL)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_OPEN_CS_SESSION
+ * Async call to open and establish a crypto service session with firmware
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_FCS_OPEN_CRYPTO_SERVICE_SESSION
+ * a1 transaction job id
+ * a2-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_OPEN_CS_SESSION (0x13A)
+#define INTEL_SIP_SMC_ASYNC_FCS_OPEN_CS_SESSION \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_OPEN_CS_SESSION)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_CLOSE_CS_SESSION
+ * Async call to close a service session
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_CLOSE_CS_SESSION
+ * a1 transaction job id
+ * a2 session ID
+ * a3-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_CLOSE_CS_SESSION (0x13B)
+#define INTEL_SIP_SMC_ASYNC_FCS_CLOSE_CS_SESSION \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_CLOSE_CS_SESSION)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_IMPORT_CS_KEY
+ * Async call to import crypto service key to the device
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_IMPORT_CS_KEY
+ * a1 transaction job id
+ * a2 physical address of the service key object with header
+ * a3 size of the service key object
+ * a4-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_IMPORT_CS_KEY (0x13C)
+#define INTEL_SIP_SMC_ASYNC_FCS_IMPORT_CS_KEY \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_IMPORT_CS_KEY)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_EXPORT_CS_KEY
+ * Async call to export crypto service key from the device
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_EXPORT_CS_KEY
+ * a1 transaction job id
+ * a2 session ID
+ * a3 key UID
+ * a4 physical address of the exported service key object
+ * a5 size of the exported service key object
+ * a6-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_EXPORT_CS_KEY (0x13D)
+#define INTEL_SIP_SMC_ASYNC_FCS_EXPORT_CS_KEY \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_EXPORT_CS_KEY)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_REMOVE_CS_KEY
+ * Async call to remove the crypto service kers from the device
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_REMOVE_CS_KEY
+ * a1 transaction job id
+ * a2 session ID
+ * a3 key UID
+ * a4-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_REMOVE_CS_KEY (0x13E)
+#define INTEL_SIP_SMC_ASYNC_FCS_REMOVE_CS_KEY \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_REMOVE_CS_KEY)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_GET_CS_KEY_INFO
+ * Sync call to query the crypto service keys on the device
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_GET_CS_KEY_INFO
+ * a1 transaction job id
+ * a2 session ID
+ * a3 key UID
+ * a4 physical address of the response data
+ * a5 max size of the response data (36 words with header)
+ * a6-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_GET_CS_KEY_INFO (0x13F)
+#define INTEL_SIP_SMC_ASYNC_FCS_GET_CS_KEY_INFO \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_GET_CS_KEY_INFO)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_RANDOM_NUMBER_EXT
+ *
+ * Async call used to query the random number generated by the firmware,
+ * the maxim random number is 4080 bytes.
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_RANDOM_NUMBER_EXT
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 buffer pointer for random data
+ * a5 size of the requested random data
+ * a6-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_RANDOM_NUMBER_EXT (0x12D)
+#define INTEL_SIP_SMC_ASYNC_FCS_RANDOM_NUMBER_EXT \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_RANDOM_NUMBER_EXT)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_GET_PROVISION_DATA
+ * Async call to dump all the fuses and key hashes
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_GET_PROVISION_DATA
+ * a1 transaction job id
+ * a2 buffer pointer to store the provision data
+ * a3 size of the buffer
+ * a4-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
  *
  */
-#define INTEL_SIP_SMC_FUNCID_FCS_GET_PROVISION_DATA 94
-#define INTEL_SIP_SMC_FCS_GET_PROVISION_DATA \
-	INTEL_SIP_SMC_FAST_CALL_VAL(INTEL_SIP_SMC_FUNCID_FCS_GET_PROVISION_DATA)
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_GET_PROVISION_DATA (0x132)
+#define INTEL_SIP_SMC_ASYNC_FCS_GET_PROVISION_DATA \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_GET_PROVISION_DATA)
 
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_SEND_CERTIFICATE
+ * Async call to send a signed certificate
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_SEND_CERTIFICATE
+ * a1 transaction job id
+ * a2 the physical address of CERTIFICATE block
+ * a3 size of data block
+ * a4-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_SEND_CERTIFICATE (0x131)
+#define INTEL_SIP_SMC_ASYNC_FCS_SEND_CERTIFICATE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_SEND_CERTIFICATE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_CNTR_SET_PREAUTH
+ * Async call to update counter value w/o signed certificate
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_CNTR_SET_PREAUTH
+ * a1 transaction job id
+ * a2 counter type
+ * a3 counter value
+ * a4 test bit
+ * a5-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_CNTR_SET_PREAUTH (0x133)
+#define INTEL_SIP_SMC_ASYNC_FCS_CNTR_SET_PREAUTH \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_CNTR_SET_PREAUTH)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_HKDF_REQUEST
+ * Sync call to send the request on performing HKDF extract or expand with
+ * input key and data.
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_HKDF_REQUEST
+ * a1 transaction job id in lower half,smmu addr offset in upper half
+ * a2 session ID
+ * a3 step type
+ * a4 MAC mode
+ * a5 physical address of source
+ * a6 key_id
+ * a7 output key object length
+ * a8-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FCS_FUNC_ID_HKDF_REQUEST (0x166)
+#define INTEL_SIP_SMC_ASYNC_FCS_HKDF_REQUEST \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FCS_FUNC_ID_HKDF_REQUEST)
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_CREATE_CRYPTO_SERVICE_KEY
+ * Async call to create crypto service key to the device
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_CREATE_CRYPTO_SERVICE_KEY
+ * a1 transaction job id
+ * a2 physical address of the service key object with header
+ * a3 size of the service key object
+ * a4-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_CREATE_CRYPTO_SERVICE_KEY (0x167)
+#define INTEL_SIP_SMC_ASYNC_FCS_CREATE_CRYPTO_SERVICE_KEY \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_CREATE_CRYPTO_SERVICE_KEY)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_GET_IDCODE
+ * Async call to retrieve the JTAG IDCODE
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_GET_IDCODE
+ * a1 transaction job id
+ * a2-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_GET_IDCODE (0xD3)
+#define INTEL_SIP_SMC_ASYNC_GET_IDCODE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_GET_IDCODE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_GET_DEVICE_IDENTITY
+ * Async call to retrieve device identity Hashed Message
+ * Authentication Code
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_GET_DEVICE_IDENTITY
+ * a1 transaction job id
+ * a2 physical address of response buffer
+ * a3 size of response buffer
+ * a4-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_GET_DEVICE_IDENTITY (0xD2)
+#define INTEL_SIP_SMC_ASYNC_GET_DEVICE_IDENTITY \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_GET_DEVICE_IDENTITY)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_QSPI_OPEN
+ * Async call to open QSPI device through SDM for client
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FUNC_ID_QSPI_OPEN
+ * a1 transaction job id
+ * a2-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_QSPI_OPEN (0xCC)
+#define INTEL_SIP_SMC_ASYNC_QSPI_OPEN \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_QSPI_OPEN)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_QSPI_CLOSE
+ * Async call to close QSPI device through SDM for client.
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_QSPI_CLOSE
+ * a1 transaction job id
+ * a2-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_QSPI_CLOSE (0xCD)
+#define INTEL_SIP_SMC_ASYNC_QSPI_CLOSE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_QSPI_CLOSE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_QSPI_SET_CS
+ * Async call to close QSPI device through SDM for client.
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_QSPI_SET_CS
+ * a1 transaction job id
+ * a2 QSPI CS number
+ * a3 Combined address mode
+ * a4 External decoder mode
+ * a5-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_QSPI_SET_CS (0xCE)
+#define INTEL_SIP_SMC_ASYNC_QSPI_SET_CS \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_QSPI_SET_CS)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_QSPI_ERASE
+ * Async call to erase QSPI device through SDM for client.
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_QSPI_ERASE
+ * a1 transaction job id
+ * a2 erase address
+ * a3 erase size
+ * a4-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_QSPI_ERASE (0xCF)
+#define INTEL_SIP_SMC_ASYNC_QSPI_ERASE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_QSPI_ERASE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_QSPI_WRITE
+ * Async call to write to QSPI device through SDM for client.
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_QSPI_WRITE
+ * a1 transaction job id
+ * a2 physical address of the payload buffer, payloadbuffer includes the write
+ *    address, size and data to be written.
+ * a3 payload size
+ * a4-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_QSPI_WRITE (0xD0)
+#define INTEL_SIP_SMC_ASYNC_QSPI_WRITE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_QSPI_WRITE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_QSPI_READ
+ * Async call to read from QSPI device through SDM for client.
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_QSPI_READ
+ * a1 transaction job id
+ * a2 read address
+ * a3 physical address of the response buffer
+ * a4 read size
+ * a5-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_QSPI_READ (0xD1)
+#define INTEL_SIP_SMC_ASYNC_QSPI_READ \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_QSPI_READ)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_MCTP
+ * Async call to send MCTP message
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_MCTP
+ * a1 transaction job id
+ * a2 payload address
+ * a3 payload size
+ * a4 response address
+ * a5 response size
+ * a6-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_MCTP (0x165)
+#define INTEL_SIP_SMC_ASYNC_FCS_MCTP \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_MCTP)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_GET_DIGEST_INIT
+ * Async call to initialize the SHA-2 hash digest on a blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_GET_DIGEST_INIT
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 key UID
+ * a5 size of crypto parameter data
+ * a6 the crypto parameter
+ *      3:0     SHA opeation mode
+ *      7:4     digist size
+ *      63:8    not used
+ * a7-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_GET_DIGEST_INIT (0x143)
+#define INTEL_SIP_SMC_ASYNC_FCS_GET_DIGEST_INIT \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_GET_DIGEST_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_GET_DIGEST_UPDATE
+ * Async call to update the SHA-2 hash digest on a blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_GET_DIGEST_UPDATE
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 physical address of source
+ * a5 size of source
+ * a6 physical address of destination
+ * a7 size of destination
+ * a8 smmu remapped address of source
+ * a9-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define  INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_GET_DIGEST_UPDATE (0x144)
+#define  INTEL_SIP_SMC_ASYNC_FCS_GET_DIGEST_UPDATE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_GET_DIGEST_UPDATE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_GET_DIGEST_FINALIZE
+ * Async call to finalize the SHA-2 hash digest on a blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_GET_DIGEST_FINALIZE
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 physical address of source
+ * a5 size of source
+ * a6 physical address of destination
+ * a7 size of destination
+ * a8 smmu remapped address of source
+ * a9-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_GET_DIGEST_FINALIZE (0x145)
+#define INTEL_SIP_SMC_ASYNC_FCS_GET_DIGEST_FINALIZE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_GET_DIGEST_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_MAC_VERIFY_INIT
+ * Async call to initialize the MAC verification on a blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_MAC_VERIFY_INIT
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 key UID
+ * a5 size of crypto parameter data
+ * a6 crypto parameter
+ *    3:0     MAC opeation mode
+ *    7:4     MAC size
+ *    63:8    not used
+ * a7-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_MAC_VERIFY_INIT (0x148)
+#define INTEL_SIP_SMC_ASYNC_FCS_MAC_VERIFY_INIT \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_MAC_VERIFY_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_MAC_VERIFY_UPDATE
+ * Async call to update the MAC verification on a blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_MAC_VERIFY_UPDATE
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 physical address of source
+ * a5 size of source
+ * a6 physical address of destination
+ * a7 size of destination
+ * a8 size of user data
+ * a9 smmu remapped address of source
+ * a10-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_MAC_VERIFY_UPDATE (0x149)
+#define INTEL_SIP_SMC_ASYNC_FCS_MAC_VERIFY_UPDATE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_MAC_VERIFY_UPDATE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_MAC_VERIFY_FINALIZE
+ * Async call to finalize the MAC verification on a blob
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_MAC_VERIFY_FINALIZE
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 physical address of source
+ * a5 size of source
+ * a6 physical address of destination
+ * a7 size of destination
+ * a8 size of user data
+ * a9 smmu remapped address of source
+ * a10-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_MAC_VERIFY_FINALIZE (0x14A)
+#define INTEL_SIP_SMC_ASYNC_FCS_MAC_VERIFY_FINALIZE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_MAC_VERIFY_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_AES_CRYPT_INIT
+ * Async call to initialize AES crypto operation
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_AES_CRYPT_INIT
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 key UID
+ * a5 physical address of AES crypto parameter data (include block mode,
+ *   encrypt/decrypt, IV fields
+ * a6 size of AES crypto parameter data
+ * a7-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_AES_CRYPT_INIT (0x140)
+#define INTEL_SIP_SMC_ASYNC_FCS_AES_CRYPT_INIT \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_AES_CRYPT_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_AES_CRYPT_UPDATE
+ * Async call to update AES crypto operation
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_AES_CRYPT_UPDATE
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 physical address of source
+ * a5 size of source
+ * a6 physical address of destination
+ * a7 size of destination
+ * a8 size of additionbal authenticated data
+ * a9 smmu remapped address of source
+ * a10 smmu remapped address of destination
+ * a11-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_AES_CRYPT_UPDATE (0x141)
+#define INTEL_SIP_SMC_ASYNC_FCS_AES_CRYPT_UPDATE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_AES_CRYPT_UPDATE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_AES_CRYPT_FINALIZE
+ * Async call to finalize AES crypto operation
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_AES_CRYPT_FINALIZE
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 physical address of source
+ * a5 size of source
+ * a6 physical address of destination
+ * a7 size of destination
+ * a8 size of additionbal authenticated data
+ * a9 smmu remapped address of source
+ * a10 smmu remapped address of destination
+ * a11-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_AES_CRYPT_FINALIZE (0x142)
+#define INTEL_SIP_SMC_ASYNC_FCS_AES_CRYPT_FINALIZE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_AES_CRYPT_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_CHIP_ID
+ * Async call to retrieve the chip ID
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_CHIP_ID
+ * a1 transaction job id
+ * a2-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_CHIP_ID (0x135)
+#define INTEL_SIP_SMC_ASYNC_FCS_CHIP_ID \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_CHIP_ID)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_GET_ATTESTATION_CERT
+ * Async call to get the attestation certificate
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_GET_ATTESTATION_CERT
+ * a1 transaction job id
+ * a2 type of certificate request
+ * a3 physical address of response buffer
+ * a4 size of response buffer
+ * a5-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_GET_ATTESTATION_CERT (0x138)
+#define INTEL_SIP_SMC_ASYNC_FCS_GET_ATTESTATION_CERT \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_GET_ATTESTATION_CERT)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_CREATE_CERT_ON_RELOAD
+ * Async call to create certificate on reload
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_CREATE_CERT_ON_RELOAD
+ * a1 transaction job id
+ * a2 type of certificat request
+ * a3-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_CREATE_CERT_ON_RELOAD (0x139)
+#define INTEL_SIP_SMC_ASYNC_FCS_CREATE_CERT_ON_RELOAD \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_CREATE_CERT_ON_RELOAD)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_CRYPTION_EXT
+ * Async call to perform encryption/decryption
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_CRYPTION_EXT
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 cryption operating mode (1 for encryption and 0 for decryption)
+ * a5 physical address of source
+ * a6 size of source
+ * a7 physical address of destination
+ * a8 size of destination
+ * a9 sdos ownership
+ * a10 smmu remapped address of source
+ * a11 smmu remapped address of destination
+ * a12-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK or INTEL_SIP_SMC_STATUS_ERROR
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_CRYPTION_EXT (0x12F)
+#define INTEL_SIP_SMC_ASYNC_FCS_CRYPTION_EXT \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_CRYPTION_EXT)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_ECDSA_GET_PUBKEY_INIT
+ * Async call to send the request to get the public key
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_ECDSA_GET_PUBKEY_INIT
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 key UID
+ * a5 size of crypto parameter data
+ * a6 crypto parameter data
+ *      3:0     EE algorithm
+ *      63:4    not used
+ * a6-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_GET_PUBKEY_INIT (0x160)
+#define INTEL_SIP_SMC_ASYNC_FCS_ECDSA_GET_PUBKEY_INIT \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_GET_PUBKEY_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_ECDSA_GET_PUBKEY_FINALIZE
+ * Async call to send the request to get the public key
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_ECDSA_GET_PUBKEY_FINALIZE
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 physical address of response data
+ * a5 size of response data
+ * a6-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_GET_PUBKEY_FINALIZE (0x161)
+#define INTEL_SIP_SMC_ASYNC_FCS_ECDSA_GET_PUBKEY_FINALIZE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_GET_PUBKEY_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_ECDH_REQUEST_INIT
+ * Async call to send the request on generating a share secret on
+ * Diffie-Hellman key exchange
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_ECDH_REQUEST_INIT
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 key UID
+ * a5 size of crypto parameter data
+ * a6 crypto parameter data
+ *    3:0     EE algorithm
+ *    63:4    not used
+ * a7-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDH_REQUEST_INIT (0x162)
+#define INTEL_SIP_SMC_ASYNC_FCS_ECDH_REQUEST_INIT \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDH_REQUEST_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_ECDH_REQUEST_FINALIZE
+ * Async call to send the request on generating a share secret on
+ * Diffie-Hellman key exchange
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_ECDH_REQUEST_FINALIZE
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 physical address of source
+ * a5 size of source
+ * a6 physical address of destination
+ * a7 size of destination
+ * a8-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDH_REQUEST_FINALIZE (0x163)
+#define INTEL_SIP_SMC_ASYNC_FCS_ECDH_REQUEST_FINALIZE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDH_REQUEST_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_ECDSA_HASH_SIG_VERIFY_INIT
+ * Async call to send digital signature verify request with precalculated hash
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_ECDSA_HASH_SIG_VERIFY_INIT
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 key UID
+ * a5 size of crypto parameter data
+ * a6 crypto parameter data
+ *    3:0     EE algorithm
+ *    63:4    not used
+ * a7-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_HASH_SIG_VERIFY_INIT (0x154)
+#define INTEL_SIP_SMC_ASYNC_FCS_ECDSA_HASH_SIG_VERIFY_INIT \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_HASH_SIG_VERIFY_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_ECDSA_HASH_SIG_VERIFY_FINALIZE
+ * Async call to send final stage of digital signature verify request
+ * with precalculated hash
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_ECDSA_HASH_SIG_VERIFY_FINALIZE
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 physical address of source
+ * a5 size of source
+ * a6 physical address of destination
+ * a7 size of destination
+ * a8-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_HASH_SIG_VERIFY_FINALIZE (0x155)
+#define INTEL_SIP_SMC_ASYNC_FCS_ECDSA_HASH_SIG_VERIFY_FINALIZE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_HASH_SIG_VERIFY_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIG_VERIFY_INIT
+ * Async call to send digital signature verify request
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIG_VERIFY_INIT
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 key UID
+ * a5 size of crypto parameter data
+ * a6 crypto parameter data
+ *    3:0     EE algorithm
+ *    63:4    not used
+ * a7-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_SHA2_DATA_SIG_VERIFY_INIT (0x156)
+#define INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIG_VERIFY_INIT \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_SHA2_DATA_SIG_VERIFY_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIG_VERIFY_UPDATE
+ * Async call to send digital signature verify request
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIG_VERIFY_UPDATE
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 physical address of source (contain user data)
+ * a5 size of source
+ * a6 physical address of destination (contain signature)
+ * a7 size of destination
+ * a8 size of user data
+ * a9 smmu remapped address of source
+ * a10-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_SHA2_DATA_SIG_VERIFY_UPDATE (0x157)
+#define INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIG_VERIFY_UPDATE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_SHA2_DATA_SIG_VERIFY_UPDATE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIG_VERIFY_FINALIZE
+ * Async call to send final stage of digital signature verify request
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIG_VERIFY_FINALIZE
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 physical address of source (contain user data)
+ * a5 size of source
+ * a6 physical address of destination (contain signature)
+ * a7 size of destination
+ * a8 size of user data
+ * a9 smmu remapped address of source
+ * a10-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_SHA2_DATA_SIG_VERIFY_FINLZE (0x158)
+#define INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIG_VERIFY_FINALIZE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_SHA2_DATA_SIG_VERIFY_FINLZE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_ECDSA_HASH_SIGN_INIT
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_ECDSA_HASH_SIGN_INIT
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 key UID
+ * a5 size of crypto parameter data
+ * a6 crypto parameter data
+ *    3:0     ECC algorithm
+ *    63:4    not used
+ * a7-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_HASH_SIGN_INIT (0x14D)
+#define INTEL_SIP_SMC_ASYNC_FCS_ECDSA_HASH_SIGN_INIT \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_HASH_SIGN_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_ECDSA_HASH_SIGN_FINALIZE
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_ECDSA_HASH_SIGN_FINALIZE
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 physical address of source
+ * a5 size of source
+ * a6 physical address of destination
+ * a7 size of destination
+ *
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_HASH_SIGN_FINALIZE (0x14E)
+#define INTEL_SIP_SMC_ASYNC_FCS_ECDSA_HASH_SIGN_FINALIZE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_HASH_SIGN_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIGN_INIT
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIGN_INIT
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 key UID
+ * a5 size of crypto parameter data
+ * a6 crypto parameter data
+ *    3:0     ECC algorithm
+ *    63:4    not used
+ * a7-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+ #define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_SHA2_DATA_SIGN_INIT (0x14F)
+#define INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIGN_INIT \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_SHA2_DATA_SIGN_INIT)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIGN_UPDATE
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIGN_UPDATE
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 physical address of source
+ * a5 size of source
+ * a6 physical address of destination
+ * a7 size of destination
+ * a8 smmu remapped address of source
+ * a9-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_SHA2_DATA_SIGN_UPDATE (0x150)
+#define INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIGN_UPDATE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_SHA2_DATA_SIGN_UPDATE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIGN_FINALIZE
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIGN_FINALIZE
+ * a1 transaction job id
+ * a2 session ID
+ * a3 context ID
+ * a4 physical address of source
+ * a5 size of source
+ * a6 physical address of destination
+ * a7 size of destination
+ * a8 smmu remapped address of source
+ * a9-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_SHA2_DATA_SIGN_FINALIZE (0x151)
+#define INTEL_SIP_SMC_ASYNC_FCS_ECDSA_SHA2_DATA_SIGN_FINALIZE \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_FCS_ECDSA_SHA2_DATA_SIGN_FINALIZE)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_QSPI_GET_DEV_INFO
+ * Async call to get QSPI device information from SDM.
+ *
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_QSPI_GET_DEV_INFO
+ * a1 transaction job id
+ * a2 physical address of response buffer
+ * a3 size of response buffer
+ * a4-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_QSPI_GET_DEV_INFO (0xD4)
+#define INTEL_SIP_SMC_ASYNC_QSPI_GET_DEV_INFO \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_QSPI_GET_DEV_INFO)
+
+/**
+ * Request INTEL_SIP_SMC_ASYNC_RSU_GET_SPT
+ * Async call to get RSU SPT from SDM.
+ * Call register usage:
+ * a0 INTEL_SIP_SMC_ASYNC_RSU_GET_SPT
+ * a1 transaction job id
+ * a2-a17 not used
+ *
+ * Return status:
+ * a0 INTEL_SIP_SMC_STATUS_OK ,INTEL_SIP_SMC_STATUS_REJECTED
+ * or INTEL_SIP_SMC_STATUS_BUSY
+ * a1-a17 not used
+ */
+#define INTEL_SIP_SMC_ASYNC_FUNC_ID_RSU_GET_SPT (0xEA)
+#define INTEL_SIP_SMC_ASYNC_RSU_GET_SPT \
+	INTEL_SIP_SMC_ASYNC_VAL(INTEL_SIP_SMC_ASYNC_FUNC_ID_RSU_GET_SPT)
 #endif

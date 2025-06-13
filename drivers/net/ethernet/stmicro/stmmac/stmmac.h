@@ -152,7 +152,7 @@ enum stmmac_mpacket_type {
 	MPACKET_RESPONSE = 1,
 };
 
-#define STMMAC_FPE_MM_MAX_VERIFY_RETRIES	3
+#define STMMAC_FPE_MM_MAX_VERIFY_RETRIES	20
 #define STMMAC_FPE_MM_MAX_VERIFY_TIME_MS	128
 
 struct stmmac_fpe_cfg {
@@ -257,6 +257,8 @@ struct stmmac_est {
 	u32 ter;
 	u32 gcl_unaligned[EST_GCL];
 	u32 gcl[EST_GCL];
+	u32 ti_ns[EST_GCL];
+	u32 gates[EST_GCL];
 	u32 gcl_size;
 	u32 max_sdu[MTL_MAX_TX_QUEUES];
 };
