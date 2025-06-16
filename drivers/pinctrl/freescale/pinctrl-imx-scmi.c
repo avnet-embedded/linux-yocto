@@ -155,6 +155,11 @@ static int pinctrl_scmi_imx_dt_node_to_map(struct pinctrl_dev *pctldev,
 static void pinctrl_scmi_imx_dt_free_map(struct pinctrl_dev *pctldev,
 					 struct pinctrl_map *map, unsigned int num_maps)
 {
+	int i;
+
+	for (i = 0; i < num_maps; i++)
+		kfree(map[i].data.configs.configs);
+
 	kfree(map);
 }
 
