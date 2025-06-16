@@ -1030,7 +1030,9 @@ static int ox05b1s_probe(struct i2c_client *client)
 	}
 
 	sensor->mode = &sensor->model->supported_modes[0];
+	mutex_lock(&sensor->lock);
 	ox05b1s_update_controls(sensor);
+	mutex_unlock(&sensor->lock);
 
 	pm_runtime_set_autosuspend_delay(dev, 1000);
 	pm_runtime_use_autosuspend(dev);
