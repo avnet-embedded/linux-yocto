@@ -99,7 +99,7 @@ static int alloc_cqc(struct hns_roce_dev *hr_dev, struct hns_roce_cq *hr_cq)
 	hr_cq->cons_index = 0;
 	hr_cq->arm_sn = 1;
 
-	atomic_set(&hr_cq->refcount, 1);
+	refcount_set(&hr_cq->refcount, 1);
 	init_completion(&hr_cq->free);
 
 	return 0;
@@ -133,7 +133,7 @@ static void free_cqc(struct hns_roce_dev *hr_dev, struct hns_roce_cq *hr_cq)
 	synchronize_irq(hr_dev->eq_table.eq[hr_cq->vector].irq);
 
 	/* wait for all interrupt processed */
-	if (atomic_dec_and_test(&hr_cq->refcount))
+	if (refcount_dec_and_test(&hr_cq->refcount))
 		complete(&hr_cq->free);
 	wait_for_completion(&hr_cq->free);
 
@@ -397,7 +397,7 @@ void hns_roce_cq_event(struct hns_roce_dev *hr_dev, u32 cqn, int event_type)
 		ibcq->event_handler(&event, ibcq->cq_context);
 	}
 
-	if (atomic_dec_and_test(&hr_cq->refcount))
+	if (refcount_dec_and_test(&hr_cq->refcount))
 		complete(&hr_cq->free);
 }
 
