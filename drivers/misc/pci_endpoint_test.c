@@ -68,6 +68,7 @@
 
 #define PCI_ENDPOINT_TEST_FLAGS			0x2c
 #define FLAG_USE_DMA				BIT(0)
+#define FLAG_USE_SINGLE_DMA				BIT(1)
 
 #define PCI_DEVICE_ID_TI_AM654			0xb00c
 #define PCI_DEVICE_ID_TI_J7200			0xb00f
@@ -75,6 +76,9 @@
 #define PCI_DEVICE_ID_TI_J721S2		0xb013
 #define PCI_DEVICE_ID_LS1088A			0x80c0
 #define PCI_DEVICE_ID_IMX8			0x0808
+#define PCI_DEVICE_ID_LX2160A			0x8d80
+#define PCI_DEVICE_ID_S32G2			0x4002
+#define PCI_DEVICE_ID_S32G3			0x4300
 
 #define is_am654_pci_dev(pdev)		\
 		((pdev)->device == PCI_DEVICE_ID_TI_AM654)
@@ -286,6 +290,7 @@ static bool pci_endpoint_test_bar(struct pci_endpoint_test *test,
 	void *write_buf __free(kfree) = NULL;
 	void *read_buf __free(kfree) = NULL;
 	struct pci_dev *pdev = test->pdev;
+	struct device *dev = &pdev->dev;
 
 	bar_size = pci_resource_len(pdev, barno);
 	if (!bar_size)
@@ -294,6 +299,7 @@ static bool pci_endpoint_test_bar(struct pci_endpoint_test *test,
 	if (!test->bar[barno])
 		return false;
 
+	dev_info(dev, "Testing BAR%d, size %d bytes\n", barno, bar_size);
 	if (barno == test->test_reg_bar)
 		bar_size = 0x4;
 
@@ -312,16 +318,24 @@ static bool pci_endpoint_test_bar(struct pci_endpoint_test *test,
 		return false;
 
 	iters = bar_size / buf_size;
-	for (j = 0; j < iters; j++)
+	for (j = 0; j < iters; j++) {
 		if (pci_endpoint_test_bar_memcmp(test, barno, buf_size * j,
-						 write_buf, read_buf, buf_size))
+						 write_buf, read_buf, buf_size)) {
+			dev_warn(dev, "BAR%d test failed at index %d\n",
+				 barno, j);
 			return false;
+		}
+	}
 
 	remain = bar_size % buf_size;
-	if (remain)
+	if (remain) {
 		if (pci_endpoint_test_bar_memcmp(test, barno, buf_size * iters,
-						 write_buf, read_buf, remain))
+						 write_buf, read_buf, remain)) {
+			dev_warn(dev, "BAR%d test failed at index %d\n",
+				 barno, iters);
 			return false;
+		}
+	}
 
 	return true;
 }
@@ -525,7 +539,7 @@ static bool pci_endpoint_test_write(struct pci_endpoint_test *test,
 	struct pci_endpoint_test_xfer_param param;
 	bool ret = false;
 	u32 flags = 0;
-	bool use_dma;
+	bool use_dma, use_single_dma;
 	u32 reg;
 	void *addr;
 	dma_addr_t phys_addr;
@@ -555,6 +569,12 @@ static bool pci_endpoint_test_write(struct pci_endpoint_test *test,
 	use_dma = !!(param.flags & PCITEST_FLAGS_USE_DMA);
 	if (use_dma)
 		flags |= FLAG_USE_DMA;
+
+	use_single_dma = !!(param.flags & PCITEST_FLAGS_USE_SINGLE_DMA);
+	if (use_single_dma) {
+		dev_info(dev, "Using Single Buffer DMA transfer\n");
+		flags |= FLAG_USE_SINGLE_DMA;
+	}
 
 	if (irq_type < IRQ_TYPE_INTX || irq_type > IRQ_TYPE_MSIX) {
 		dev_err(dev, "Invalid IRQ type option\n");
@@ -626,7 +646,7 @@ static bool pci_endpoint_test_read(struct pci_endpoint_test *test,
 	struct pci_endpoint_test_xfer_param param;
 	bool ret = false;
 	u32 flags = 0;
-	bool use_dma;
+	bool use_dma, use_single_dma;
 	size_t size;
 	void *addr;
 	dma_addr_t phys_addr;
@@ -655,6 +675,12 @@ static bool pci_endpoint_test_read(struct pci_endpoint_test *test,
 	use_dma = !!(param.flags & PCITEST_FLAGS_USE_DMA);
 	if (use_dma)
 		flags |= FLAG_USE_DMA;
+
+	use_single_dma = !!(param.flags & PCITEST_FLAGS_USE_SINGLE_DMA);
+	if (use_single_dma) {
+		dev_info(dev, "Using Single Buffer DMA transfer\n");
+		flags |= FLAG_USE_SINGLE_DMA;
+	}
 
 	if (irq_type < IRQ_TYPE_INTX || irq_type > IRQ_TYPE_MSIX) {
 		dev_err(dev, "Invalid IRQ type option\n");
@@ -991,6 +1017,11 @@ static const struct pci_endpoint_test_data default_data = {
 	.irq_type = IRQ_TYPE_MSI,
 };
 
+static const struct pci_endpoint_test_data s32cc_data = {
+	.test_reg_bar = BAR_0,
+	.alignment = SZ_4K,
+	.irq_type = IRQ_TYPE_MSI,
+};
 static const struct pci_endpoint_test_data am654_data = {
 	.test_reg_bar = BAR_2,
 	.alignment = SZ_64K,
@@ -1024,6 +1055,22 @@ static const struct pci_device_id pci_endpoint_test_tbl[] = {
 	{ PCI_DEVICE(PCI_VENDOR_ID_FREESCALE, PCI_DEVICE_ID_IMX8),},
 	{ PCI_DEVICE(PCI_VENDOR_ID_FREESCALE, PCI_DEVICE_ID_LS1088A),
 	  .driver_data = (kernel_ulong_t)&default_data,
+	},
+	{ PCI_DEVICE(PCI_VENDOR_ID_FREESCALE, PCI_DEVICE_ID_LX2160A),
+	  .driver_data = (kernel_ulong_t)&default_data,
+	},
+	{ PCI_DEVICE(PCI_VENDOR_ID_FREESCALE, PCI_DEVICE_ID_S32G2),
+	  .driver_data = (kernel_ulong_t)&s32cc_data,
+	},
+	{ PCI_DEVICE(PCI_VENDOR_ID_FREESCALE, PCI_DEVICE_ID_S32G3),
+	  .driver_data = (kernel_ulong_t)&s32cc_data,
+	},
+	/* somehow for S32G2/S32G3 the vendor gets 0x0 and the device last digit 0x2 */
+	{ PCI_DEVICE(0x0, PCI_DEVICE_ID_S32G2),
+		.driver_data = (kernel_ulong_t)&s32cc_data,
+	},
+	{ PCI_DEVICE(0x0, PCI_DEVICE_ID_S32G3),
+		.driver_data = (kernel_ulong_t)&s32cc_data,
 	},
 	{ PCI_DEVICE_DATA(SYNOPSYS, EDDA, NULL) },
 	{ PCI_DEVICE(PCI_VENDOR_ID_TI, PCI_DEVICE_ID_TI_AM654),

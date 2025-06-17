@@ -3,7 +3,7 @@
  * System Control and Management Interface (SCMI) Message SMC/HVC
  * Transport driver
  *
- * Copyright 2020 NXP
+ * Copyright 2020,2022-2024 NXP
  */
 
 #include <linux/arm-smccc.h>
@@ -44,31 +44,45 @@
  *
  * @irq: An optional IRQ for completion
  * @cinfo: SCMI channel info
+ * @notif_cinfo: SCMI notification channel info
  * @shmem: Transmit/Receive shared memory area
+ * @notif_shmem: Notification shared memory area
  * @shmem_lock: Lock to protect access to Tx/Rx shared memory area.
  *		Used when NOT operating in atomic mode.
- * @inflight: Atomic flag to protect access to Tx/Rx shared memory area.
+ * @spinlock: Lock to protect access to Tx/Rx shared memory area.
  *	      Used when operating in atomic mode.
+ * @spin_flags: Lock flags
  * @func_id: smc/hvc call function id
  * @param_page: 4K page number of the shmem channel
  * @param_offset: Offset within the 4K page of the shmem channel
  * @cap_id: smc/hvc doorbell's capability id to be used on Qualcomm virtual
  *	    platforms
+ * @node: Linked list pointers
+ * @tx_no_completion_irq: Tx channel has no completion interrupt
+ *                        mechanism for synchronous commands.
  */
 
 struct scmi_smc {
 	int irq;
 	struct scmi_chan_info *cinfo;
+	struct scmi_chan_info *notif_cinfo;
 	struct scmi_shared_mem __iomem *shmem;
+	struct scmi_shared_mem __iomem *notif_shmem;
 	/* Protect access to shmem area */
 	struct mutex shmem_lock;
-#define INFLIGHT_NONE	MSG_TOKEN_MAX
-	atomic_t inflight;
+	struct list_head node;
+	/* Protect access to shmem area in atomic context */
+	spinlock_t spinlock;
+	unsigned long spin_flags;
 	unsigned long func_id;
 	unsigned long param_page;
 	unsigned long param_offset;
 	unsigned long cap_id;
+	bool tx_no_completion_irq;
 };
+
+static LIST_HEAD(scmi_smc_devices);
+static DEFINE_MUTEX(smc_devices_lock);
 
 static struct scmi_transport_core_operations *core;
 
@@ -78,6 +92,16 @@ static irqreturn_t smc_msg_done_isr(int irq, void *data)
 
 	core->rx_callback(scmi_info->cinfo,
 			  core->shmem->read_header(scmi_info->shmem), NULL);
+
+	return IRQ_HANDLED;
+}
+
+static irqreturn_t smc_platform_notif_isr(int irq, void *data)
+{
+	struct scmi_smc *scmi_info = data;
+
+	core->rx_callback(scmi_info->notif_cinfo,
+			 core->shmem->read_header(scmi_info->notif_shmem), NULL);
 
 	return IRQ_HANDLED;
 }
@@ -95,62 +119,135 @@ static bool smc_chan_available(struct device_node *of_node, int idx)
 static inline void smc_channel_lock_init(struct scmi_smc *scmi_info)
 {
 	if (IS_ENABLED(CONFIG_ARM_SCMI_TRANSPORT_SMC_ATOMIC_ENABLE))
-		atomic_set(&scmi_info->inflight, INFLIGHT_NONE);
+		spin_lock_init(&scmi_info->spinlock);
 	else
 		mutex_init(&scmi_info->shmem_lock);
 }
 
-static bool smc_xfer_inflight(struct scmi_xfer *xfer, atomic_t *inflight)
+static inline int
+smc_channel_try_lock_acquire(struct scmi_smc *scmi_info)
 {
+	unsigned long flags;
 	int ret;
 
-	ret = atomic_cmpxchg(inflight, INFLIGHT_NONE, xfer->hdr.seq);
+	if (IS_ENABLED(CONFIG_ARM_SCMI_TRANSPORT_SMC_ATOMIC_ENABLE)) {
+		ret = spin_trylock_irqsave(&scmi_info->spinlock,
+					   flags);
+		if (ret)
+			scmi_info->spin_flags = flags;
+		return ret;
+	}
 
-	return ret == INFLIGHT_NONE;
-}
-
-static inline void
-smc_channel_lock_acquire(struct scmi_smc *scmi_info,
-			 struct scmi_xfer *xfer __maybe_unused)
-{
-	if (IS_ENABLED(CONFIG_ARM_SCMI_TRANSPORT_SMC_ATOMIC_ENABLE))
-		spin_until_cond(smc_xfer_inflight(xfer, &scmi_info->inflight));
-	else
-		mutex_lock(&scmi_info->shmem_lock);
+	return mutex_trylock(&scmi_info->shmem_lock);
 }
 
 static inline void smc_channel_lock_release(struct scmi_smc *scmi_info)
 {
 	if (IS_ENABLED(CONFIG_ARM_SCMI_TRANSPORT_SMC_ATOMIC_ENABLE))
-		atomic_set(&scmi_info->inflight, INFLIGHT_NONE);
+		spin_unlock_irqrestore(&scmi_info->spinlock,
+				       scmi_info->spin_flags);
 	else
 		mutex_unlock(&scmi_info->shmem_lock);
+}
+
+static struct scmi_smc *create_scmi_smc_dev(struct device *cdev,
+					    struct device *dev, bool tx)
+{
+	struct scmi_smc *scmi_info;
+	u32 func_id;
+	int ret, irq;
+
+	scmi_info = devm_kzalloc(dev, sizeof(*scmi_info), GFP_KERNEL);
+	if (!scmi_info)
+		return ERR_PTR(-ENOMEM);
+
+	ret = of_property_read_u32(dev->of_node, "arm,smc-id", &func_id);
+	if (ret < 0)
+		return ERR_PTR(ret);
+
+	/*
+	 * If there is an interrupt named "a2p", then the service and
+	 * completion of a message is signaled by an interrupt rather than by
+	 * the return of the SMC call.
+	 */
+	scmi_info->irq = of_irq_get_byname(cdev->of_node, "a2p");
+	if (scmi_info->irq > 0) {
+		ret = request_irq(scmi_info->irq, smc_msg_done_isr,
+				  IRQF_NO_SUSPEND, dev_name(dev), scmi_info);
+		if (ret) {
+			dev_err(dev, "failed to setup SCMI smc irq\n");
+			return ERR_PTR(ret);
+		}
+	} else {
+		scmi_info->tx_no_completion_irq = true;
+	}
+
+	if (!tx) {
+		/* p2a_notif is used only by RX channels */
+		irq = of_irq_get_byname(cdev->of_node, "p2a_notif");
+		if (irq > 0) {
+			ret = devm_request_irq(dev, irq, smc_platform_notif_isr,
+						IRQF_NO_SUSPEND,
+						dev_name(dev), scmi_info);
+			if (ret) {
+				dev_err(dev, "failed to setup SCMI smc notification irq\n");
+				return ERR_PTR(ret);
+			}
+		}
+	}
+
+	scmi_info->func_id = func_id;
+	smc_channel_lock_init(scmi_info);
+
+	return scmi_info;
+}
+
+static struct scmi_smc *get_scmi_smc_dev(struct scmi_chan_info *cinfo,
+					 struct device *dev, bool tx)
+{
+	struct scmi_smc *smc_dev = NULL;
+	bool found = false;
+
+	mutex_lock(&smc_devices_lock);
+	list_for_each_entry(smc_dev, &scmi_smc_devices, node) {
+		if (smc_dev->cinfo->dev == cinfo->dev) {
+			found = true;
+			break;
+		}
+	}
+
+	if (found)
+		goto release_lock;
+
+	smc_dev = create_scmi_smc_dev(cinfo->dev, dev, tx);
+	if (!IS_ERR(smc_dev))
+		list_add(&smc_dev->node, &scmi_smc_devices);
+
+release_lock:
+	mutex_unlock(&smc_devices_lock);
+	return smc_dev;
 }
 
 static int smc_chan_setup(struct scmi_chan_info *cinfo, struct device *dev,
 			  bool tx)
 {
-	struct device *cdev = cinfo->dev;
 	unsigned long cap_id = ULONG_MAX;
 	struct scmi_smc *scmi_info;
 	struct resource res = {};
-	u32 func_id;
-	int ret;
+	struct scmi_shared_mem __iomem *addr;
 
-	if (!tx)
-		return -ENODEV;
+	scmi_info = get_scmi_smc_dev(cinfo, dev, tx);
+	if (IS_ERR(scmi_info))
+		return PTR_ERR(scmi_info);
 
-	scmi_info = devm_kzalloc(dev, sizeof(*scmi_info), GFP_KERNEL);
-	if (!scmi_info)
-		return -ENOMEM;
+	addr = core->shmem->setup_iomap(cinfo, dev, tx, &res);
+	if (IS_ERR(addr))
+		return PTR_ERR(addr);
 
-	scmi_info->shmem = core->shmem->setup_iomap(cinfo, dev, tx, &res);
-	if (IS_ERR(scmi_info->shmem))
-		return PTR_ERR(scmi_info->shmem);
-
-	ret = of_property_read_u32(dev->of_node, "arm,smc-id", &func_id);
-	if (ret < 0)
-		return ret;
+	if (tx)
+		scmi_info->shmem = addr;
+	else
+		scmi_info->notif_shmem = addr;
 
 	if (of_device_is_compatible(dev->of_node, "qcom,scmi-smc")) {
 		resource_size_t size = resource_size(&res);
@@ -169,27 +266,14 @@ static int smc_chan_setup(struct scmi_chan_info *cinfo, struct device *dev,
 		scmi_info->param_page = SHMEM_PAGE(res.start);
 		scmi_info->param_offset = SHMEM_OFFSET(res.start);
 	}
-	/*
-	 * If there is an interrupt named "a2p", then the service and
-	 * completion of a message is signaled by an interrupt rather than by
-	 * the return of the SMC call.
-	 */
-	scmi_info->irq = of_irq_get_byname(cdev->of_node, "a2p");
-	if (scmi_info->irq > 0) {
-		ret = request_irq(scmi_info->irq, smc_msg_done_isr,
-				  IRQF_NO_SUSPEND, dev_name(dev), scmi_info);
-		if (ret) {
-			dev_err(dev, "failed to setup SCMI smc irq\n");
-			return ret;
-		}
+
+	if (tx) {
+		scmi_info->cinfo = cinfo;
+		cinfo->no_completion_irq = scmi_info->tx_no_completion_irq;
 	} else {
-		cinfo->no_completion_irq = true;
+		scmi_info->notif_cinfo = cinfo;
 	}
 
-	scmi_info->func_id = func_id;
-	scmi_info->cap_id = cap_id;
-	scmi_info->cinfo = cinfo;
-	smc_channel_lock_init(scmi_info);
 	cinfo->transport_info = scmi_info;
 
 	return 0;
@@ -222,12 +306,16 @@ static int smc_send_message(struct scmi_chan_info *cinfo,
 {
 	struct scmi_smc *scmi_info = cinfo->transport_info;
 	struct arm_smccc_res res;
+	int ret = 0;
 
 	/*
 	 * Channel will be released only once response has been
 	 * surely fully retrieved, so after .mark_txdone()
 	 */
-	smc_channel_lock_acquire(scmi_info, xfer);
+	while (!ret) {
+		spin_until_cond(core->shmem->channel_free(scmi_info->shmem));
+		ret = smc_channel_try_lock_acquire(scmi_info);
+	}
 
 	core->shmem->tx_prepare(scmi_info->shmem, xfer, cinfo);
 
@@ -264,6 +352,14 @@ static void smc_mark_txdone(struct scmi_chan_info *cinfo, int ret,
 	smc_channel_lock_release(scmi_info);
 }
 
+static void smc_fetch_notification(struct scmi_chan_info *cinfo,
+				   size_t max_len, struct scmi_xfer *xfer)
+{
+	struct scmi_smc *scmi_info = cinfo->transport_info;
+
+	core->shmem->fetch_notification(scmi_info->notif_shmem, max_len, xfer);
+}
+
 static const struct scmi_transport_ops scmi_smc_ops = {
 	.chan_available = smc_chan_available,
 	.chan_setup = smc_chan_setup,
@@ -271,6 +367,7 @@ static const struct scmi_transport_ops scmi_smc_ops = {
 	.send_message = smc_send_message,
 	.mark_txdone = smc_mark_txdone,
 	.fetch_response = smc_fetch_response,
+	.fetch_notification = smc_fetch_notification,
 };
 
 static struct scmi_desc scmi_smc_desc = {

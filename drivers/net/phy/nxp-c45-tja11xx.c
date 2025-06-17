@@ -21,6 +21,7 @@
 #define PHY_ID_MASK			GENMASK(31, 4)
 /* Same id: TJA1103, TJA1104 */
 #define PHY_ID_TJA_1103			0x001BB010
+/* Same id: TJA1120, TJA1121 */
 #define PHY_ID_TJA_1120			0x001BB031
 
 #define VEND1_DEVICE_ID3		0x0004
@@ -117,6 +118,12 @@
 
 #define VEND1_SGMII_BASIC_CONTROL	0xB000
 #define SGMII_LPM			BIT(11)
+
+#define VEND1_SGMII_BASIC_STATUS	0xB001
+#define SGMII_AN_ABILITY		BIT(3)
+
+#define VEND1_SGMII_EXT_ABILITY	0xB00F
+#define EXT_ABILITY_1000BASE_X_FULL	BIT(15)
 
 #define VEND1_SYMBOL_ERROR_CNT_XTD	0x8351
 #define EXTENDED_CNT_EN			BIT(15)
@@ -1527,6 +1534,8 @@ static int nxp_c45_set_phy_mode(struct phy_device *phydev)
 	ret = phy_read_mmd(phydev, MDIO_MMD_VEND1, VEND1_ABILITIES);
 	phydev_dbg(phydev, "Clause 45 managed PHY abilities 0x%x\n", ret);
 
+	phydev->autoneg = AUTONEG_DISABLE;
+
 	switch (phydev->interface) {
 	case PHY_INTERFACE_MODE_RGMII:
 		if (!(ret & RGMII_ABILITY)) {
@@ -1583,6 +1592,8 @@ static int nxp_c45_set_phy_mode(struct phy_device *phydev)
 		}
 		phy_write_mmd(phydev, MDIO_MMD_VEND1, VEND1_MII_BASIC_CONFIG,
 			      MII_BASIC_CONFIG_SGMII);
+
+		phydev->autoneg = AUTONEG_ENABLE;
 		break;
 	case PHY_INTERFACE_MODE_INTERNAL:
 		break;
@@ -1676,8 +1687,6 @@ static int nxp_c45_config_init(struct phy_device *phydev)
 	if (ret)
 		return ret;
 
-	phydev->autoneg = AUTONEG_DISABLE;
-
 	nxp_c45_counters_enable(phydev);
 	nxp_c45_ptp_init(phydev);
 	ret = nxp_c45_macsec_config_init(phydev);
@@ -1687,12 +1696,43 @@ static int nxp_c45_config_init(struct phy_device *phydev)
 	return nxp_c45_start_op(phydev);
 }
 
+static int nxp_c45_get_features_sgmii(struct phy_device *phydev)
+{
+	int ret;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND1, VEND1_ABILITIES);
+	if (!(ret & SGMII_ABILITY))
+		return 0;
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND1, VEND1_SGMII_BASIC_STATUS);
+	if (ret < 0)
+		return ret;
+
+	if (ret & SGMII_AN_ABILITY)
+		linkmode_set_bit(ETHTOOL_LINK_MODE_Autoneg_BIT, phydev->supported);
+
+	ret = phy_read_mmd(phydev, MDIO_MMD_VEND1, VEND1_SGMII_EXT_ABILITY);
+	if (ret < 0)
+		return ret;
+
+	if (ret & EXT_ABILITY_1000BASE_X_FULL)
+		linkmode_set_bit(ETHTOOL_LINK_MODE_1000baseX_Full_BIT, phydev->supported);
+
+	return 0;
+}
+
 static int nxp_c45_get_features(struct phy_device *phydev)
 {
+	int ret;
+
 	linkmode_set_bit(ETHTOOL_LINK_MODE_TP_BIT, phydev->supported);
 	linkmode_set_bit(ETHTOOL_LINK_MODE_MII_BIT, phydev->supported);
 
-	return genphy_c45_pma_read_abilities(phydev);
+	ret = genphy_c45_pma_read_abilities(phydev);
+	if (ret)
+		return ret;
+
+	return nxp_c45_get_features_sgmii(phydev);
 }
 
 static int nxp_c45_probe(struct phy_device *phydev)
@@ -1956,6 +1996,18 @@ static int tja1104_match_phy_device(struct phy_device *phydev)
 	       nxp_c45_macsec_ability(phydev);
 }
 
+static int tja1120_match_phy_device(struct phy_device *phydev)
+{
+	return phy_id_compare(phydev->phy_id, PHY_ID_TJA_1120, PHY_ID_MASK) &&
+	       !nxp_c45_macsec_ability(phydev);
+}
+
+static int tja1121_match_phy_device(struct phy_device *phydev)
+{
+	return phy_id_compare(phydev->phy_id, PHY_ID_TJA_1120, PHY_ID_MASK) &&
+	       nxp_c45_macsec_ability(phydev);
+}
+
 static const struct nxp_c45_regmap tja1120_regmap = {
 	.vend1_ptp_clk_period	= 0x1020,
 	.vend1_event_msg_filt	= 0x9010,
@@ -2074,7 +2126,6 @@ static struct phy_driver nxp_c45_driver[] = {
 		.match_phy_device	= tja1104_match_phy_device,
 	},
 	{
-		PHY_ID_MATCH_MODEL(PHY_ID_TJA_1120),
 		.name			= "NXP C45 TJA1120",
 		.get_features		= nxp_c45_get_features,
 		.driver_data		= &tja1120_phy_data,
@@ -2097,6 +2148,32 @@ static struct phy_driver nxp_c45_driver[] = {
 		.get_sqi		= nxp_c45_get_sqi,
 		.get_sqi_max		= nxp_c45_get_sqi_max,
 		.remove			= nxp_c45_remove,
+		.match_phy_device	= tja1120_match_phy_device,
+	},
+	{
+		.name			= "NXP C45 TJA1121",
+		.get_features		= nxp_c45_get_features,
+		.driver_data		= &tja1120_phy_data,
+		.probe			= nxp_c45_probe,
+		.soft_reset		= nxp_c45_soft_reset,
+		.config_aneg		= genphy_c45_config_aneg,
+		.config_init		= nxp_c45_config_init,
+		.config_intr		= tja1120_config_intr,
+		.handle_interrupt	= nxp_c45_handle_interrupt,
+		.read_status		= genphy_c45_read_status,
+		.link_change_notify	= tja1120_link_change_notify,
+		.suspend		= genphy_c45_pma_suspend,
+		.resume			= genphy_c45_pma_resume,
+		.get_sset_count		= nxp_c45_get_sset_count,
+		.get_strings		= nxp_c45_get_strings,
+		.get_stats		= nxp_c45_get_stats,
+		.cable_test_start	= nxp_c45_cable_test_start,
+		.cable_test_get_status	= nxp_c45_cable_test_get_status,
+		.set_loopback		= genphy_c45_loopback,
+		.get_sqi		= nxp_c45_get_sqi,
+		.get_sqi_max		= nxp_c45_get_sqi_max,
+		.remove			= nxp_c45_remove,
+		.match_phy_device	= tja1121_match_phy_device,
 	},
 };
 

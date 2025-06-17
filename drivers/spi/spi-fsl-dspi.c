@@ -24,6 +24,7 @@
 
 #define SPI_MCR				0x00
 #define SPI_MCR_HOST			BIT(31)
+#define SPI_MCR_MTFE			BIT(26)
 #define SPI_MCR_PCSIS(x)		((x) << 16)
 #define SPI_MCR_CLR_TXF			BIT(11)
 #define SPI_MCR_CLR_RXF			BIT(10)
@@ -35,8 +36,9 @@
 #define SPI_TCR				0x08
 #define SPI_TCR_GET_TCNT(x)		(((x) & GENMASK(31, 16)) >> 16)
 
-#define SPI_CTAR(x)			(0x0c + (((x) & GENMASK(1, 0)) * 4))
+#define SPI_CTAR(x)			(0x0c + (((x) & GENMASK(2, 0)) * 4))
 #define SPI_CTAR_FMSZ(x)		(((x) << 27) & GENMASK(30, 27))
+#define SPI_CTAR_DBR			BIT(31)
 #define SPI_CTAR_CPOL			BIT(26)
 #define SPI_CTAR_CPHA			BIT(25)
 #define SPI_CTAR_LSBFE			BIT(24)
@@ -89,16 +91,13 @@
 
 #define SPI_POPR			0x38
 
-#define SPI_TXFR0			0x3c
-#define SPI_TXFR1			0x40
-#define SPI_TXFR2			0x44
-#define SPI_TXFR3			0x48
-#define SPI_RXFR0			0x7c
-#define SPI_RXFR1			0x80
-#define SPI_RXFR2			0x84
-#define SPI_RXFR3			0x88
+/* Transmit FIFO TXFR */
+#define SPI_TXFR(x)			(0x3c + ((x) * 4))
 
-#define SPI_CTARE(x)			(0x11c + (((x) & GENMASK(1, 0)) * 4))
+/* Receive FIFO (RXFR) */
+#define SPI_RXFR(x)			(0x7c + ((x) * 4))
+
+#define SPI_CTARE(x)			(0x11c + (((x) & GENMASK(2, 0)) * 4))
 #define SPI_CTARE_FMSZE(x)		(((x) & 0x1) << 16)
 #define SPI_CTARE_DTCP(x)		((x) & 0x7ff)
 
@@ -108,6 +107,11 @@
 #define SPI_FRAME_EBITS(bits)		SPI_CTARE_FMSZE(((bits) - 1) >> 4)
 
 #define DMA_COMPLETION_TIMEOUT		msecs_to_jiffies(3000)
+
+#define SPI_25MHZ					25000000
+
+/* The maximum that edma can transfer once.*/
+#define SPI_DMA_BUFFER_SIZE	(GENMASK(14, 0) * DMA_SLAVE_BUSWIDTH_4_BYTES)
 
 struct chip_data {
 	u32			ctar_val;
@@ -135,6 +139,8 @@ enum {
 	LX2160A,
 	MCF5441X,
 	VF610,
+	S32CC,
+	S32CC_TARGET,
 };
 
 static const struct fsl_dspi_devtype_data devtype_data[] = {
@@ -192,6 +198,16 @@ static const struct fsl_dspi_devtype_data devtype_data[] = {
 		.max_clock_factor	= 8,
 		.fifo_size		= 16,
 	},
+	[S32CC] = {
+		.trans_mode		= DSPI_XSPI_MODE,
+		.max_clock_factor	= 1,
+		.fifo_size		= 5,
+	},
+	[S32CC_TARGET] = {
+		.trans_mode		= DSPI_DMA_MODE,
+		.max_clock_factor	= 1,
+		.fifo_size		= 5,
+	},
 };
 
 struct fsl_dspi_dma {
@@ -206,6 +222,7 @@ struct fsl_dspi_dma {
 	dma_addr_t				rx_dma_phys;
 	struct completion			cmd_rx_complete;
 	struct dma_async_tx_descriptor		*rx_desc;
+	unsigned int				dma_bufsize;
 };
 
 struct fsl_dspi {
@@ -214,9 +231,9 @@ struct fsl_dspi {
 
 	struct regmap				*regmap;
 	struct regmap				*regmap_pushr;
-	int					irq;
+	int						irq;
 	struct clk				*clk;
-
+	bool					mtf_enabled;
 	struct spi_transfer			*cur_transfer;
 	struct spi_message			*cur_msg;
 	struct chip_data			*cur_chip;
@@ -246,6 +263,14 @@ struct fsl_dspi {
 	void (*host_to_dev)(struct fsl_dspi *dspi, u32 *txdata);
 	void (*dev_to_host)(struct fsl_dspi *dspi, u32 rxdata);
 };
+
+static int dspi_init(struct fsl_dspi *dspi);
+
+static inline bool is_s32cc_dspi(struct fsl_dspi *data)
+{
+	return data->devtype_data == &devtype_data[S32CC] ||
+		data->devtype_data == &devtype_data[S32CC_TARGET];
+}
 
 static void dspi_native_host_to_dev(struct fsl_dspi *dspi, u32 *txdata)
 {
@@ -464,7 +489,13 @@ static int dspi_dma_xfer(struct fsl_dspi *dspi)
 	struct spi_message *message = dspi->cur_msg;
 	struct device *dev = &dspi->pdev->dev;
 	int ret = 0;
+	int max_words_per_buffer = dspi->dma->dma_bufsize /
+				   DMA_SLAVE_BUSWIDTH_4_BYTES;
 
+	if (spi_controller_is_target(dspi->ctlr) &&
+			dspi->len / dspi->oper_word_size > max_words_per_buffer)
+		dev_warn(dev, "Current message has more than %d words. Underrun may occur.\n",
+				max_words_per_buffer);
 	/*
 	 * dspi->len gets decremented by dspi_pop_tx_pushr in
 	 * dspi_next_xfer_dma_submit
@@ -474,8 +505,8 @@ static int dspi_dma_xfer(struct fsl_dspi *dspi)
 		dspi_setup_accel(dspi);
 
 		dspi->words_in_flight = dspi->len / dspi->oper_word_size;
-		if (dspi->words_in_flight > dspi->devtype_data->fifo_size)
-			dspi->words_in_flight = dspi->devtype_data->fifo_size;
+		if (dspi->words_in_flight > max_words_per_buffer)
+			dspi->words_in_flight = max_words_per_buffer;
 
 		message->actual_length += dspi->words_in_flight *
 					  dspi->oper_word_size;
@@ -492,7 +523,7 @@ static int dspi_dma_xfer(struct fsl_dspi *dspi)
 
 static int dspi_request_dma(struct fsl_dspi *dspi, phys_addr_t phy_addr)
 {
-	int dma_bufsize = dspi->devtype_data->fifo_size * 2;
+	unsigned int dma_bufsize = SPI_DMA_BUFFER_SIZE;
 	struct device *dev = &dspi->pdev->dev;
 	struct dma_slave_config cfg;
 	struct fsl_dspi_dma *dma;
@@ -550,6 +581,7 @@ static int dspi_request_dma(struct fsl_dspi *dspi, phys_addr_t phy_addr)
 		goto err_slave_config;
 	}
 
+	dma->dma_bufsize = dma_bufsize;
 	dspi->dma = dma;
 	init_completion(&dma->cmd_tx_complete);
 	init_completion(&dma->cmd_rx_complete);
@@ -575,27 +607,26 @@ err_tx_channel:
 
 static void dspi_release_dma(struct fsl_dspi *dspi)
 {
-	int dma_bufsize = dspi->devtype_data->fifo_size * 2;
 	struct fsl_dspi_dma *dma = dspi->dma;
 
 	if (!dma)
 		return;
 
 	if (dma->chan_tx) {
-		dma_free_coherent(dma->chan_tx->device->dev, dma_bufsize,
+		dma_free_coherent(dma->chan_tx->device->dev, dma->dma_bufsize,
 				  dma->tx_dma_buf, dma->tx_dma_phys);
 		dma_release_channel(dma->chan_tx);
 	}
 
 	if (dma->chan_rx) {
-		dma_free_coherent(dma->chan_rx->device->dev, dma_bufsize,
+		dma_free_coherent(dma->chan_rx->device->dev, dma->dma_bufsize,
 				  dma->rx_dma_buf, dma->rx_dma_phys);
 		dma_release_channel(dma->chan_rx);
 	}
 }
 
 static void hz_to_spi_baud(char *pbr, char *br, int speed_hz,
-			   unsigned long clkrate)
+			   unsigned long clkrate, bool mtf_enabled)
 {
 	/* Valid baud rate pre-scaler values */
 	int pbr_tbl[4] = {2, 3, 5, 7};
@@ -604,7 +635,7 @@ static void hz_to_spi_baud(char *pbr, char *br, int speed_hz,
 			256,	512,	1024,	2048,
 			4096,	8192,	16384,	32768 };
 	int scale_needed, scale, minscale = INT_MAX;
-	int i, j;
+	int i, j, dbr = 1;
 
 	scale_needed = clkrate / speed_hz;
 	if (clkrate % speed_hz)
@@ -612,7 +643,11 @@ static void hz_to_spi_baud(char *pbr, char *br, int speed_hz,
 
 	for (i = 0; i < ARRAY_SIZE(brs); i++)
 		for (j = 0; j < ARRAY_SIZE(pbr_tbl); j++) {
-			scale = brs[i] * pbr_tbl[j];
+			if (!mtf_enabled)
+				scale = brs[i] * pbr_tbl[j];
+			else
+				scale = (brs[i] * pbr_tbl[j]) / (1 + dbr);
+
 			if (scale >= scale_needed) {
 				if (scale < minscale) {
 					minscale = scale;
@@ -746,8 +781,11 @@ static void dspi_setup_accel(struct fsl_dspi *dspi)
 	struct spi_transfer *xfer = dspi->cur_transfer;
 	bool odd = !!(dspi->len & 1);
 
-	/* No accel for frames not multiple of 8 bits at the moment */
-	if (xfer->bits_per_word % 8)
+	/* No accel for DMA transfers or for frames not multiple of 8 bits
+	 * at the moment
+	 */
+	if (dspi->devtype_data->trans_mode == DSPI_DMA_MODE ||
+			xfer->bits_per_word % 8)
 		goto no_accel;
 
 	if (!odd && dspi->len <= dspi->devtype_data->fifo_size * 2) {
@@ -1018,6 +1056,20 @@ static int dspi_transfer_one_message(struct spi_controller *ctlr,
 	return status;
 }
 
+static int dspi_set_mtf(struct fsl_dspi *dspi)
+{
+	if (spi_controller_is_target(dspi->ctlr))
+		return 0;
+
+	if (dspi->mtf_enabled)
+		regmap_update_bits(dspi->regmap, SPI_MCR, SPI_MCR_MTFE,
+				   SPI_MCR_MTFE);
+	else
+		regmap_update_bits(dspi->regmap, SPI_MCR, SPI_MCR_MTFE, 0);
+
+	return 0;
+}
+
 static int dspi_setup(struct spi_device *spi)
 {
 	struct fsl_dspi *dspi = spi_controller_get_devdata(spi->controller);
@@ -1076,7 +1128,15 @@ static int dspi_setup(struct spi_device *spi)
 		cs_sck_delay, sck_cs_delay);
 
 	clkrate = clk_get_rate(dspi->clk);
-	hz_to_spi_baud(&pbr, &br, spi->max_speed_hz, clkrate);
+
+	if (is_s32cc_dspi(dspi) && spi->max_speed_hz > SPI_25MHZ)
+		dspi->mtf_enabled = true;
+	else
+		dspi->mtf_enabled = false;
+
+	dspi_set_mtf(dspi);
+
+	hz_to_spi_baud(&pbr, &br, spi->max_speed_hz, clkrate, dspi->mtf_enabled);
 
 	/* Set PCS to SCK delay scale values */
 	ns_delay_scale(&pcssck, &cssck, cs_sck_delay, clkrate);
@@ -1097,6 +1157,9 @@ static int dspi_setup(struct spi_device *spi)
 				  SPI_CTAR_ASC(asc) |
 				  SPI_CTAR_PBR(pbr) |
 				  SPI_CTAR_BR(br);
+
+		if (dspi->mtf_enabled)
+			chip->ctar_val |= SPI_CTAR_DBR;
 
 		if (spi->mode & SPI_LSB_FIRST)
 			chip->ctar_val |= SPI_CTAR_LSBFE;
@@ -1151,6 +1214,9 @@ static const struct of_device_id fsl_dspi_dt_ids[] = {
 	}, {
 		.compatible = "fsl,lx2160a-dspi",
 		.data = &devtype_data[LX2160A],
+	}, {
+		.compatible = "nxp,s32cc-dspi",
+		.data = &devtype_data[S32CC],
 	},
 	{ /* sentinel */ }
 };
@@ -1182,6 +1248,15 @@ static int dspi_resume(struct device *dev)
 	if (ret)
 		return ret;
 	spi_controller_resume(dspi->ctlr);
+
+	ret = dspi_init(dspi);
+	if (ret) {
+		dev_err(dev, "failed to initialize dspi during resume\n");
+		return ret;
+	}
+
+	dspi_set_mtf(dspi);
+
 	if (dspi->irq)
 		enable_irq(dspi->irq);
 
@@ -1194,9 +1269,18 @@ static SIMPLE_DEV_PM_OPS(dspi_pm, dspi_suspend, dspi_resume);
 static const struct regmap_range dspi_yes_ranges[] = {
 	regmap_reg_range(SPI_MCR, SPI_MCR),
 	regmap_reg_range(SPI_TCR, SPI_CTAR(3)),
-	regmap_reg_range(SPI_SR, SPI_TXFR3),
-	regmap_reg_range(SPI_RXFR0, SPI_RXFR3),
+	regmap_reg_range(SPI_SR, SPI_TXFR(3)),
+	regmap_reg_range(SPI_RXFR(0), SPI_RXFR(3)),
 	regmap_reg_range(SPI_CTARE(0), SPI_CTARE(3)),
+	regmap_reg_range(SPI_SREX, SPI_SREX),
+};
+
+static const struct regmap_range s32cc_dspi_yes_ranges[] = {
+	regmap_reg_range(SPI_MCR, SPI_MCR),
+	regmap_reg_range(SPI_TCR, SPI_CTAR(5)),
+	regmap_reg_range(SPI_SR, SPI_TXFR(4)),
+	regmap_reg_range(SPI_RXFR(0), SPI_RXFR(4)),
+	regmap_reg_range(SPI_CTARE(0), SPI_CTARE(5)),
 	regmap_reg_range(SPI_SREX, SPI_SREX),
 };
 
@@ -1205,10 +1289,15 @@ static const struct regmap_access_table dspi_access_table = {
 	.n_yes_ranges	= ARRAY_SIZE(dspi_yes_ranges),
 };
 
+static const struct regmap_access_table s32cc_dspi_access_table = {
+	.yes_ranges	= s32cc_dspi_yes_ranges,
+	.n_yes_ranges	= ARRAY_SIZE(s32cc_dspi_yes_ranges),
+};
+
 static const struct regmap_range dspi_volatile_ranges[] = {
 	regmap_reg_range(SPI_MCR, SPI_TCR),
 	regmap_reg_range(SPI_SR, SPI_SR),
-	regmap_reg_range(SPI_PUSHR, SPI_RXFR3),
+	regmap_reg_range(SPI_PUSHR, SPI_RXFR(4)),
 };
 
 static const struct regmap_access_table dspi_volatile_table = {
@@ -1216,20 +1305,10 @@ static const struct regmap_access_table dspi_volatile_table = {
 	.n_yes_ranges	= ARRAY_SIZE(dspi_volatile_ranges),
 };
 
-static const struct regmap_config dspi_regmap_config = {
-	.reg_bits	= 32,
-	.val_bits	= 32,
-	.reg_stride	= 4,
-	.max_register	= 0x88,
-	.volatile_table	= &dspi_volatile_table,
-	.rd_table	= &dspi_access_table,
-	.wr_table	= &dspi_access_table,
-};
-
 static const struct regmap_range dspi_xspi_volatile_ranges[] = {
 	regmap_reg_range(SPI_MCR, SPI_TCR),
 	regmap_reg_range(SPI_SR, SPI_SR),
-	regmap_reg_range(SPI_PUSHR, SPI_RXFR3),
+	regmap_reg_range(SPI_PUSHR, SPI_RXFR(4)),
 	regmap_reg_range(SPI_SREX, SPI_SREX),
 };
 
@@ -1238,8 +1317,34 @@ static const struct regmap_access_table dspi_xspi_volatile_table = {
 	.n_yes_ranges	= ARRAY_SIZE(dspi_xspi_volatile_ranges),
 };
 
-static const struct regmap_config dspi_xspi_regmap_config[] = {
-	{
+enum {
+	DSPI_REGMAP,
+	S32CC_DSPI_REGMAP,
+	DSPI_XSPI_REGMAP,
+	S32CC_DSPI_XSPI_REGMAP,
+	DSPI_PUSHR
+};
+
+static const struct regmap_config dspi_regmap_config[] = {
+	[DSPI_REGMAP] = {
+		.reg_bits	= 32,
+		.val_bits	= 32,
+		.reg_stride	= 4,
+		.max_register	= 0x8C,
+		.volatile_table	= &dspi_volatile_table,
+		.wr_table	= &dspi_access_table,
+		.rd_table	= &dspi_access_table,
+	},
+	[S32CC_DSPI_REGMAP] = {
+		.reg_bits	= 32,
+		.val_bits	= 32,
+		.reg_stride	= 4,
+		.max_register	= 0x8C,
+		.volatile_table	= &dspi_volatile_table,
+		.wr_table	= &s32cc_dspi_access_table,
+		.rd_table	= &s32cc_dspi_access_table,
+	},
+	[DSPI_XSPI_REGMAP] = {
 		.reg_bits	= 32,
 		.val_bits	= 32,
 		.reg_stride	= 4,
@@ -1248,7 +1353,16 @@ static const struct regmap_config dspi_xspi_regmap_config[] = {
 		.rd_table	= &dspi_access_table,
 		.wr_table	= &dspi_access_table,
 	},
-	{
+	[S32CC_DSPI_XSPI_REGMAP] = {
+		.reg_bits	= 32,
+		.val_bits	= 32,
+		.reg_stride	= 4,
+		.max_register	= 0x13c,
+		.volatile_table	= &dspi_xspi_volatile_table,
+		.wr_table	= &s32cc_dspi_access_table,
+		.rd_table	= &s32cc_dspi_access_table,
+	},
+	[DSPI_PUSHR] = {
 		.name		= "pushr",
 		.reg_bits	= 16,
 		.val_bits	= 16,
@@ -1329,7 +1443,10 @@ static int dspi_probe(struct platform_device *pdev)
 	if (!dspi)
 		return -ENOMEM;
 
-	ctlr = spi_alloc_host(&pdev->dev, 0);
+	if (of_property_read_bool(np, "spi-slave"))
+		ctlr = spi_alloc_target(&pdev->dev, 0);
+	else
+		ctlr = spi_alloc_host(&pdev->dev, 0);
 	if (!ctlr)
 		return -ENOMEM;
 
@@ -1378,6 +1495,9 @@ static int dspi_probe(struct platform_device *pdev)
 			goto out_ctlr_put;
 		}
 
+		if (ctlr->target && is_s32cc_dspi(dspi))
+			dspi->devtype_data = &devtype_data[S32CC_TARGET];
+
 		big_endian = of_device_is_big_endian(np);
 	}
 	if (big_endian) {
@@ -1399,10 +1519,22 @@ static int dspi_probe(struct platform_device *pdev)
 		goto out_ctlr_put;
 	}
 
-	if (dspi->devtype_data->trans_mode == DSPI_XSPI_MODE)
-		regmap_config = &dspi_xspi_regmap_config[0];
-	else
-		regmap_config = &dspi_regmap_config;
+	if (is_s32cc_dspi(dspi)) {
+		if (dspi->devtype_data->trans_mode == DSPI_XSPI_MODE)
+			regmap_config =
+				&dspi_regmap_config[S32CC_DSPI_XSPI_REGMAP];
+		else
+			regmap_config =
+				&dspi_regmap_config[S32CC_DSPI_REGMAP];
+	} else {
+		if (dspi->devtype_data->trans_mode == DSPI_XSPI_MODE)
+			regmap_config =
+				&dspi_regmap_config[DSPI_XSPI_REGMAP];
+		else
+			regmap_config =
+				&dspi_regmap_config[DSPI_REGMAP];
+	}
+
 	dspi->regmap = devm_regmap_init_mmio(&pdev->dev, base, regmap_config);
 	if (IS_ERR(dspi->regmap)) {
 		dev_err(&pdev->dev, "failed to init regmap: %ld\n",
@@ -1414,7 +1546,7 @@ static int dspi_probe(struct platform_device *pdev)
 	if (dspi->devtype_data->trans_mode == DSPI_XSPI_MODE) {
 		dspi->regmap_pushr = devm_regmap_init_mmio(
 			&pdev->dev, base + SPI_PUSHR,
-			&dspi_xspi_regmap_config[1]);
+			&dspi_regmap_config[DSPI_PUSHR]);
 		if (IS_ERR(dspi->regmap_pushr)) {
 			dev_err(&pdev->dev,
 				"failed to init pushr regmap: %ld\n",

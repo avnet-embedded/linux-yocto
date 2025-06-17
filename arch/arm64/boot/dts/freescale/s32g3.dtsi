@@ -1,24 +1,17 @@
-// SPDX-License-Identifier: (GPL-2.0+ OR BSD-3-Clause)
+// SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright 2021-2024 NXP
- *
- * Authors: Ghennadi Procopciuc <ghennadi.procopciuc@nxp.com>
- *          Ciprian Costea <ciprianmarian.costea@nxp.com>
- *          Andra-Teodora Ilie <andra.ilie@nxp.com>
+ * Copyright 2021-2023 NXP
  */
 
-#include <dt-bindings/interrupt-controller/arm-gic.h>
+/dts-v1/;
+#include "s32g.dtsi"
+
+/delete-node/ &gic;
 
 / {
 	compatible = "nxp,s32g3";
-	interrupt-parent = <&gic>;
-	#address-cells = <0x02>;
-	#size-cells = <0x02>;
 
 	cpus {
-		#address-cells = <1>;
-		#size-cells = <0>;
-
 		cpu-map {
 			cluster0 {
 				core0 {
@@ -62,7 +55,9 @@
 			compatible = "arm,cortex-a53";
 			reg = <0x0>;
 			enable-method = "psci";
-			clocks = <&dfs 0>;
+			clocks = <&dfs S32CC_SCMI_PERF_A53>;
+			next-level-cache = <&cluster0_l2>;
+			#cooling-cells = <2>;
 		};
 
 		cpu1: cpu@1 {
@@ -70,7 +65,9 @@
 			compatible = "arm,cortex-a53";
 			reg = <0x1>;
 			enable-method = "psci";
-			clocks = <&dfs 0>;
+			clocks = <&dfs S32CC_SCMI_PERF_A53>;
+			next-level-cache = <&cluster0_l2>;
+			#cooling-cells = <2>;
 		};
 
 		cpu2: cpu@2 {
@@ -78,7 +75,9 @@
 			compatible = "arm,cortex-a53";
 			reg = <0x2>;
 			enable-method = "psci";
-			clocks = <&dfs 0>;
+			clocks = <&dfs S32CC_SCMI_PERF_A53>;
+			next-level-cache = <&cluster0_l2>;
+			#cooling-cells = <2>;
 		};
 
 		cpu3: cpu@3 {
@@ -86,7 +85,9 @@
 			compatible = "arm,cortex-a53";
 			reg = <0x3>;
 			enable-method = "psci";
-			clocks = <&dfs 0>;
+			clocks = <&dfs S32CC_SCMI_PERF_A53>;
+			next-level-cache = <&cluster0_l2>;
+			#cooling-cells = <2>;
 		};
 
 		cpu4: cpu@100 {
@@ -94,7 +95,9 @@
 			compatible = "arm,cortex-a53";
 			reg = <0x100>;
 			enable-method = "psci";
-			clocks = <&dfs 0>;
+			clocks = <&dfs S32CC_SCMI_PERF_A53>;
+			next-level-cache = <&cluster1_l2>;
+			#cooling-cells = <2>;
 		};
 
 		cpu5: cpu@101 {
@@ -102,7 +105,9 @@
 			compatible = "arm,cortex-a53";
 			reg = <0x101>;
 			enable-method = "psci";
-			clocks = <&dfs 0>;
+			clocks = <&dfs S32CC_SCMI_PERF_A53>;
+			next-level-cache = <&cluster1_l2>;
+			#cooling-cells = <2>;
 		};
 
 		cpu6: cpu@102 {
@@ -110,7 +115,9 @@
 			compatible = "arm,cortex-a53";
 			reg = <0x102>;
 			enable-method = "psci";
-			clocks = <&dfs 0>;
+			clocks = <&dfs S32CC_SCMI_PERF_A53>;
+			next-level-cache = <&cluster1_l2>;
+			#cooling-cells = <2>;
 		};
 
 		cpu7: cpu@103 {
@@ -118,166 +125,153 @@
 			compatible = "arm,cortex-a53";
 			reg = <0x103>;
 			enable-method = "psci";
-			clocks = <&dfs 0>;
+			clocks = <&dfs S32CC_SCMI_PERF_A53>;
+			next-level-cache = <&cluster1_l2>;
+			#cooling-cells = <2>;
 		};
 	};
 
-	firmware {
-		scmi: scmi {
-			compatible = "arm,scmi-smc";
-			shmem = <&scmi_shmem>;
-			arm,smc-id = <0xc20000fe>;
-			#address-cells = <1>;
-			#size-cells = <0>;
-
-			dfs: protocol@13 {
-				reg = <0x13>;
-				#clock-cells = <1>;
-			};
-
-			clks: protocol@14 {
-				reg = <0x14>;
-				#clock-cells = <1>;
-			};
-		};
-
-		psci: psci {
-			compatible = "arm,psci-1.0";
-			method = "smc";
-		};
-	};
-
-
-	pmu {
-		compatible = "arm,cortex-a53-pmu";
-		interrupts = <GIC_PPI 7 IRQ_TYPE_LEVEL_HIGH>;
-	};
-
-	reserved-memory  {
-		#address-cells = <2>;
-		#size-cells = <2>;
-		ranges;
-
-		scmi_shmem: shm@d0000000 {
-			compatible = "arm,scmi-shmem";
-			reg = <0x0 0xd0000000 0x0 0x80>;
-			no-map;
-		};
-	};
-
-	soc@0 {
-		compatible = "simple-bus";
-		#address-cells = <1>;
-		#size-cells = <1>;
-		ranges = <0 0 0 0x80000000>;
-
-		pinctrl: pinctrl@4009c240 {
-			compatible = "nxp,s32g2-siul2-pinctrl";
-				/* MSCR0-MSCR101 registers on siul2_0 */
-			reg = <0x4009c240 0x198>,
-				/* MSCR112-MSCR122 registers on siul2_1 */
-			      <0x44010400 0x2c>,
-				/* MSCR144-MSCR190 registers on siul2_1 */
-			      <0x44010480 0xbc>,
-				/* IMCR0-IMCR83 registers on siul2_0 */
-			      <0x4009ca40 0x150>,
-				/* IMCR119-IMCR397 registers on siul2_1 */
-			      <0x44010c1c 0x45c>,
-				/* IMCR430-IMCR495 registers on siul2_1 */
-			      <0x440110f8 0x108>;
-
-			jtag_pins: jtag-pins {
-				jtag-grp0 {
-					pinmux = <0x0>;
-					input-enable;
-					bias-pull-up;
-					slew-rate = <166>;
-				};
-
-				jtag-grp1 {
-					pinmux = <0x11>;
-					slew-rate = <166>;
-				};
-
-				jtag-grp2 {
-					pinmux = <0x40>;
-					input-enable;
-					bias-pull-down;
-					slew-rate = <166>;
-				};
-
-				jtag-grp3 {
-					pinmux = <0x23c0>,
-						 <0x23d0>,
-						 <0x2320>;
-				};
-
-				jtag-grp4 {
-					pinmux = <0x51>;
-					input-enable;
-					bias-pull-up;
-					slew-rate = <166>;
-				};
-			};
-		};
-
-		uart0: serial@401c8000 {
-			compatible = "nxp,s32g3-linflexuart",
-				     "fsl,s32v234-linflexuart";
-			reg = <0x401c8000 0x3000>;
-			interrupts = <GIC_SPI 82 IRQ_TYPE_EDGE_RISING>;
+	soc {
+		swt8: watchdog@40500000 {
+			compatible = "nxp,s32cc-wdt";
+			reg = <0x0 0x40500000 0x0 0x1000>;
+			clocks = <&clks S32CC_SCMI_CLK_SWT_COUNTER>;
+			clock-names = "swt";
 			status = "disabled";
 		};
 
-		uart1: serial@401cc000 {
-			compatible = "nxp,s32g3-linflexuart",
-				     "fsl,s32v234-linflexuart";
-			reg = <0x401cc000 0x3000>;
-			interrupts = <GIC_SPI 83 IRQ_TYPE_EDGE_RISING>;
+		swt9: watchdog@40504000 {
+			compatible = "nxp,s32cc-wdt";
+			reg = <0x0 0x40504000 0x0 0x1000>;
+			clocks = <&clks S32CC_SCMI_CLK_SWT_COUNTER>;
+			clock-names = "swt";
 			status = "disabled";
 		};
 
-		uart2: serial@402bc000 {
-			compatible = "nxp,s32g3-linflexuart",
-				     "fsl,s32v234-linflexuart";
-			reg = <0x402bc000 0x3000>;
-			interrupts = <GIC_SPI 84 IRQ_TYPE_EDGE_RISING>;
+		swt10: watchdog@40508000 {
+			compatible = "nxp,s32cc-wdt";
+			reg = <0x0 0x40508000 0x0 0x1000>;
+			clocks = <&clks S32CC_SCMI_CLK_SWT_COUNTER>;
+			clock-names = "swt";
 			status = "disabled";
 		};
 
-		usdhc0: mmc@402f0000 {
-			compatible = "nxp,s32g3-usdhc",
-				     "nxp,s32g2-usdhc";
-			reg = <0x402f0000 0x1000>;
-			interrupts = <GIC_SPI 36 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&clks 32>,
-				 <&clks 31>,
-				 <&clks 33>;
-			clock-names = "ipg", "ahb", "per";
+		swt11: watchdog@4050c000 {
+			compatible = "nxp,s32cc-wdt";
+			reg = <0x0 0x4050c000 0x0 0x1000>;
+			clocks = <&clks S32CC_SCMI_CLK_SWT_COUNTER>;
+			clock-names = "swt";
+			status = "disabled";
+		};
+
+		stm8: stm@40520000 {
+			compatible = "nxp,s32cc-stm-global";
+			reg = <0x0 0x40520000 0x0 0x3000>;
+			clocks = <&clks S32CC_SCMI_CLK_STM_MODULE>;
+			clock-names = "stm";
+			status = "disabled";
+		};
+
+		stm9: stm@40524000 {
+			compatible = "nxp,s32cc-stm-global";
+			reg = <0x0 0x40524000 0x0 0x3000>;
+			clocks = <&clks S32CC_SCMI_CLK_STM_MODULE>;
+			clock-names = "stm";
+			status = "disabled";
+		};
+
+		stm10: stm@40528000 {
+			compatible = "nxp,s32cc-stm-global";
+			reg = <0x0 0x40528000 0x0 0x3000>;
+			clocks = <&clks S32CC_SCMI_CLK_STM_MODULE>;
+			clock-names = "stm";
+			status = "disabled";
+		};
+
+		stm11: stm@4052c000 {
+			compatible = "nxp,s32cc-stm-global";
+			reg = <0x0 0x4052c000 0x0 0x3000>;
+			clocks = <&clks S32CC_SCMI_CLK_STM_MODULE>;
+			clock-names = "stm";
 			status = "disabled";
 		};
 
 		gic: interrupt-controller@50800000 {
 			compatible = "arm,gic-v3";
 			#interrupt-cells = <3>;
+			#address-cells = <2>;
+			#size-cells = <2>;
 			interrupt-controller;
-			reg = <0x50800000 0x10000>,
-			      <0x50900000 0x200000>,
-			      <0x50400000 0x2000>,
-			      <0x50410000 0x2000>,
-			      <0x50420000 0x2000>;
+			reg = <0 0x50800000 0 0x10000>,
+				<0 0x50900000 0 0x200000>,
+				<0 0x50400000 0 0x2000>,
+				<0 0x50410000 0 0x2000>,
+				<0 0x50420000 0 0x2000>;
 			interrupts = <GIC_PPI 9 IRQ_TYPE_LEVEL_HIGH>;
+
+			msi-controller;
+			/* GIC interrupts between 167 and 182 can be used as MBIs. */
+			mbi-ranges = <167 16>;
 		};
 	};
+};
 
-	timer {
-		compatible = "arm,armv8-timer";
-		interrupt-parent = <&gic>;
-		interrupts = <GIC_PPI 13 IRQ_TYPE_LEVEL_LOW>, /* sec-phys */
-			     <GIC_PPI 14 IRQ_TYPE_LEVEL_LOW>, /* phys */
-			     <GIC_PPI 11 IRQ_TYPE_LEVEL_LOW>, /* virt */
-			     <GIC_PPI 10 IRQ_TYPE_LEVEL_LOW>, /* hyp-phys */
-			     <GIC_PPI 12 IRQ_TYPE_LEVEL_LOW>; /* hyp-virt */
-		arm,no-tick-in-suspend;
-	};
+&mscm0 {
+	/* CPU2CPU interrupts */
+	interrupts = <GIC_SPI 1 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 2 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 3 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 22 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 23 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 69 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 164 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 165 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 166 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 167 IRQ_TYPE_LEVEL_HIGH>,
+				<GIC_SPI 168 IRQ_TYPE_LEVEL_HIGH>;
+};
+
+&usbmisc {
+	compatible = "nxp,s32g3-usbmisc";
+};
+
+&llce_dte_sram {
+	reg = <0x0 0x43000000 0x0 0x4000>;
+};
+
+&llce_ppe_rx_sram {
+	reg = <0x0 0x43100000 0x0 0x18000>;
+};
+
+&llce_frpe_sram {
+	reg = <0x0 0x43300000 0x0 0x40000>;
+};
+
+&pcie0 {
+	pcie_device_id = <0x4300>;
+};
+
+&pcie1 {
+	pcie_device_id = <0x4300>;
+};
+
+&qspi {
+	compatible = "nxp,s32g3-qspi";
+	pinctrl-names = "default";
+	pinctrl-0 = <&qspi_pins_200mhz_slow_sre>;
+};
+
+&tmu {
+	fsl,tmu-range = <0xe4 0xe9 0x100 0x12a 0x18e 0x193>;
+	fsl,tmu-calibration = <0 0x1f  0x7c0
+			       1 0x28  0x7c0
+			       2 0x53  0x0
+			       3 0xa2  0x0
+			       4 0x162 0x1f
+			       5 0x16c 0x1f>;
+};
+
+&llce_spi2 {
+	nxp,reset-at-underrun;
 };

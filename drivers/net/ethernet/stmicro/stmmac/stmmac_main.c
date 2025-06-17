@@ -324,6 +324,10 @@ static void stmmac_clk_csr_set(struct stmmac_priv *priv)
 			priv->clk_csr = STMMAC_CSR_150_250M;
 		else if ((clk_rate >= CSR_F_250M) && (clk_rate <= CSR_F_300M))
 			priv->clk_csr = STMMAC_CSR_250_300M;
+		else if ((clk_rate >= CSR_F_300M) && (clk_rate < CSR_F_500M))
+			priv->clk_csr = STMMAC_CSR_300_500M;
+		else if ((clk_rate >= CSR_F_500M) && (clk_rate < CSR_F_800M))
+			priv->clk_csr = STMMAC_CSR_500_800M;
 	}
 
 	if (priv->plat->flags & STMMAC_FLAG_HAS_SUN8I) {
@@ -881,7 +885,8 @@ static int stmmac_init_ptp(struct stmmac_priv *priv)
 	if (priv->plat->ptp_clk_freq_config)
 		priv->plat->ptp_clk_freq_config(priv);
 
-	ret = stmmac_init_tstamp_counter(priv, STMMAC_HWTS_ACTIVE);
+	ret = stmmac_init_tstamp_counter(priv, STMMAC_HWTS_ACTIVE |
+			(priv->plat->ext_sys_time ? PTP_TCR_ESTI : 0));
 	if (ret)
 		return ret;
 
@@ -3040,8 +3045,10 @@ static int stmmac_init_dma_engine(struct stmmac_priv *priv)
 	/* DMA Configuration */
 	stmmac_dma_init(priv, priv->ioaddr, priv->plat->dma_cfg);
 
-	if (priv->plat->axi)
+	if (priv->plat->axi) {
 		stmmac_axi(priv, priv->ioaddr, priv->plat->axi);
+		stmmac_axi4_cc(priv, priv->ioaddr, priv->plat->axi);
+	}
 
 	/* DMA CSR Channel configuration */
 	for (chan = 0; chan < dma_csr_ch; chan++) {
@@ -3978,6 +3985,8 @@ static int __stmmac_open(struct net_device *dev,
 	}
 
 	stmmac_init_coalesce(priv);
+
+	stmmac_restore_hw_vlan_rx_fltr(priv, dev, priv->hw);
 
 	phylink_start(priv->phylink);
 	/* We may have called phylink_speed_down before */
@@ -5450,6 +5459,7 @@ static int stmmac_rx(struct stmmac_priv *priv, int limit, u32 queue)
 	}
 	while (count < limit) {
 		unsigned int buf1_len = 0, buf2_len = 0;
+		unsigned int fcs_len_in_buf1, fcs_len_in_buf2;
 		enum pkt_hash_types hash_type;
 		struct stmmac_rx_buffer *buf;
 		struct dma_desc *np, *p;
@@ -5528,15 +5538,23 @@ read_again:
 		buf2_len = stmmac_rx_buf2_len(priv, p, status, len);
 		len += buf2_len;
 
-		/* ACS is disabled; strip manually. */
-		if (likely(!(status & rx_not_ls))) {
-			if (buf2_len) {
-				buf2_len -= ETH_FCS_LEN;
-				len -= ETH_FCS_LEN;
-			} else if (buf1_len) {
-				buf1_len -= ETH_FCS_LEN;
-				len -= ETH_FCS_LEN;
-			}
+		/* ACS is set; GMAC core strips PAD/FCS for IEEE 802.3
+		 * Type frames (LLC/LLC-SNAP)
+		 *
+		 * llc_snap is never checked in GMAC >= 4, so this ACS
+		 * feature is always disabled and packets need to be
+		 * stripped manually.
+		 */
+		if (likely(!(status & rx_not_ls)) &&
+		    (likely(priv->synopsys_id >= DWMAC_CORE_4_00) ||
+		     unlikely(status != llc_snap))) {
+			fcs_len_in_buf2 = min_t(unsigned int, ETH_FCS_LEN, buf2_len);
+			fcs_len_in_buf1 = min_t(unsigned int,
+						ETH_FCS_LEN - fcs_len_in_buf2, buf1_len);
+
+			buf2_len -= fcs_len_in_buf2;
+			buf1_len -= fcs_len_in_buf1;
+			len -= ETH_FCS_LEN;
 		}
 
 		if (!skb) {
@@ -8012,16 +8030,6 @@ int stmmac_resume(struct device *dev)
 	}
 
 	rtnl_lock();
-	if (device_may_wakeup(priv->device) && priv->plat->pmt) {
-		phylink_resume(priv->phylink);
-	} else {
-		phylink_resume(priv->phylink);
-		if (device_may_wakeup(priv->device))
-			phylink_speed_up(priv->phylink);
-	}
-	rtnl_unlock();
-
-	rtnl_lock();
 	mutex_lock(&priv->lock);
 
 	stmmac_reset_queues_param(priv);
@@ -8030,6 +8038,15 @@ int stmmac_resume(struct device *dev)
 	stmmac_clear_descriptors(priv, &priv->dma_conf);
 
 	stmmac_hw_setup(ndev, false);
+
+	if (device_may_wakeup(priv->device) && priv->plat->pmt) {
+		phylink_resume(priv->phylink);
+	} else {
+		phylink_resume(priv->phylink);
+		if (device_may_wakeup(priv->device))
+			phylink_speed_up(priv->phylink);
+	}
+
 	stmmac_init_coalesce(priv);
 	stmmac_set_rx_mode(ndev);
 
