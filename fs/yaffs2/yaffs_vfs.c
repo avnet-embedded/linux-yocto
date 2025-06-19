@@ -561,7 +561,7 @@ static int yaffs_write_begin(struct file *filp, struct address_space *mapping,
 			     struct page **pagep, void **fsdata)
 #endif
 {
-	struct page *pg = NULL;
+	__maybe_unused struct page *pg = NULL;
 	pgoff_t index = pos >> PAGE_CACHE_SHIFT;
 
 	int ret = 0;
@@ -570,20 +570,20 @@ static int yaffs_write_begin(struct file *filp, struct address_space *mapping,
 	/* Get a page */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 19, 0)
 	*foliop = __filemap_get_folio(mapping, index, FGP_WRITEBEGIN,
-+                       mapping_gfp_mask(mapping));
+			mapping_gfp_mask(mapping));
 #elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
 	pg = grab_cache_page_write_begin(mapping, index, flags);
 #else
 	pg = __grab_cache_page(mapping, index);
 #endif
 
-	if (!*foliop) {
-		ret = -ENOMEM;
+	if (IS_ERR(*foliop)) {
+		ret = PTR_ERR(*foliop);
 		goto out;
 	}
 	yaffs_trace(YAFFS_TRACE_OS,
 		"start yaffs_write_begin index %d(%x) uptodate %d",
-		(int)index, (int)index, Page_Uptodate(pg) ? 1 : 0);
+		(int)index, (int)index, folio_test_uptodate(*foliop) ? 1 : 0);
 
 	/* Get fs space */
 	space_held = yaffs_hold_space(filp);
@@ -595,8 +595,8 @@ static int yaffs_write_begin(struct file *filp, struct address_space *mapping,
 
 	/* Update page if required */
 
-	if (!Page_Uptodate(pg))
-		ret = yaffs_readpage_nolock(filp, pg);
+	if (folio_test_uptodate(*foliop))
+		ret = yaffs_readpage_unlock(filp, &(*foliop)->page);
 
 	if (ret)
 		goto out;
@@ -611,9 +611,9 @@ out:
 		"end yaffs_write_begin fail returning %d", ret);
 	if (space_held)
 		yaffs_release_space(filp);
-	if (pg) {
-		unlock_page(pg);
-		page_cache_release(pg);
+	if (!IS_ERR(*foliop)) {
+		folio_unlock(*foliop);
+		folio_put(*foliop);
 	}
 	return ret;
 }
