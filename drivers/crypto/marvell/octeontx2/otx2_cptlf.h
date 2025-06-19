@@ -44,6 +44,8 @@
 #define OTX2_CPT_INST_GRP_QLEN_BYTES                                           \
 		((OTX2_CPT_SIZE_DIV40 + OTX2_CPT_EXTRA_SIZE_DIV40) * 16)
 
+#define OTX2_CPT_QUEUE_HI_PRI(num_bits) ((1U << (num_bits)) - 1)
+
 /* CPT FC length in bytes */
 #define OTX2_CPT_Q_FC_LEN 128
 
@@ -55,10 +57,6 @@
 
 /* Maximum LFs supported in OcteonTX2 for CPT */
 #define OTX2_CPT_MAX_LFS_NUM    64
-
-/* Queue priority */
-#define OTX2_CPT_QUEUE_HI_PRIO  0x1
-#define OTX2_CPT_QUEUE_LOW_PRIO 0x0
 
 enum otx2_cptlf_state {
 	OTX2_CPTLF_IN_RESET,
@@ -105,18 +103,27 @@ struct cpt_hw_ops {
 			      gfp_t gfp);
 };
 
+#define LMTLINE_SIZE  128
+#define LMTLINE_ALIGN 128
+struct otx2_lmt_info {
+	void *base;
+	dma_addr_t iova;
+	u32 size;
+	u8 align;
+};
+
 struct otx2_cptlfs_info {
 	/* Registers start address of VF/PF LFs are attached to */
 	void __iomem *reg_base;
-#define LMTLINE_SIZE  128
-	void __iomem *lmt_base;
+	struct otx2_lmt_info lmt_info;
 	struct pci_dev *pdev;   /* Device LFs are attached to */
 	struct otx2_cptlf_info lf[OTX2_CPT_MAX_LFS_NUM];
 	struct otx2_mbox *mbox;
 	struct cpt_hw_ops *ops;
 	u8 are_lfs_attached;	/* Whether CPT LFs are attached */
 	u8 lfs_num;		/* Number of CPT LFs */
-	u8 kcrypto_eng_grp_num;	/* Kernel crypto engine group number */
+	u8 kcrypto_se_eng_grp_num; /* Crypto symmetric engine group number */
+	u8 kcrypto_ae_eng_grp_num; /* Crypto asymmetric engine group number */
 	u8 kvf_limits;          /* Kernel crypto limits */
 	atomic_t state;         /* LF's state. started/reset */
 	int blkaddr;            /* CPT blkaddr: BLKADDR_CPT0/BLKADDR_CPT1 */
@@ -426,7 +433,7 @@ static inline void otx2_cptlf_set_dev_info(struct otx2_cptlfs_info *lfs,
 	lfs->blkaddr = blkaddr;
 }
 
-int otx2_cptlf_init(struct otx2_cptlfs_info *lfs, u8 eng_grp_msk, int pri,
+int otx2_cptlf_init(struct otx2_cptlfs_info *lfs, u8 eng_grp_msk, u8 pri,
 		    int lfs_num);
 void otx2_cptlf_shutdown(struct otx2_cptlfs_info *lfs);
 int otx2_cptlf_register_misc_interrupts(struct otx2_cptlfs_info *lfs);
@@ -435,5 +442,6 @@ void otx2_cptlf_unregister_misc_interrupts(struct otx2_cptlfs_info *lfs);
 void otx2_cptlf_unregister_done_interrupts(struct otx2_cptlfs_info *lfs);
 void otx2_cptlf_free_irqs_affinity(struct otx2_cptlfs_info *lfs);
 int otx2_cptlf_set_irqs_affinity(struct otx2_cptlfs_info *lfs);
+int otx2_cptlf_set_que_pri_msg(struct otx2_cptlfs_info *lfs, u8 pri);
 
 #endif /* __OTX2_CPTLF_H */

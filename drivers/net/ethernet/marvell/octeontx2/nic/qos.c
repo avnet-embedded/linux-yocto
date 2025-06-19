@@ -533,6 +533,7 @@ otx2_qos_sw_create_leaf_node(struct otx2_nic *pfvf,
 	err = otx2_qos_add_child_node(parent, node);
 	if (err) {
 		mutex_unlock(&pfvf->qos.qos_lock);
+		kfree(node);
 		return ERR_PTR(err);
 	}
 	mutex_unlock(&pfvf->qos.qos_lock);
@@ -1638,6 +1639,7 @@ static int otx2_qos_leaf_del_last(struct otx2_nic *pfvf, u16 classid, bool force
 	if (!node->is_static)
 		dwrr_del_node = true;
 
+	WRITE_ONCE(node->qid, OTX2_QOS_QID_INNER);
 	/* destroy the leaf node */
 	otx2_qos_disable_sq(pfvf, qid);
 	otx2_qos_destroy_node(pfvf, node);
@@ -1681,9 +1683,6 @@ static int otx2_qos_leaf_del_last(struct otx2_nic *pfvf, u16 classid, bool force
 		return err;
 	}
 	kfree(new_cfg);
-
-	/* update tx_real_queues */
-	otx2_qos_update_tx_netdev_queues(pfvf);
 
 	return 0;
 }
@@ -1730,6 +1729,18 @@ root_destroy:
 	/* Free resources allocated */
 	otx2_qos_root_destroy(pfvf);
 }
+
+bool otx2_is_qos_configured(struct otx2_nic *pfvf)
+{
+	struct otx2_qos_node *root;
+
+	root = otx2_sw_node_find(pfvf, OTX2_QOS_ROOT_CLASSID);
+	if (!root)
+		return false;
+
+	return true;
+}
+EXPORT_SYMBOL(otx2_is_qos_configured);
 
 int otx2_setup_tc_htb(struct net_device *ndev, struct tc_htb_qopt_offload *htb)
 {

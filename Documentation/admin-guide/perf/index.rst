@@ -13,11 +13,13 @@ Performance monitor support
    imx-ddr
    qcom_l2_pmu
    qcom_l3_pmu
+   mrvl-odyssey-tad-pmu
    starfive_starlink_pmu
    arm-ccn
    arm-cmn
    arm-ni
    xgene-pmu
+   mrvl-odyssey-ddr-pmu
    arm_dsu_pmu
    thunderx2-pmu
    alibaba_pmu

@@ -23,12 +23,14 @@
 #include <linux/spinlock.h>
 #include <linux/pm_runtime.h>
 #include <linux/of.h>
+#include <linux/of_address.h>
 #include <linux/coresight.h>
 #include <linux/amba/bus.h>
 #include <linux/platform_device.h>
 
 #include "coresight-priv.h"
 #include "coresight-tmc.h"
+#include "coresight-tmc-secure-etr.h"
 
 DEFINE_CORESIGHT_DEVLIST(etb_devs, "tmc_etb");
 DEFINE_CORESIGHT_DEVLIST(etf_devs, "tmc_etf");
@@ -55,8 +57,11 @@ void tmc_flush_and_stop(struct tmc_drvdata *drvdata)
 	u32 ffcr;
 
 	ffcr = readl_relaxed(drvdata->base + TMC_FFCR);
-	ffcr |= TMC_FFCR_STOP_ON_FLUSH;
-	writel_relaxed(ffcr, drvdata->base + TMC_FFCR);
+
+	if (!(drvdata->etr_quirks & CORESIGHT_QUIRK_ETR_NO_STOP_FLUSH)) {
+		ffcr |= TMC_FFCR_STOP_ON_FLUSH;
+		writel_relaxed(ffcr, drvdata->base + TMC_FFCR);
+	}
 	ffcr |= BIT(TMC_FFCR_FLUSHMAN_BIT);
 	writel_relaxed(ffcr, drvdata->base + TMC_FFCR);
 	/* Ensure flush completes */
@@ -65,7 +70,8 @@ void tmc_flush_and_stop(struct tmc_drvdata *drvdata)
 		"timeout while waiting for completion of Manual Flush\n");
 	}
 
-	tmc_wait_for_tmcready(drvdata);
+	if (!(drvdata->etr_quirks & CORESIGHT_QUIRK_ETR_NO_STOP_FLUSH))
+		tmc_wait_for_tmcready(drvdata);
 }
 
 void tmc_enable_hw(struct tmc_drvdata *drvdata)
@@ -153,6 +159,12 @@ static int tmc_open(struct inode *inode, struct file *file)
 	int ret;
 	struct tmc_drvdata *drvdata = container_of(file->private_data,
 						   struct tmc_drvdata, miscdev);
+	struct coresight_device *csdev = drvdata->csdev;
+
+	if (drvdata->buf == NULL) {
+		coresight_set_mode(csdev, CS_MODE_READ_PREVBOOT);
+		dev_info(&drvdata->csdev->dev, "TMC read mode for previous boot\n");
+	}
 
 	ret = tmc_read_prepare(drvdata);
 	if (ret)
@@ -255,6 +267,22 @@ static enum tmc_mem_intf_width tmc_get_memwidth(u32 devid)
 	return memwidth;
 }
 
+/* To accommodate silicons that don't support 32 bit split reads
+ * of DBA, use tmc_read_dba so that ETR quirks can be processed.
+ */
+static ssize_t dba_show(struct device *_dev,
+			struct device_attribute *attr, char *buf)
+{
+	struct tmc_drvdata *drvdata = dev_get_drvdata(_dev->parent);
+	u64 val;
+
+	pm_runtime_get_sync(_dev->parent);
+	val = tmc_read_dba(drvdata);
+	pm_runtime_put_sync(_dev->parent);
+	return scnprintf(buf, PAGE_SIZE, "0x%llx\n", val);
+}
+static DEVICE_ATTR_RO(dba);
+
 static struct attribute *coresight_tmc_mgmt_attrs[] = {
 	coresight_simple_reg32(rsz, TMC_RSZ),
 	coresight_simple_reg32(sts, TMC_STS),
@@ -267,7 +295,7 @@ static struct attribute *coresight_tmc_mgmt_attrs[] = {
 	coresight_simple_reg32(mode, TMC_MODE),
 	coresight_simple_reg32(pscr, TMC_PSCR),
 	coresight_simple_reg32(devid, CORESIGHT_DEVID),
-	coresight_simple_reg64(dba, TMC_DBALO, TMC_DBAHI),
+	&dev_attr_dba.attr,
 	coresight_simple_reg32(axictl, TMC_AXICTL),
 	coresight_simple_reg32(authstatus, TMC_AUTHSTATUS),
 	NULL,
@@ -331,9 +359,20 @@ static ssize_t buffer_size_store(struct device *dev,
 
 static DEVICE_ATTR_RW(buffer_size);
 
+static ssize_t tracebuffer_size_show(struct device *dev,
+				     struct device_attribute *attr, char *buf)
+{
+	struct tmc_drvdata *drvdata = dev_get_drvdata(dev->parent);
+	unsigned long val = drvdata->size;
+
+	return sprintf(buf, "%#lx\n", val);
+}
+static DEVICE_ATTR_RO(tracebuffer_size);
+
 static struct attribute *coresight_tmc_attrs[] = {
 	&dev_attr_trigger_cntr.attr,
 	&dev_attr_buffer_size.attr,
+	&dev_attr_tracebuffer_size.attr,
 	NULL,
 };
 
@@ -398,6 +437,65 @@ static inline bool tmc_etr_has_non_secure_access(struct tmc_drvdata *drvdata)
 
 static const struct amba_id tmc_ids[];
 
+static inline bool tmc_etr_has_secure_access(struct tmc_drvdata *drvdata)
+{
+	u32 auth = readl_relaxed(drvdata->base + TMC_AUTHSTATUS);
+
+	return (auth & TMC_AUTH_SID_MASK) == 0x30;
+}
+
+static inline bool is_tmc_reserved_region_valid(struct device *dev)
+{
+	struct tmc_drvdata *drvdata = dev_get_drvdata(dev);
+
+	if (drvdata->resrv_mem.paddr &&
+		drvdata->resrv_mem.size &&
+		drvdata->reg_metadata.paddr &&
+		drvdata->reg_metadata.size)
+		return true;
+	return false;
+}
+
+static void tmc_get_reserved_region(struct device *parent)
+{
+	struct tmc_drvdata *drvdata = dev_get_drvdata(parent);
+	struct device_node *node;
+	struct resource res;
+	int rc;
+
+	node = of_parse_phandle(parent->of_node, "memory-region", 0);
+	if (!node) {
+		dev_dbg(parent, "No memory-region specified\n");
+		goto out;
+	}
+
+	rc = of_address_to_resource(node, 0, &res);
+	of_node_put(node);
+	if (rc) {
+		dev_err(parent, "No address assigned to the memory-region\n");
+		goto out;
+	}
+
+	if (res.start != 0 && resource_size(&res) != 0) {
+		drvdata->resrv_mem.vaddr = memremap(res.start, resource_size(&res), MEMREMAP_WC);
+		if (IS_ERR(drvdata->resrv_mem.vaddr)) {
+			dev_err(parent, "Failed to map destination address for reserved memory\n");
+			rc = PTR_ERR(drvdata->resrv_mem.vaddr);
+			goto out;
+		}
+
+		drvdata->resrv_mem.paddr = res.start;
+		drvdata->resrv_mem.size  = resource_size(&res);
+
+		/* Size of contiguous buffer space for TMC ETR */
+		drvdata->size = drvdata->resrv_mem.size;
+	}
+
+
+out:
+	return;
+}
+
 /* Detect and initialise the capabilities of a TMC ETR */
 static int tmc_etr_setup_caps(struct device *parent, u32 devid,
 			      struct csdev_access *access)
@@ -407,7 +505,8 @@ static int tmc_etr_setup_caps(struct device *parent, u32 devid,
 	struct tmc_drvdata *drvdata = dev_get_drvdata(parent);
 	void *dev_caps;
 
-	if (!tmc_etr_has_non_secure_access(drvdata))
+	if (!tmc_etr_has_non_secure_access(drvdata) &&
+	    !tmc_etr_has_secure_access(drvdata))
 		return -EACCES;
 
 	tmc_pid = coresight_get_pid(access);
@@ -418,6 +517,12 @@ static int tmc_etr_setup_caps(struct device *parent, u32 devid,
 
 	if (!(devid & TMC_DEVID_NOSCAT) && tmc_etr_can_use_sg(parent))
 		tmc_etr_set_cap(drvdata, TMC_ETR_SG);
+
+	/* Get reserved memory region if specified and
+	 * set capability to use reserved memory for trace buffer.
+	 */
+	if (is_tmc_reserved_region_valid(parent))
+		tmc_etr_set_cap(drvdata, TMC_ETR_RESRV_MEM);
 
 	/* Check if the AXI address width is available */
 	if (devid & TMC_DEVID_AXIAW_VALID)
@@ -444,6 +549,38 @@ static int tmc_etr_setup_caps(struct device *parent, u32 devid,
 	if (rc)
 		dev_err(parent, "Failed to setup DMA mask: %d\n", rc);
 	return rc;
+}
+
+static void tmc_parse_register_metadata_region(struct device *parent)
+{
+	struct tmc_drvdata *drvdata = dev_get_drvdata(parent);
+	const __be32 *metadata;
+	phys_addr_t paddr;
+	size_t size;
+	int len;
+
+	metadata = of_get_property(parent->of_node, "metadata-region", &len);
+	len /= sizeof(*metadata);
+
+	if (!metadata || len != 4)
+		goto out;
+
+	paddr = of_translate_address(parent->of_node, metadata);
+	size =  be32_to_cpup(metadata + 3);
+
+	if (paddr == 0 || size == 0)
+		goto out;
+
+	drvdata->reg_metadata.vaddr = memremap(paddr, size, MEMREMAP_WC);
+	if (IS_ERR_OR_NULL(drvdata->reg_metadata.vaddr)) {
+		dev_err(parent, "Failed to map destination address for registers metadata\n");
+		goto out;
+	}
+
+	drvdata->reg_metadata.paddr = paddr;
+	drvdata->reg_metadata.size = size;
+out:
+	return;
 }
 
 static u32 tmc_etr_get_default_buffer_size(struct device *dev)
@@ -479,6 +616,7 @@ static int __tmc_probe(struct device *dev, struct resource *res)
 	struct tmc_drvdata *drvdata = dev_get_drvdata(dev);
 	struct coresight_desc desc = { 0 };
 	struct coresight_dev_list *dev_list = NULL;
+	const struct amba_id *id = drvdata->id;
 
 	ret = -ENOMEM;
 
@@ -494,6 +632,20 @@ static int __tmc_probe(struct device *dev, struct resource *res)
 
 	spin_lock_init(&drvdata->spinlock);
 
+	drvdata->cpu = coresight_get_cpu(dev);
+
+	/* Enable quirks for Silicon issues */
+	drvdata->etr_quirks = coresight_get_etr_quirks(id->id);
+
+	/* Update the SMP target cpu */
+	drvdata->rc_cpu = coresight_get_etm_sync_mode() == SYNC_MODE_SW_GLOBAL ?
+			  SYNC_GLOBAL_CORE : drvdata->cpu;
+
+	if (drvdata->etr_quirks & CORESIGHT_QUIRK_ETM_SW_SYNC) {
+		tmc_etr_add_cpumap(drvdata); /* Used for global sync mode */
+		tmc_etr_timer_init(drvdata);
+	}
+
 	devid = readl_relaxed(drvdata->base + CORESIGHT_DEVID);
 	drvdata->config_type = BMVAL(devid, 6, 7);
 	drvdata->memwidth = tmc_get_memwidth(devid);
@@ -507,6 +659,18 @@ static int __tmc_probe(struct device *dev, struct resource *res)
 	} else {
 		drvdata->size = readl_relaxed(drvdata->base + TMC_RSZ) * 4;
 	}
+
+	if (drvdata->etr_quirks & CORESIGHT_QUIRK_ETR_SECURE_BUFF) {
+		if (tmc_get_cpu_tracebufsize(drvdata, &drvdata->size) ||
+		    !drvdata->size) {
+			pr_err("Secure tracebuffer not available\n");
+			ret = -ENOMEM;
+			goto out;
+		}
+	}
+
+	tmc_get_reserved_region(dev);
+	tmc_parse_register_metadata_region(dev);
 
 	desc.dev = dev;
 
@@ -583,6 +747,7 @@ static int tmc_probe(struct amba_device *adev, const struct amba_id *id)
 	if (!drvdata)
 		return -ENOMEM;
 
+	drvdata->id = id;
 	amba_set_drvdata(adev, drvdata);
 	ret = __tmc_probe(&adev->dev, &adev->res);
 	if (!ret)
@@ -616,7 +781,12 @@ out:
 static void __tmc_remove(struct device *dev)
 {
 	struct tmc_drvdata *drvdata = dev_get_drvdata(dev);
+	struct coresight_device *csdev = drvdata->csdev;
 
+	if ((drvdata->etr_quirks & CORESIGHT_QUIRK_ETM_SW_SYNC) &&
+	    (coresight_get_mode(csdev) == CS_MODE_SYSFS))
+		smp_call_function_single(drvdata->rc_cpu, tmc_etr_timer_cancel,
+					 drvdata, true);
 	/*
 	 * Since misc_open() holds a refcount on the f_ops, which is
 	 * etb fops in this case, device is there until last file
@@ -639,6 +809,8 @@ static const struct amba_id tmc_ids[] = {
 	CS_AMBA_ID(0x000bb9e9),
 	/* Coresight SoC 600 TMC-ETF */
 	CS_AMBA_ID(0x000bb9ea),
+	/* Marvell OcteonTx CN9xxx */
+	CS_AMBA_ID_DATA(0x000cc213, (unsigned long)OCTEONTX_CN9XXX_ETR_CAPS),
 	{ 0, 0, NULL },
 };
 

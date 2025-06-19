@@ -156,6 +156,13 @@ static void scmi_clk_atomic_disable(struct clk_hw *hw)
 	scmi_proto_clk_ops->disable(clk->ph, clk->id, ATOMIC);
 }
 
+static int scmi_clk_get_available_rates(struct clk_hw *hw, u64 *rate)
+{
+	struct scmi_clk *clk = to_scmi_clk(hw);
+
+	return scmi_proto_clk_ops->available_rates(clk->ph, clk->id, rate);
+}
+
 static int __scmi_clk_is_enabled(struct clk_hw *hw, bool atomic)
 {
 	int ret;
@@ -302,6 +309,7 @@ scmi_clk_ops_alloc(struct device *dev, unsigned long feats_key)
 	ops->recalc_rate = scmi_clk_recalc_rate;
 	ops->round_rate = scmi_clk_round_rate;
 	ops->determine_rate = scmi_clk_determine_rate;
+	ops->get_available_rates = scmi_clk_get_available_rates;
 	if (feats_key & BIT(SCMI_CLK_RATE_CTRL_SUPPORTED))
 		ops->set_rate = scmi_clk_set_rate;
 

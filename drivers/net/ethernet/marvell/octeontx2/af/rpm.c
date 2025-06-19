@@ -37,7 +37,8 @@ static struct mac_ops		rpm_mac_ops   = {
 	.mac_tx_enable =		rpm_lmac_tx_enable,
 	.pfc_config =                   rpm_lmac_pfc_config,
 	.mac_get_pfc_frm_cfg   =        rpm_lmac_get_pfc_frm_cfg,
-	.mac_reset   =			rpm_lmac_reset,
+	.mac_reset			 =	  rpm_lmac_reset,
+	.get_dmacflt_dropped_pktcnt      =        rpm_get_dmacflt_dropped_pktcnt,
 	.mac_stats_reset		 =	  rpm_stats_reset,
 	.mac_x2p_reset                   =        rpm_x2p_reset,
 	.mac_enadis_rx			 =        rpm_enadis_rx,
@@ -73,6 +74,7 @@ static struct mac_ops		rpm2_mac_ops   = {
 	.pfc_config =                   rpm_lmac_pfc_config,
 	.mac_get_pfc_frm_cfg   =        rpm_lmac_get_pfc_frm_cfg,
 	.mac_reset   =			rpm_lmac_reset,
+	.get_dmacflt_dropped_pktcnt =   rpm_get_dmacflt_dropped_pktcnt,
 	.mac_stats_reset	    =	rpm_stats_reset,
 	.mac_x2p_reset              =   rpm_x2p_reset,
 	.mac_enadis_rx		    =   rpm_enadis_rx,
@@ -449,6 +451,20 @@ int rpm_get_tx_stats(void *rpmd, int lmac_id, int idx, u64 *tx_stat)
 	return 0;
 }
 
+u64 rpm_get_dmacflt_dropped_pktcnt(void *rpmd, int lmac_id)
+{
+	rpm_t *rpm = rpmd;
+	u64 dmac_flt_stat;
+
+	if (!is_lmac_valid(rpm, lmac_id))
+		return 0;
+
+	dmac_flt_stat = is_dev_rpm2(rpm) ? RPM2_CMRX_RX_STAT2 :
+			RPMX_CMRX_RX_STAT2;
+
+	return rpm_read(rpm, lmac_id, dmac_flt_stat);
+}
+
 int rpm_stats_reset(void *rpmd, int lmac_id)
 {
 	rpm_t *rpm = rpmd;
@@ -695,26 +711,28 @@ int rpm_get_fec_stats(void *rpmd, int lmac_id, struct cgx_fec_stats_rsp *rsp)
 {
 	u64 val_lo, val_hi;
 	rpm_t *rpm = rpmd;
+	struct lmac *lmac;
 	u64 cfg;
 
 	if (!is_lmac_valid(rpm, lmac_id))
 		return -ENODEV;
 
-	if (rpm->lmac_idmap[lmac_id]->link_info.fec == OTX2_FEC_NONE)
+	lmac = lmac_pdata(lmac_id, rpm);
+	if (lmac->link_info.fec == OTX2_FEC_NONE)
 		return 0;
 
 	/* latched registers FCFECX_CW_HI/RSFEC_STAT_FAST_DATA_HI_CDC are common
 	 * for all counters. Acquire lock to ensure serialized reads
 	 */
 	mutex_lock(&rpm->lock);
-	if (rpm->lmac_idmap[lmac_id]->link_info.fec == OTX2_FEC_BASER) {
+	if (lmac->link_info.fec == OTX2_FEC_BASER) {
 		val_lo = rpm_read(rpm, 0, RPMX_MTI_FCFECX_VL0_CCW_LO(lmac_id));
 		val_hi = rpm_read(rpm, 0, RPMX_MTI_FCFECX_CW_HI(lmac_id));
-		rsp->fec_corr_blks = (val_hi << 16 | val_lo);
+		lmac->fec_corr_blks += (val_hi << 16 | val_lo);
 
 		val_lo = rpm_read(rpm, 0, RPMX_MTI_FCFECX_VL0_NCCW_LO(lmac_id));
 		val_hi = rpm_read(rpm, 0, RPMX_MTI_FCFECX_CW_HI(lmac_id));
-		rsp->fec_uncorr_blks = (val_hi << 16 | val_lo);
+		lmac->fec_uncorr_blks += (val_hi << 16 | val_lo);
 
 		/* 50G uses 2 Physical serdes lines */
 		if (rpm->lmac_idmap[lmac_id]->link_info.lmac_type_id ==
@@ -723,13 +741,13 @@ int rpm_get_fec_stats(void *rpmd, int lmac_id, struct cgx_fec_stats_rsp *rsp)
 					  RPMX_MTI_FCFECX_VL1_CCW_LO(lmac_id));
 			val_hi = rpm_read(rpm, 0,
 					  RPMX_MTI_FCFECX_CW_HI(lmac_id));
-			rsp->fec_corr_blks += (val_hi << 16 | val_lo);
+			lmac->fec_corr_blks += (val_hi << 16 | val_lo);
 
 			val_lo = rpm_read(rpm, 0,
 					  RPMX_MTI_FCFECX_VL1_NCCW_LO(lmac_id));
 			val_hi = rpm_read(rpm, 0,
 					  RPMX_MTI_FCFECX_CW_HI(lmac_id));
-			rsp->fec_uncorr_blks += (val_hi << 16 | val_lo);
+			lmac->fec_uncorr_blks += (val_hi << 16 | val_lo);
 		}
 	} else {
 		/* enable RS-FEC capture */
@@ -740,13 +758,16 @@ int rpm_get_fec_stats(void *rpmd, int lmac_id, struct cgx_fec_stats_rsp *rsp)
 		val_lo = rpm_read(rpm, 0,
 				  RPMX_MTI_RSFEC_STAT_COUNTER_CAPTURE_2);
 		val_hi = rpm_read(rpm, 0, RPMX_MTI_RSFEC_STAT_FAST_DATA_HI_CDC);
-		rsp->fec_corr_blks = (val_hi << 32 | val_lo);
+		lmac->fec_corr_blks = (val_hi << 32 | val_lo);
 
 		val_lo = rpm_read(rpm, 0,
 				  RPMX_MTI_RSFEC_STAT_COUNTER_CAPTURE_3);
 		val_hi = rpm_read(rpm, 0, RPMX_MTI_RSFEC_STAT_FAST_DATA_HI_CDC);
-		rsp->fec_uncorr_blks = (val_hi << 32 | val_lo);
+		lmac->fec_uncorr_blks = (val_hi << 32 | val_lo);
 	}
+
+	rsp->fec_corr_blks = lmac->fec_corr_blks;
+	rsp->fec_uncorr_blks = lmac->fec_uncorr_blks;
 	mutex_unlock(&rpm->lock);
 
 	return 0;

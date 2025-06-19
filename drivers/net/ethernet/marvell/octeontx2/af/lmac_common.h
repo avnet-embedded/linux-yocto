@@ -47,6 +47,8 @@ struct lmac {
 	u8 lmac_type;
 	bool cmd_pend;
 	char *name;
+	u64 fec_corr_blks;
+	u64 fec_uncorr_blks;
 };
 
 /* CGX & RPM has different feature set
@@ -127,6 +129,8 @@ struct mac_ops {
 	int                     (*mac_get_pfc_frm_cfg)(void *cgxd, int lmac_id,
 						       u8 *tx_pause, u8 *rx_pause);
 	int			(*mac_reset)(void *cgxd, int lmac_id, u8 pf_req_flr);
+
+	u64			(*get_dmacflt_dropped_pktcnt)(void *cgxd, int lmac_id);
 
 	/* FEC stats */
 	int			(*get_fec_stats)(void *cgxd, int lmac_id,

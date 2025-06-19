@@ -11,6 +11,7 @@
 
 #include <linux/acpi.h>
 #include <linux/acpi_iort.h>
+#include <linux/arm_mpam.h>
 #include <linux/bitops.h>
 #include <linux/crash_dump.h>
 #include <linux/delay.h>
@@ -2997,6 +2998,40 @@ static void arm_smmu_remove_dev_pasid(struct device *dev, ioasid_t pasid,
 	}
 }
 
+static int arm_smmu_group_get_mpam(struct iommu_group *group, u16 *partid,
+				   u8 *pmg)
+{
+	int err = -EINVAL;
+	unsigned long flags;
+	struct iommu_domain *domain;
+	struct arm_smmu_master *master;
+	struct arm_smmu_master_domain *master_domain;
+	struct arm_smmu_domain *smmu_domain;
+
+	domain = iommu_get_domain_for_group(group);
+	smmu_domain = to_smmu_domain(domain);
+	if (!(smmu_domain->smmu->features & ARM_SMMU_FEAT_MPAM))
+		return -EIO;
+
+	if (!partid && !pmg)
+		return 0;
+
+	spin_lock_irqsave(&smmu_domain->devices_lock, flags);
+	master_domain = list_first_entry_or_null(&smmu_domain->devices,
+					  typeof(*master_domain), devices_elm);
+	master = master_domain->master;
+	if (master) {
+		if (partid)
+			*partid = master->partid;
+		if (pmg)
+			*pmg = master->pmg;
+		err = 0;
+	}
+	spin_unlock_irqrestore(&smmu_domain->devices_lock, flags);
+
+	return err;
+}
+
 static void arm_smmu_attach_dev_ste(struct iommu_domain *domain,
 				    struct device *dev,
 				    struct arm_smmu_ste *ste,
@@ -3505,6 +3540,66 @@ static int arm_smmu_def_domain_type(struct device *dev)
 	return 0;
 }
 
+static int arm_smmu_group_set_mpam(struct iommu_group *group, u16 partid,
+				   u8 pmg)
+{
+	int i;
+	unsigned long flags;
+	struct iommu_domain *domain;
+	struct arm_smmu_device *smmu;
+	struct arm_smmu_master_domain *master_domain;
+	struct arm_smmu_cmdq_batch cmds;
+	struct arm_smmu_domain *smmu_domain;
+	struct arm_smmu_cmdq_ent cmd = {
+		.opcode	= CMDQ_OP_CFGI_STE,
+		.cfgi	= {
+			.leaf	= true,
+		},
+	};
+
+	domain = iommu_get_domain_for_group(group);
+	smmu_domain = to_smmu_domain(domain);
+	if (!(smmu_domain->smmu->features & ARM_SMMU_FEAT_MPAM))
+		return -EIO;
+	smmu = smmu_domain->smmu;
+
+	cmds.num = 0;
+
+	spin_lock_irqsave(&smmu_domain->devices_lock, flags);
+	list_for_each_entry(master_domain, &smmu_domain->devices, devices_elm) {
+		struct arm_smmu_master *master = master_domain->master;
+		for (i = 0; i < master->num_streams; i++) {
+			u32 sid = master->streams[i].id;
+			struct arm_smmu_ste *step =
+				arm_smmu_get_step_for_sid(smmu, sid);
+			struct arm_smmu_ste target_ste = *step;
+
+			/* These need locking if the VMSPtr is ever used */
+			target_ste.data[4] = cpu_to_le64(
+				(le64_to_cpu(target_ste.data[4]) & ~STRTAB_STE_4_PARTID) |
+				FIELD_PREP(STRTAB_STE_4_PARTID, partid)
+			);
+			target_ste.data[5] = cpu_to_le64(
+				(le64_to_cpu(target_ste.data[5]) & ~STRTAB_STE_5_PMG) |
+				FIELD_PREP(STRTAB_STE_5_PMG, pmg)
+			);
+
+			arm_smmu_write_ste(master, sid, step, &target_ste);
+
+			cmd.cfgi.sid = sid;
+			arm_smmu_cmdq_batch_add(smmu, &cmds, &cmd);
+		}
+
+		master->partid = partid;
+		master->pmg = pmg;
+	}
+	spin_unlock_irqrestore(&smmu_domain->devices_lock, flags);
+
+	arm_smmu_cmdq_batch_submit(smmu, &cmds);
+
+	return 0;
+}
+
 static struct iommu_ops arm_smmu_ops = {
 	.identity_domain	= &arm_smmu_identity_domain,
 	.blocked_domain		= &arm_smmu_blocked_domain,
@@ -3520,6 +3615,8 @@ static struct iommu_ops arm_smmu_ops = {
 	.remove_dev_pasid	= arm_smmu_remove_dev_pasid,
 	.dev_enable_feat	= arm_smmu_dev_enable_feature,
 	.dev_disable_feat	= arm_smmu_dev_disable_feature,
+	.get_group_qos_params	= arm_smmu_group_get_mpam,
+	.set_group_qos_params	= arm_smmu_group_set_mpam,
 	.page_response		= arm_smmu_page_response,
 	.def_domain_type	= arm_smmu_def_domain_type,
 	.pgsize_bitmap		= -1UL, /* Restricted during device attach */
@@ -4113,6 +4210,29 @@ static void arm_smmu_device_iidr_probe(struct arm_smmu_device *smmu)
 	}
 }
 
+static void arm_smmu_mpam_register_smmu(struct arm_smmu_device *smmu)
+{
+	u16 partid_max;
+	u8 pmg_max;
+	u32 reg;
+
+	if (!IS_ENABLED(CONFIG_ARM64_MPAM))
+		return;
+
+	if (!(smmu->features & ARM_SMMU_FEAT_MPAM))
+		return;
+
+	reg = readl_relaxed(smmu->base + ARM_SMMU_MPAMIDR);
+	if (!reg)
+		return;
+
+	partid_max = FIELD_GET(SMMU_MPAMIDR_PARTID_MAX, reg);
+	pmg_max = FIELD_GET(SMMU_MPAMIDR_PMG_MAX, reg);
+
+	if (mpam_register_requestor(partid_max, pmg_max))
+		smmu->features &= ~ARM_SMMU_FEAT_MPAM;
+}
+
 static void arm_smmu_get_httu(struct arm_smmu_device *smmu, u32 reg)
 {
 	u32 fw_features = smmu->features & (ARM_SMMU_FEAT_HA | ARM_SMMU_FEAT_HD);
@@ -4286,6 +4406,8 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 	reg = readl_relaxed(smmu->base + ARM_SMMU_IDR3);
 	if (FIELD_GET(IDR3_RIL, reg))
 		smmu->features |= ARM_SMMU_FEAT_RANGE_INV;
+	if (FIELD_GET(IDR3_MPAM, reg))
+		smmu->features |= ARM_SMMU_FEAT_MPAM;
 
 	/* IDR5 */
 	reg = readl_relaxed(smmu->base + ARM_SMMU_IDR5);
@@ -4354,6 +4476,8 @@ static int arm_smmu_device_hw_probe(struct arm_smmu_device *smmu)
 
 	if (arm_smmu_sva_supported(smmu))
 		smmu->features |= ARM_SMMU_FEAT_SVA;
+
+	arm_smmu_mpam_register_smmu(smmu);
 
 	dev_info(smmu->dev, "ias %lu-bit, oas %lu-bit (features 0x%08x)\n",
 		 smmu->ias, smmu->oas, smmu->features);

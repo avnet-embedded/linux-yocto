@@ -58,6 +58,7 @@ struct arm_smmu_device;
 
 #define ARM_SMMU_IDR3			0xc
 #define IDR3_RIL			(1 << 10)
+#define IDR3_MPAM			(1 << 7)
 
 #define ARM_SMMU_IDR5			0x14
 #define IDR5_STALL_MAX			GENMASK(31, 16)
@@ -164,6 +165,10 @@ struct arm_smmu_device;
 #define ARM_SMMU_PRIQ_IRQ_CFG1		0xd8
 #define ARM_SMMU_PRIQ_IRQ_CFG2		0xdc
 
+#define ARM_SMMU_MPAMIDR		0x130
+#define SMMU_MPAMIDR_PARTID_MAX		GENMASK(15,0)
+#define SMMU_MPAMIDR_PMG_MAX		GENMASK(23,16)
+
 #define ARM_SMMU_REG_SZ			0xe00
 
 /* Common MSI config fields */
@@ -262,6 +267,7 @@ static inline u32 arm_smmu_strtab_l2_idx(u32 sid)
 #define STRTAB_STE_1_S1CSH		GENMASK_ULL(7, 6)
 
 #define STRTAB_STE_1_S1STALLD		(1UL << 27)
+#define STRTAB_STE_1_S1MPAM		(1UL << 26)
 
 #define STRTAB_STE_1_EATS		GENMASK_ULL(29, 28)
 #define STRTAB_STE_1_EATS_ABT		0UL
@@ -291,6 +297,10 @@ static inline u32 arm_smmu_strtab_l2_idx(u32 sid)
 #define STRTAB_STE_2_S2R		(1UL << 58)
 
 #define STRTAB_STE_3_S2TTB_MASK		GENMASK_ULL(51, 4)
+
+#define STRTAB_STE_4_PARTID		GENMASK_ULL(31, 16)
+
+#define STRTAB_STE_5_PMG		GENMASK_ULL(7, 0)
 
 /*
  * Context descriptors.
@@ -726,6 +736,7 @@ struct arm_smmu_device {
 #define ARM_SMMU_FEAT_ATTR_TYPES_OVR	(1 << 20)
 #define ARM_SMMU_FEAT_HA		(1 << 21)
 #define ARM_SMMU_FEAT_HD		(1 << 22)
+#define ARM_SMMU_FEAT_MPAM		(1 << 23)
 	u32				features;
 
 #define ARM_SMMU_OPT_SKIP_PREFETCH	(1 << 0)
@@ -785,6 +796,8 @@ struct arm_smmu_master {
 	bool				sva_enabled;
 	bool				iopf_enabled;
 	unsigned int			ssid_bits;
+	u16				partid;
+	u8				pmg;
 };
 
 /* SMMU private data for an IOMMU domain */

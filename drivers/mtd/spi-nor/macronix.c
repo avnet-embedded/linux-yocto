@@ -150,6 +150,12 @@ static const struct flash_info macronix_nor_parts[] = {
 		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,
 		.fixup_flags = SPI_NOR_4B_OPCODES,
 	}, {
+		.id = SNOR_ID(0xc2, 0x80, 0x3a),
+		.name = "mx25um51245g",
+		.size = SZ_64M,
+		.no_sfdp_flags = SECT_4K,
+		.fixup_flags = SPI_NOR_4B_OPCODES,
+	}, {
 		.id = SNOR_ID(0xc2, 0x26, 0x18),
 		.name = "mx25l12855e",
 		.size = SZ_16M,
