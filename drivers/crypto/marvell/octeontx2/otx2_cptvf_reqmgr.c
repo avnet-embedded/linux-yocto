@@ -101,15 +101,25 @@ static int process_request(struct pci_dev *pdev, struct otx2_cpt_req_info *req,
 	if (unlikely(!otx2_cptlf_started(lf->lfs)))
 		return -ENODEV;
 
-	info = lf->lfs->ops->cpt_sg_info_create(pdev, req, gfp);
-	if (unlikely(!info)) {
-		dev_err(&pdev->dev, "Setting up cpt inst info failed");
-		return -ENOMEM;
-	}
-	cpt_req->dlen = info->dlen;
+	if (ctrl->s.dma_mode == OTX2_CPT_DMA_MODE_SG) {
+		info = lf->lfs->ops->cpt_sg_info_create(pdev, req, gfp);
+		if (unlikely(!info)) {
+			dev_err(&pdev->dev, "Setting up cpt inst info failed");
+			return -ENOMEM;
+		}
+		cpt_req->dlen = info->dlen;
 
-	result = info->completion_addr;
-	result->s.compcode = OTX2_CPT_COMPLETION_CODE_INIT;
+		result = info->completion_addr;
+		result->s.compcode = OTX2_CPT_COMPLETION_CODE_INIT;
+	} else {
+		info = otx2_cpt_info_create(pdev, req, gfp);
+		if (unlikely(!info)) {
+			dev_err(&pdev->dev, "Setting up cpt inst info failed");
+			return -ENOMEM;
+		}
+		result = info->completion_addr;
+		result->s.compcode = OTX2_CPT_COMPLETION_CODE_INIT;
+	}
 
 	spin_lock_bh(&pqueue->lock);
 	pentry = get_free_pending_entry(pqueue, pqueue->qlen);
@@ -166,7 +176,9 @@ static int process_request(struct pci_dev *pdev, struct otx2_cpt_req_info *req,
 	otx2_cpt_fill_inst(&cptinst, &iq_cmd, info->comp_baddr);
 
 	/* Print debug info if enabled */
-	otx2_cpt_dump_sg_list(pdev, req);
+	if (ctrl->s.dma_mode == OTX2_CPT_DMA_MODE_SG)
+		otx2_cpt_dump_sg_list(pdev, req);
+
 	pr_debug("Cpt_inst_s hexdump (%d bytes)\n", OTX2_CPT_INST_SIZE);
 	print_hex_dump_debug("", 0, 16, 1, &cptinst, OTX2_CPT_INST_SIZE, false);
 	pr_debug("Dptr hexdump (%d bytes)\n", cpt_req->dlen);
@@ -269,6 +281,8 @@ static int cpt_process_ccode(struct otx2_cptlfs_info *lfs,
 				 info->req->areq->tfm->__crt_alg->cra_name,
 				 info->req->areq->tfm->__crt_alg->cra_driver_name);
 			otx2_cpt_dump_sg_list(pdev, info->req);
+			if (uc_ccode == 0x4C)
+				*res_code = -EBADMSG;
 			break;
 		}
 		/* Request has been processed with success */
@@ -391,9 +405,19 @@ void otx2_cpt_post_process(struct otx2_cptlf_wqe *wqe)
 			      &wqe->lfs->lf[wqe->lf_num].pqueue);
 }
 
-int otx2_cpt_get_kcrypto_eng_grp_num(struct pci_dev *pdev)
+int otx2_cpt_get_eng_grp_num(struct pci_dev *pdev,
+			     enum otx2_cpt_eng_type eng_type)
 {
 	struct otx2_cptvf_dev *cptvf = pci_get_drvdata(pdev);
 
-	return cptvf->lfs.kcrypto_eng_grp_num;
+	switch (eng_type) {
+	case OTX2_CPT_SE_TYPES:
+		return cptvf->lfs.kcrypto_se_eng_grp_num;
+	case OTX2_CPT_AE_TYPES:
+		return cptvf->lfs.kcrypto_ae_eng_grp_num;
+	default:
+		dev_err(&cptvf->pdev->dev, "Unsupported engine type");
+		break;
+	}
+	return -ENXIO;
 }

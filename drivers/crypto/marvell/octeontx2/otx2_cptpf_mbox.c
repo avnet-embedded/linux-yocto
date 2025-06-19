@@ -19,6 +19,27 @@
 	(opcode);                                       \
 })
 
+int otx2_cptpf_mbox_bbuf_init(struct otx2_cptpf_dev *cptpf,
+			      struct pci_dev *pdev)
+{
+	struct otx2_mbox_dev *mdev;
+	struct otx2_mbox *otx2_mbox;
+
+	cptpf->afpf_bbuf_base = devm_kmalloc(&pdev->dev, MBOX_SIZE, GFP_KERNEL);
+	if (!cptpf->afpf_bbuf_base)
+		return -ENOMEM;
+	/*
+	 * Overwrite mbox mbase to point to bounce buffer, so that PF/VF
+	 * prepare all mbox messages in bounce buffer instead of directly
+	 * in hw mbox memory.
+	 */
+	otx2_mbox = &cptpf->afpf_mbox;
+	mdev = &otx2_mbox->dev[0];
+	mdev->mbase = cptpf->afpf_bbuf_base;
+
+	return 0;
+}
+
 /*
  * CPT PF driver version, It will be incremented by 1 for every feature
  * addition in CPT mailbox messages.
@@ -205,7 +226,9 @@ otx2_inline_cptlf_setup(struct otx2_cptpf_dev *cptpf,
 {
 	int ret;
 
-	ret = otx2_cptlf_init(lfs, 1 << egrp, OTX2_CPT_QUEUE_HI_PRIO, 1);
+	ret = otx2_cptlf_init(lfs, 1 << egrp,
+			      otx2_cpt_queue_get_default_pri(cptpf->pdev),
+			      1);
 	if (ret) {
 		dev_err(&cptpf->pdev->dev,
 			"LF configuration failed for RX inline ipsec.\n");
@@ -264,8 +287,6 @@ static int handle_msg_rx_inline_ipsec_lf_cfg(struct otx2_cptpf_dev *cptpf,
 		return -ENOENT;
 	}
 
-	otx2_cptlf_set_dev_info(&cptpf->lfs, cptpf->pdev, cptpf->reg_base,
-				&cptpf->afpf_mbox, BLKADDR_CPT0);
 	cptpf->lfs.global_slot = 0;
 	cptpf->lfs.ctx_ilen_ovrd = cfg_req->ctx_ilen_valid;
 	cptpf->lfs.ctx_ilen = cfg_req->ctx_ilen;
@@ -278,9 +299,6 @@ static int handle_msg_rx_inline_ipsec_lf_cfg(struct otx2_cptpf_dev *cptpf,
 
 	if (cptpf->has_cpt1) {
 		cptpf->rsrc_req_blkaddr = BLKADDR_CPT1;
-		otx2_cptlf_set_dev_info(&cptpf->cpt1_lfs, cptpf->pdev,
-					cptpf->reg_base, &cptpf->afpf_mbox,
-					BLKADDR_CPT1);
 		cptpf->cpt1_lfs.global_slot = num_lfs;
 		cptpf->cpt1_lfs.ctx_ilen_ovrd = cfg_req->ctx_ilen_valid;
 		cptpf->cpt1_lfs.ctx_ilen = cfg_req->ctx_ilen;
@@ -340,6 +358,34 @@ inval_msg:
 	otx2_reply_invalid_msg(&cptpf->vfpf_mbox, vf->vf_id, 0, req->id);
 	otx2_mbox_msg_send(&cptpf->vfpf_mbox, vf->vf_id);
 	return err;
+}
+
+irqreturn_t cptpf_cn20k_vfpf_mbox_intr(int __always_unused irq, void *arg)
+{
+	struct cptpf_irq_data *irq_data = (struct cptpf_irq_data *)arg;
+	struct otx2_cptpf_dev *cptpf = irq_data->pf;
+	struct otx2_cptvf_info *vf;
+	int vf_idx;
+	u64 intr;
+
+	/* Sync with the mbox memory region */
+	rmb();
+
+	intr = otx2_cpt_read64(cptpf->reg_base, BLKADDR_RVUM, 0,
+			       irq_data->intr_status);
+
+	for (vf_idx = irq_data->start; vf_idx < cptpf->enabled_vfs; vf_idx++) {
+		vf = &cptpf->vf[vf_idx];
+		if (intr & (1ULL << vf->intr_idx)) {
+			queue_work(cptpf->vfpf_mbox_wq, &vf->vfpf_mbox_work);
+			/* Clear the interrupt */
+			otx2_cpt_write64(cptpf->reg_base, BLKADDR_RVUM,
+					 0, irq_data->intr_status,
+					 BIT_ULL(vf->intr_idx));
+		}
+	}
+
+	return IRQ_HANDLED;
 }
 
 irqreturn_t otx2_cptpf_vfpf_mbox_intr(int __always_unused irq, void *arg)
@@ -433,6 +479,9 @@ irqreturn_t otx2_cptpf_afpf_mbox_intr(int __always_unused irq, void *arg)
 	if (intr & 0x1ULL) {
 		mbox = &cptpf->afpf_mbox;
 		mdev = &mbox->dev[0];
+
+		otx2_cpt_sync_mbox_bbuf(mbox, 0);
+
 		hdr = mdev->mbase + mbox->rx_start;
 		if (hdr->num_msgs)
 			/* Schedule work queue function to process the MBOX request */
@@ -440,6 +489,9 @@ irqreturn_t otx2_cptpf_afpf_mbox_intr(int __always_unused irq, void *arg)
 
 		mbox = &cptpf->afpf_mbox_up;
 		mdev = &mbox->dev[0];
+
+		otx2_cpt_sync_mbox_bbuf(mbox, 0);
+
 		hdr = mdev->mbase + mbox->rx_start;
 		if (hdr->num_msgs)
 			/* Schedule work queue function to process the MBOX request */
@@ -448,6 +500,54 @@ irqreturn_t otx2_cptpf_afpf_mbox_intr(int __always_unused irq, void *arg)
 		otx2_cpt_write64(cptpf->reg_base, BLKADDR_RVUM, 0, RVU_PF_INT,
 				 0x1ULL);
 	}
+	return IRQ_HANDLED;
+}
+
+/* CN20K mbox AF <==> PF irq handler */
+irqreturn_t cptpf_cn20k_afpf_mbox_intr(int __always_unused irq, void *arg)
+{
+	struct otx2_cptpf_dev *cptpf = arg;
+	struct otx2_mbox_dev *mdev;
+	struct otx2_mbox *mbox;
+	struct mbox_hdr *hdr;
+	u64 intr;
+
+	/* Read the interrupt bits */
+	intr = otx2_cpt_read64(cptpf->reg_base, BLKADDR_RVUM, 0, RVU_PF_INT);
+	intr &= GENMASK_ULL(1, 0);
+
+	/* Clear and ack the interrupt */
+	otx2_cpt_write64(cptpf->reg_base, BLKADDR_RVUM, 0, RVU_PF_INT, intr);
+
+	if (intr & BIT_ULL(0)) {
+		mbox = &cptpf->afpf_mbox_up;
+		mdev = &mbox->dev[0];
+
+		otx2_cpt_sync_mbox_bbuf(mbox, 0);
+
+		hdr = mdev->mbase + mbox->rx_start;
+		if (hdr->num_msgs)
+			/* Schedule workqueue function to process the
+			 * MBOX request
+			 */
+			queue_work(cptpf->afpf_mbox_wq,
+				   &cptpf->afpf_mbox_up_work);
+	}
+
+	if (intr & BIT_ULL(1)) {
+		mbox = &cptpf->afpf_mbox;
+		mdev = &mbox->dev[0];
+
+		otx2_cpt_sync_mbox_bbuf(mbox, 0);
+
+		hdr = mdev->mbase + mbox->rx_start;
+		if (hdr->num_msgs)
+			/* Schedule work queue function to process the
+			 * MBOX request
+			 */
+			queue_work(cptpf->afpf_mbox_wq, &cptpf->afpf_mbox_work);
+	}
+
 	return IRQ_HANDLED;
 }
 
@@ -507,6 +607,8 @@ static void process_afpf_mbox_msg(struct otx2_cptpf_dev *cptpf,
 	case MBOX_MSG_CPT_INLINE_IPSEC_CFG:
 	case MBOX_MSG_NIX_INLINE_IPSEC_CFG:
 	case MBOX_MSG_CPT_LF_RESET:
+	case MBOX_MSG_LMTST_TBL_SETUP:
+	case MBOX_MSG_CPT_SET_QUEQE_PRI:
 		break;
 
 	default:
@@ -592,9 +694,10 @@ void otx2_cptpf_afpf_mbox_handler(struct work_struct *work)
 		offset = msg->next_msgoff;
 		/* Sync VF response ready to be sent */
 		smp_wmb();
+		if (mdev->msgs_acked == rsp_hdr->num_msgs - 1)
+			otx2_mbox_reset(afpf_mbox, 0);
 		mdev->msgs_acked++;
 	}
-	otx2_mbox_reset(afpf_mbox, 0);
 }
 
 static void handle_msg_cpt_inst_lmtst(struct otx2_cptpf_dev *cptpf,

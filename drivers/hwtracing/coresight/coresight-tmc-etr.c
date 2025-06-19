@@ -18,6 +18,8 @@
 #include "coresight-etm-perf.h"
 #include "coresight-priv.h"
 #include "coresight-tmc.h"
+#include "coresight-tmc-secure-etr.h"
+
 
 struct etr_flat_buf {
 	struct device	*dev;
@@ -696,6 +698,97 @@ static const struct etr_buf_operations etr_flat_buf_ops = {
 };
 
 /*
+ * tmc_etr_alloc_resrv_buf: Allocate a contiguous DMA buffer from reserved region.
+ */
+static int tmc_etr_alloc_resrv_buf(struct tmc_drvdata *drvdata,
+				  struct etr_buf *etr_buf, int node,
+				  void **pages)
+{
+	struct etr_flat_buf *resrv_buf;
+	struct device *real_dev = drvdata->csdev->dev.parent;
+	struct coresight_device *csdev = drvdata->csdev;
+
+	/* Return if the requested buffer size is larger
+	 * than the reserved memory region.
+	 */
+	if (etr_buf->size > drvdata->resrv_mem.size)
+		return -EINVAL;
+
+	/* We cannot reuse existing pages for resrv buf */
+	if (pages)
+		return -EINVAL;
+
+	resrv_buf = kzalloc(sizeof(*resrv_buf), GFP_KERNEL);
+	if (!resrv_buf)
+		return -ENOMEM;
+
+	if (coresight_get_mode(csdev) != CS_MODE_READ_PREVBOOT)
+		memset(drvdata->resrv_mem.vaddr, 0, etr_buf->size);
+
+	resrv_buf->daddr = dma_map_resource(real_dev, drvdata->resrv_mem.paddr,
+					   etr_buf->size, DMA_FROM_DEVICE, 0);
+	if (dma_mapping_error(real_dev, resrv_buf->daddr)) {
+		dev_err(real_dev, "failed to map source buffer address\n");
+		kfree(resrv_buf);
+		return -ENOMEM;
+	}
+
+	resrv_buf->vaddr = drvdata->resrv_mem.vaddr;
+	resrv_buf->size = etr_buf->size;
+	resrv_buf->dev = &drvdata->csdev->dev;
+	etr_buf->hwaddr = resrv_buf->daddr;
+	etr_buf->mode = ETR_MODE_RESRV;
+	etr_buf->private = resrv_buf;
+	return 0;
+}
+
+static void tmc_etr_free_resrv_buf(struct etr_buf *etr_buf)
+{
+	struct etr_flat_buf *resrv_buf = etr_buf->private;
+
+	if (resrv_buf && resrv_buf->daddr) {
+		struct device *real_dev = resrv_buf->dev->parent;
+
+		dma_unmap_resource(real_dev, resrv_buf->daddr,
+				resrv_buf->size, DMA_FROM_DEVICE, 0);
+	}
+	kfree(resrv_buf);
+}
+
+static void tmc_etr_sync_resrv_buf(struct etr_buf *etr_buf, u64 rrp, u64 rwp)
+{
+	/*
+	 * Adjust the buffer to point to the beginning of the trace data
+	 * and update the available trace data.
+	 */
+	etr_buf->offset = rrp - etr_buf->hwaddr;
+	if (etr_buf->full)
+		etr_buf->len = etr_buf->size;
+	else
+		etr_buf->len = rwp - rrp;
+}
+
+static ssize_t tmc_etr_get_data_resrv_buf(struct etr_buf *etr_buf,
+					 u64 offset, size_t len, char **bufpp)
+{
+	struct etr_flat_buf *resrv_buf = etr_buf->private;
+
+	*bufpp = (char *)resrv_buf->vaddr + offset;
+	/*
+	 * tmc_etr_buf_get_data already adjusts the length to handle
+	 * buffer wrapping around.
+	 */
+	return len;
+}
+
+static const struct etr_buf_operations etr_resrv_buf_ops = {
+	.alloc = tmc_etr_alloc_resrv_buf,
+	.free = tmc_etr_free_resrv_buf,
+	.sync = tmc_etr_sync_resrv_buf,
+	.get_data = tmc_etr_get_data_resrv_buf,
+};
+
+/*
  * tmc_etr_alloc_sg_buf: Allocate an SG buf @etr_buf. Setup the parameters
  * appropriately.
  */
@@ -797,10 +890,14 @@ tmc_etr_get_catu_device(struct tmc_drvdata *drvdata)
 }
 EXPORT_SYMBOL_GPL(tmc_etr_get_catu_device);
 
+extern const struct etr_buf_operations etr_secure_buf_ops;
+
 static const struct etr_buf_operations *etr_buf_ops[] = {
 	[ETR_MODE_FLAT] = &etr_flat_buf_ops,
 	[ETR_MODE_ETR_SG] = &etr_sg_buf_ops,
 	[ETR_MODE_CATU] = NULL,
+	[ETR_MODE_SECURE] = &etr_secure_buf_ops,
+	[ETR_MODE_RESRV] = &etr_resrv_buf_ops
 };
 
 void tmc_etr_set_catu_ops(const struct etr_buf_operations *catu)
@@ -826,6 +923,8 @@ static inline int tmc_etr_mode_alloc_buf(int mode,
 	case ETR_MODE_FLAT:
 	case ETR_MODE_ETR_SG:
 	case ETR_MODE_CATU:
+	case ETR_MODE_SECURE:
+	case ETR_MODE_RESRV:
 		if (etr_buf_ops[mode] && etr_buf_ops[mode]->alloc)
 			rc = etr_buf_ops[mode]->alloc(drvdata, etr_buf,
 						      node, pages);
@@ -866,21 +965,39 @@ static struct etr_buf *tmc_alloc_etr_buf(struct tmc_drvdata *drvdata,
 					 int node, void **pages)
 {
 	int rc = -ENOMEM;
+	bool has_etr_resrv_mem;
 	struct etr_buf *etr_buf;
 	struct etr_buf_hw buf_hw;
 	struct device *dev = &drvdata->csdev->dev;
 
 	get_etr_buf_hw(dev, &buf_hw);
+	has_etr_resrv_mem = tmc_etr_has_cap(drvdata, TMC_ETR_RESRV_MEM);
 	etr_buf = kzalloc(sizeof(*etr_buf), GFP_KERNEL);
 	if (!etr_buf)
 		return ERR_PTR(-ENOMEM);
 
 	etr_buf->size = size;
 
+	if (drvdata->etr_quirks & CORESIGHT_QUIRK_ETR_SECURE_BUFF) {
+		rc = tmc_etr_mode_alloc_buf(ETR_MODE_SECURE, drvdata,
+					    etr_buf, node, pages);
+		goto done;
+	}
+
 	/* If there is user directive for buffer mode, try that first */
 	if (drvdata->etr_mode != ETR_MODE_AUTO)
 		rc = tmc_etr_mode_alloc_buf(drvdata->etr_mode, drvdata,
 					    etr_buf, node, pages);
+
+	if (has_etr_resrv_mem) {
+		rc = tmc_etr_mode_alloc_buf(ETR_MODE_RESRV, drvdata,
+					    etr_buf, node, pages);
+		/* Fallback to other modes of allocation if
+		 * reserved memory region cannot be used.
+		 */
+		if (!rc)
+			goto done;
+	}
 
 	/*
 	 * If we have to use an existing list of pages, we cannot reliably
@@ -903,6 +1020,8 @@ static struct etr_buf *tmc_alloc_etr_buf(struct tmc_drvdata *drvdata,
 	if (rc && buf_hw.has_catu)
 		rc = tmc_etr_mode_alloc_buf(ETR_MODE_CATU, drvdata,
 					    etr_buf, node, pages);
+
+done:
 	if (rc) {
 		kfree(etr_buf);
 		return ERR_PTR(rc);
@@ -959,12 +1078,29 @@ tmc_etr_buf_insert_barrier_packet(struct etr_buf *etr_buf, u64 offset)
 static void tmc_sync_etr_buf(struct tmc_drvdata *drvdata)
 {
 	struct etr_buf *etr_buf = drvdata->etr_buf;
+	struct coresight_device *csdev = drvdata->csdev;
 	u64 rrp, rwp;
 	u32 status;
 
 	rrp = tmc_read_rrp(drvdata);
 	rwp = tmc_read_rwp(drvdata);
 	status = readl_relaxed(drvdata->base + TMC_STS);
+
+	if (coresight_get_mode(csdev) == CS_MODE_READ_PREVBOOT && drvdata->reg_metadata.vaddr) {
+		struct tmc_register_snapshot *reg_ptr;
+
+		reg_ptr = drvdata->reg_metadata.vaddr;
+		if (reg_ptr->valid != 1) {
+			dev_err(&drvdata->csdev->dev, "No or invalid ETR register snapshot captured from previous boot\n");
+			etr_buf->len = 0;
+			etr_buf->full = false;
+			return;
+		}
+
+		rrp = reg_ptr->rrp | ((u64)reg_ptr->rrphi << 32);
+		rwp = reg_ptr->rwp | ((u64)reg_ptr->rwphi << 32);
+		status = reg_ptr->sts;
+	}
 
 	/*
 	 * If there were memory errors in the session, truncate the
@@ -993,6 +1129,9 @@ static int __tmc_etr_enable_hw(struct tmc_drvdata *drvdata)
 
 	CS_UNLOCK(drvdata->base);
 
+	if (drvdata->etr_quirks & CORESIGHT_QUIRK_ETR_RESET_CTL_REG)
+		tmc_disable_hw(drvdata);
+
 	/* Wait for TMCSReady bit to be set */
 	rc = tmc_wait_for_tmcready(drvdata);
 	if (rc) {
@@ -1002,7 +1141,10 @@ static int __tmc_etr_enable_hw(struct tmc_drvdata *drvdata)
 		return rc;
 	}
 
-	writel_relaxed(etr_buf->size / 4, drvdata->base + TMC_RSZ);
+	if (drvdata->etr_quirks & CORESIGHT_QUIRK_ETR_BUFFSIZE_8BX)
+		writel_relaxed(etr_buf->size / 8, drvdata->base + TMC_RSZ);
+	else
+		writel_relaxed(etr_buf->size / 4, drvdata->base + TMC_RSZ);
 	writel_relaxed(TMC_MODE_CIRCULAR_BUFFER, drvdata->base + TMC_MODE);
 
 	axictl = readl_relaxed(drvdata->base + TMC_AXICTL);
@@ -1035,7 +1177,7 @@ static int __tmc_etr_enable_hw(struct tmc_drvdata *drvdata)
 
 	writel_relaxed(TMC_FFCR_EN_FMT | TMC_FFCR_EN_TI |
 		       TMC_FFCR_FON_FLIN | TMC_FFCR_FON_TRIG_EVT |
-		       TMC_FFCR_TRIGON_TRIGIN,
+		       TMC_FFCR_TRIGON_TRIGIN | TMC_FFCR_STOP_ON_FLUSH,
 		       drvdata->base + TMC_FFCR);
 	writel_relaxed(drvdata->trigger_cntr, drvdata->base + TMC_TRG);
 	tmc_enable_hw(drvdata);
@@ -1048,6 +1190,7 @@ static int tmc_etr_enable_hw(struct tmc_drvdata *drvdata,
 			     struct etr_buf *etr_buf)
 {
 	int rc;
+	struct coresight_device *etr = drvdata->csdev;
 
 	/* Callers should provide an appropriate buffer for use */
 	if (WARN_ON(!etr_buf))
@@ -1063,7 +1206,8 @@ static int tmc_etr_enable_hw(struct tmc_drvdata *drvdata,
 	rc = coresight_claim_device(drvdata->csdev);
 	if (!rc) {
 		drvdata->etr_buf = etr_buf;
-		rc = __tmc_etr_enable_hw(drvdata);
+		if (coresight_get_mode(etr) != CS_MODE_READ_PREVBOOT)
+			rc = __tmc_etr_enable_hw(drvdata);
 		if (rc) {
 			drvdata->etr_buf = NULL;
 			coresight_disclaim_device(drvdata->csdev);
@@ -1238,12 +1382,18 @@ static int tmc_enable_etr_sink_sysfs(struct coresight_device *csdev)
 
 	ret = tmc_etr_enable_hw(drvdata, sysfs_buf);
 	if (!ret) {
-		coresight_set_mode(csdev, CS_MODE_SYSFS);
+		if (coresight_get_mode(csdev) != CS_MODE_READ_PREVBOOT)
+			coresight_set_mode(csdev, CS_MODE_SYSFS);
 		csdev->refcnt++;
 	}
 
 out:
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
+
+	if (!ret && (drvdata->etr_quirks & CORESIGHT_QUIRK_ETM_SW_SYNC) &&
+	    (coresight_get_mode(csdev) != CS_MODE_READ_PREVBOOT))
+		smp_call_function_single(drvdata->rc_cpu, tmc_etr_timer_start,
+					 drvdata, true);
 
 	if (!ret)
 		dev_dbg(&csdev->dev, "TMC-ETR enabled\n");
@@ -1712,6 +1862,10 @@ static int tmc_disable_etr_sink(struct coresight_device *csdev)
 {
 	unsigned long flags;
 	struct tmc_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
+	enum cs_mode mode;
+
+	/* Cache the coresight_device->mode */
+	mode = coresight_get_mode(csdev);
 
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 
@@ -1737,6 +1891,11 @@ static int tmc_disable_etr_sink(struct coresight_device *csdev)
 
 	spin_unlock_irqrestore(&drvdata->spinlock, flags);
 
+	if ((drvdata->etr_quirks & CORESIGHT_QUIRK_ETM_SW_SYNC) &&
+	    (mode == CS_MODE_SYSFS))
+		smp_call_function_single(drvdata->rc_cpu, tmc_etr_timer_cancel,
+					 drvdata, true);
+
 	dev_dbg(&csdev->dev, "TMC-ETR disabled\n");
 	return 0;
 }
@@ -1749,18 +1908,93 @@ static const struct coresight_ops_sink tmc_etr_sink_ops = {
 	.free_buffer	= tmc_free_etr_buffer,
 };
 
+static int tmc_etr_panic_sync(struct coresight_device *csdev)
+{
+	u32 val;
+	struct tmc_register_snapshot *tmc;
+	struct tmc_drvdata *drvdata = dev_get_drvdata(csdev->dev.parent);
+
+	/* Make sure we have valid reserved memory */
+	if (!drvdata->reg_metadata.vaddr || !drvdata->resrv_mem.vaddr)
+		return 0;
+
+	tmc = (struct tmc_register_snapshot *)drvdata->reg_metadata.vaddr;
+	tmc->valid = 0x0;
+
+	CS_UNLOCK(drvdata->base);
+
+	/* Proceed only if ETR is enabled */
+	val = readl(drvdata->base + TMC_CTL);
+	if (!(val & TMC_CTL_CAPT_EN))
+		goto out;
+
+	val = readl(drvdata->base + TMC_FFSR);
+	/* Do manual flush and stop only if its not auto-stopped */
+	if (!(val & TMC_FFSR_FT_STOPPED)) {
+		dev_info(&csdev->dev,
+			 "%s: Triggering manual flush\n", __func__);
+		tmc_flush_and_stop(drvdata);
+	}
+
+	/* Sync registers from hardware to metadata region */
+	tmc->size = readl(drvdata->base + TMC_RSZ);
+	tmc->rrphi = readl(drvdata->base + TMC_RRPHI);
+	tmc->rrp = readl(drvdata->base + TMC_RRP);
+	tmc->rwphi = readl(drvdata->base + TMC_RWPHI);
+	tmc->rwp = readl(drvdata->base + TMC_RWP);
+	tmc->sts = readl(drvdata->base + TMC_STS);
+	tmc->trc_addrhi = drvdata->resrv_mem.paddr >> 32;
+	tmc->trc_addr =  drvdata->resrv_mem.paddr & 0xffffffff;
+
+	/*
+	 * Make sure all previous writes are completed,
+	 * before we mark valid
+	 */
+	dsb(sy);
+	tmc->valid = 0x1;
+
+	tmc_disable_hw(drvdata);
+
+	dev_info(&csdev->dev, "%s: success\n", __func__);
+out:
+	CS_UNLOCK(drvdata->base);
+
+	return 0;
+}
+
+static const struct coresight_ops_panic tmc_etr_sync_ops = {
+	.sync		= tmc_etr_panic_sync,
+};
+
 const struct coresight_ops tmc_etr_cs_ops = {
 	.sink_ops	= &tmc_etr_sink_ops,
+	.panic_ops	= &tmc_etr_sync_ops,
 };
+
 
 int tmc_read_prepare_etr(struct tmc_drvdata *drvdata)
 {
 	int ret = 0;
 	unsigned long flags;
+	struct coresight_device *etr = drvdata->csdev;
 
 	/* config types are set a boot time and never change */
 	if (WARN_ON_ONCE(drvdata->config_type != TMC_CONFIG_TYPE_ETR))
 		return -EINVAL;
+
+	if (coresight_get_mode(etr) == CS_MODE_READ_PREVBOOT) {
+		/* Initialize drvdata for reading trace data from last boot */
+		ret = tmc_enable_etr_sink_sysfs(etr);
+		if (ret)
+			return ret;
+		/* Update the buffer offset, len */
+		tmc_etr_sync_sysfs_buf(drvdata);
+		return 0;
+	}
+
+	if (drvdata->etr_quirks & CORESIGHT_QUIRK_ETR_NO_STOP_FLUSH)
+		smp_call_function_single(drvdata->rc_cpu, tmc_flushstop_etm_off,
+					 drvdata, true);
 
 	spin_lock_irqsave(&drvdata->spinlock, flags);
 	if (drvdata->reading) {
@@ -1793,6 +2027,7 @@ int tmc_read_unprepare_etr(struct tmc_drvdata *drvdata)
 {
 	unsigned long flags;
 	struct etr_buf *sysfs_buf = NULL;
+	struct coresight_device *etr = drvdata->csdev;
 
 	/* config types are set a boot time and never change */
 	if (WARN_ON_ONCE(drvdata->config_type != TMC_CONFIG_TYPE_ETR))
@@ -1823,6 +2058,16 @@ int tmc_read_unprepare_etr(struct tmc_drvdata *drvdata)
 	/* Free allocated memory out side of the spinlock */
 	if (sysfs_buf)
 		tmc_etr_free_sysfs_buf(sysfs_buf);
+
+	if (drvdata->buf && coresight_get_mode(etr) == CS_MODE_READ_PREVBOOT) {
+		coresight_set_mode(etr, CS_MODE_DISABLED);
+		tmc_etr_disable_hw(drvdata);
+	}
+
+	if ((coresight_get_mode(etr) == CS_MODE_SYSFS) &&
+	    (drvdata->etr_quirks & CORESIGHT_QUIRK_ETR_NO_STOP_FLUSH))
+		smp_call_function_single(drvdata->rc_cpu, tmc_flushstop_etm_on,
+					 drvdata, true);
 
 	return 0;
 }

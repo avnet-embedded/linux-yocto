@@ -65,10 +65,19 @@ static int octeon_i2c_wait(struct octeon_i2c *i2c)
 		return octeon_i2c_test_iflg(i2c) ? 0 : -ETIMEDOUT;
 	}
 
-	i2c->int_enable(i2c);
-	time_left = wait_event_timeout(i2c->queue, octeon_i2c_test_iflg(i2c),
-				       i2c->adap.timeout);
-	i2c->int_disable(i2c);
+	if (IS_LS_FREQ(i2c->twsi_freq)) {
+		i2c->int_enable(i2c);
+		time_left = wait_event_timeout(i2c->queue,
+					       octeon_i2c_test_iflg(i2c),
+					       i2c->adap.timeout);
+		i2c->int_disable(i2c);
+	} else {
+		time_left = 1000; /* 1ms */
+		do {
+			if (time_left--)
+				__udelay(1);
+		} while (!octeon_i2c_test_iflg(i2c) && time_left);
+	}
 
 	if (i2c->broken_irq_check && !time_left &&
 	    octeon_i2c_test_iflg(i2c)) {
@@ -179,6 +188,17 @@ static int octeon_i2c_hlc_wait(struct octeon_i2c *i2c)
 	return 0;
 }
 
+static int octeon_i2c_recovery(struct octeon_i2c *i2c)
+{
+	int ret;
+
+	ret = i2c_recover_bus(&i2c->adap);
+	if (ret)
+		/* recover failed, try hardware re-init */
+		ret = octeon_i2c_init_lowlevel(i2c);
+	return ret;
+}
+
 static int octeon_i2c_check_status(struct octeon_i2c *i2c, int final_read)
 {
 	u8 stat;
@@ -239,8 +259,9 @@ static int octeon_i2c_check_status(struct octeon_i2c *i2c, int final_read)
 		return -EOPNOTSUPP;
 
 	case STAT_TXDATA_NAK:
-	case STAT_BUS_ERROR:
 		return -EIO;
+	case STAT_BUS_ERROR:
+		return octeon_i2c_recovery(i2c) ? -EIO : -EAGAIN;
 	case STAT_TXADDR_NAK:
 	case STAT_RXADDR_NAK:
 	case STAT_AD2W_NAK:
@@ -251,22 +272,11 @@ static int octeon_i2c_check_status(struct octeon_i2c *i2c, int final_read)
 		/* Set BUS_MON_RST to reset bus monitor */
 		mode |= BUS_MON_RST_MASK;
 		octeon_i2c_writeq_flush(mode, i2c->twsi_base + OCTEON_REG_MODE(i2c));
-		return -EIO;
+		return octeon_i2c_recovery(i2c) ? -EIO : -EAGAIN;
 	default:
 		dev_err(i2c->dev, "unhandled state: %d\n", stat);
 		return -EIO;
 	}
-}
-
-static int octeon_i2c_recovery(struct octeon_i2c *i2c)
-{
-	int ret;
-
-	ret = i2c_recover_bus(&i2c->adap);
-	if (ret)
-		/* recover failed, try hardware re-init */
-		ret = octeon_i2c_init_lowlevel(i2c);
-	return ret;
 }
 
 /**

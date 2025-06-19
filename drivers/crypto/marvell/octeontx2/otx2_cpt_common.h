@@ -36,6 +36,7 @@ enum otx2_cpt_eng_type {
 	OTX2_CPT_AE_TYPES = 1,
 	OTX2_CPT_SE_TYPES = 2,
 	OTX2_CPT_IE_TYPES = 3,
+	OTX2_CPT_RE_TYPES = 4,
 	OTX2_CPT_MAX_ENG_TYPES,
 };
 
@@ -206,8 +207,17 @@ static inline bool cpt_feature_sgv2(struct pci_dev *pdev)
 	return false;
 }
 
+static inline bool cpt_feature_rxc_icb_cnt(struct pci_dev *pdev)
+{
+	if (!is_dev_otx2(pdev) && !is_dev_cn10ka_ax(pdev))
+		return true;
+
+	return false;
+}
+
 int otx2_cpt_send_ready_msg(struct otx2_mbox *mbox, struct pci_dev *pdev);
 int otx2_cpt_send_mbox_msg(struct otx2_mbox *mbox, struct pci_dev *pdev);
+void otx2_cpt_sync_mbox_bbuf(struct otx2_mbox *mbox, int devid);
 
 int otx2_cpt_send_af_reg_requests(struct otx2_mbox *mbox,
 				  struct pci_dev *pdev);
@@ -223,5 +233,6 @@ int otx2_cpt_detach_rsrcs_msg(struct otx2_cptlfs_info *lfs);
 int otx2_cpt_msix_offset_msg(struct otx2_cptlfs_info *lfs);
 int otx2_cpt_sync_mbox_msg(struct otx2_mbox *mbox);
 int otx2_cpt_lf_reset_msg(struct otx2_cptlfs_info *lfs, int slot);
+int otx2_cpt_lmtst_tbl_setup_msg(struct otx2_cptlfs_info *lfs);
 
 #endif /* __OTX2_CPT_COMMON_H */

@@ -112,6 +112,8 @@ struct scmi_clk_proto_ops {
 		      bool atomic);
 	int (*disable)(const struct scmi_protocol_handle *ph, u32 clk_id,
 		       bool atomic);
+	int (*available_rates)(const struct scmi_protocol_handle *ph, u32 clk_id,
+			       u64 *rates);
 	int (*state_get)(const struct scmi_protocol_handle *ph, u32 clk_id,
 			 bool *enabled, bool atomic);
 	int (*config_oem_get)(const struct scmi_protocol_handle *ph, u32 clk_id,
