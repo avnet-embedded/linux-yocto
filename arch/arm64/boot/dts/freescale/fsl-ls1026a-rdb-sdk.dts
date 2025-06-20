@@ -27,7 +27,7 @@
 	};
 
 	thermal-zones {
-		core-cluster {
+		cluster-thermal {
 			cooling-maps {
 				map0 {
 					cooling-device =
