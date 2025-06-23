@@ -762,16 +762,16 @@ int del_mtd_device(struct mtd_info *mtd)
 		goto out_error;
 	}
 
+	/* No need to get a refcount on the module containing
+		the notifier, since we hold the mtd_table_mutex */
+	list_for_each_entry(not, &mtd_notifiers, list)
+		not->remove(mtd);
+
 	while (master->mtd_event_remove) {
 		if (kref_read(&mtd->refcnt) == 1)
 			break;
 		__put_mtd_device(mtd);
 	}
-
-	/* No need to get a refcount on the module containing
-		the notifier, since we hold the mtd_table_mutex */
-	list_for_each_entry(not, &mtd_notifiers, list)
-		not->remove(mtd);
 
 	kref_put(&mtd->refcnt, mtd_device_release);
 	ret = 0;
