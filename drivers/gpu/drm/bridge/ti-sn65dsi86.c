@@ -152,7 +152,6 @@
  * @ln_assign:    Value to program to the LN_ASSIGN register.
  * @ln_polrs:     Value for the 4-bit LN_POLRS field of SN_ENH_FRAME_REG.
  * @comms_enabled: If true then communication over the aux channel is enabled.
- * @plugged:       Plug connection status
  * @comms_mutex:   Protects modification of comms_enabled.
  *
  * @gchip:        If we expose our GPIOs, this is used.
@@ -191,7 +190,6 @@ struct ti_sn65dsi86 {
 	u8				ln_assign;
 	u8				ln_polrs;
 	bool				comms_enabled;
-	bool				plugged;
 	struct mutex			comms_mutex;
 
 #if defined(CONFIG_OF_GPIO)
@@ -1179,23 +1177,14 @@ static void ti_sn_bridge_atomic_post_disable(struct drm_bridge *bridge,
 static enum drm_connector_status ti_sn_bridge_detect(struct drm_bridge *bridge)
 {
 	struct ti_sn65dsi86 *pdata = bridge_to_ti_sn65dsi86(bridge);
-	int val;
-	u8 link_status[DP_LINK_STATUS_SIZE];
+	int val = 0;
 
-	if (!pdata->plugged) {
-	  /*
-	   * Runtime reference is grabbed in ti_sn_bridge_hpd_enable()
-	   * as the chip won't report HPD just after being powered on.
-	   * HPD_DEBOUNCED_STATE reflects correct state only after the
-	   * debounce time (~100-400 ms).
-	   */
-		val = drm_dp_dpcd_read_link_status(&pdata->aux, link_status);
-		if (val > 0)
-			pdata->plugged = true;
-	}
+	pm_runtime_get_sync(pdata->dev);
+	regmap_read(pdata->regmap, SN_HPD_DISABLE_REG, &val);
+	pm_runtime_put_autosuspend(pdata->dev);
 
-	return pdata->plugged ? connector_status_connected
-			      : connector_status_disconnected;
+	return val & HPD_DEBOUNCED_STATE ? connector_status_connected
+					 : connector_status_disconnected;
 }
 
 static const struct drm_edid *ti_sn_bridge_edid_read(struct drm_bridge *bridge,
@@ -1339,11 +1328,8 @@ static int ti_sn_bridge_probe(struct auxiliary_device *adev,
 	pdata->bridge.type = pdata->next_bridge->type == DRM_MODE_CONNECTOR_DisplayPort
 			   ? DRM_MODE_CONNECTOR_DisplayPort : DRM_MODE_CONNECTOR_eDP;
 
-	pdata->plugged = false;
-	pdata->bridge.ops |= DRM_BRIDGE_OP_DETECT;
-
 	if (pdata->bridge.type == DRM_MODE_CONNECTOR_DisplayPort) {
-		pdata->bridge.ops = DRM_BRIDGE_OP_EDID | DRM_BRIDGE_OP_HPD;
+		pdata->bridge.ops = DRM_BRIDGE_OP_EDID | DRM_BRIDGE_OP_DETECT;
 		/*
 		 * If comms were already enabled they would have been enabled
 		 * with the wrong value of HPD_DISABLE. Update it now. Comms
