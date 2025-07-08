@@ -145,6 +145,7 @@ static void octeontx_edac_inject_error(struct octeontx_edac_pvt *pvt)
 	bool call = false;
 	u64 val = einj_val;
 	unsigned long error_type = pvt->error_type & 0x0000FFFF;
+	int cpu;
 
 	if (soc_device_match(cn10_socinfo)) {
 		arg[0] = CN10K_EDAC_INJECT;
@@ -158,7 +159,9 @@ static void octeontx_edac_inject_error(struct octeontx_edac_pvt *pvt)
 			arg[3] = pvt->error_type;	// Full error type and let ATF handle it.
 			arg[4] = pvt->address;		// Address is in arg[4] instead of arg[2].
 		}
+		cpu = get_cpu();
 		arm_smccc_smc(arg[0], arg[1], arg[2], arg[3], arg[4], arg[5], arg[6], arg[7], &res);
+		put_cpu();
 	} else {
 		arg[0] = OCTEONTX2_EDAC_INJECT;
 		arg[1] = 0x3;
@@ -181,7 +184,9 @@ static void octeontx_edac_inject_error(struct octeontx_edac_pvt *pvt)
 			break;
 		}
 
+		cpu = get_cpu();
 		arm_smccc_smc(arg[0], arg[1], arg[2], arg[3], arg[4], arg[5], arg[6], arg[7], &res);
+		put_cpu();
 
 		if (read && val != einj_val)
 			otx_printk(KERN_DEBUG, "read mismatch\n");
@@ -191,7 +196,7 @@ static void octeontx_edac_inject_error(struct octeontx_edac_pvt *pvt)
 	}
 
 	otx_printk(KERN_DEBUG, "Inject: CPU%d: (0x%lx, 0x%lx, 0x%lx, 0x%lx, 0x%lx) 0x%lx\n",
-			smp_processor_id(),
+			cpu,
 			arg[0], arg[1], arg[2], arg[3], arg[4], res.a0);
 }
 
