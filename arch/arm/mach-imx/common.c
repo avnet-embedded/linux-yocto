@@ -126,11 +126,6 @@ put_enet_node:
 
 #if !defined(CONFIG_SOC_IMX6SL)
 u32 imx6_lpddr2_freq_change_start, imx6_lpddr2_freq_change_end;
-void mx6_lpddr2_freq_change(u32 freq, int bus_freq_mode) {}
-#endif
-
-#if !defined(CONFIG_SOC_IMX6SLL)
-void imx6sll_lpddr2_freq_change(u32 freq, int bus_freq_mode) {}
 #endif
 
 #if !defined(CONFIG_SOC_IMX6SX) && !defined(CONFIG_SOC_IMX6UL)
@@ -150,9 +145,3 @@ void mx6_ddr3_freq_change(u32 freq, void *ddr_settings,
 void mx6q_lpddr2_freq_change(u32 freq, void *ddr_settings) {}
 void wfe_smp_freq_change(u32 cpuid, u32 *ddr_freq_change_done) {}
 #endif
-
-#if !defined(CONFIG_SOC_IMX7D)
-void imx7_smp_wfe(u32 cpuid, u32 ocram_base) {}
-void imx7d_ddr3_freq_change(u32 freq) {}
-#endif
-
