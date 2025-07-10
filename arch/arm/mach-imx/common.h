@@ -229,3 +229,16 @@ extern const struct smp_operations ls1021a_smp_ops;
 
 extern bool uart_from_osc;
 #endif
+
+#if !defined(CONFIG_SOC_IMX6SL)
+static inline void mx6_lpddr2_freq_change(u32 freq, int bus_freq_mode) {}
+#endif
+
+#if !defined(CONFIG_SOC_IMX6SLL)
+static inline void imx6sll_lpddr2_freq_change(u32 freq, int bus_freq_mode) {}
+#endif
+
+#if !defined(CONFIG_SOC_IMX7D)
+static inline void imx7_smp_wfe(u32 cpuid, u32 ocram_base) {}
+static inline void imx7d_ddr3_freq_change(u32 freq) {}
+#endif
