@@ -43,10 +43,10 @@
 				#size-cells = <2>;
 				dma-coherent;
 				interrupt-map-mask = <0 0 0 7>;
-				interrupt-map = <0 0 0 1 &pcie_0_pcie_s10 1>,
-						<0 0 0 2 &pcie_0_pcie_s10 2>,
-						<0 0 0 3 &pcie_0_pcie_s10 3>,
-						<0 0 0 4 &pcie_0_pcie_s10 4>;
+				interrupt-map = <0 0 0 1 &intc 0 20 4>,
+						<0 0 0 2 &intc 0 21 4>,
+						<0 0 0 3 &intc 0 22 4>,
+						<0 0 0 4 &intc 0 23 4>;
 			}; //end pcie@0x010000000 (pcie_0_pcie_s10)
 
 			pcie_0_msi_irq: msi@10008080 {
