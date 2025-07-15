@@ -4,19 +4,20 @@
  * Copyright (c) 2022 Xilinx Inc.
  * Copyright (C) 2022-2023, Advanced Micro Devices, Inc.
  */
-#include <linux/cacheflush.h>
 #include <crypto/engine.h>
 #include <crypto/hash.h>
 #include <crypto/internal/hash.h>
 #include <crypto/sha3.h>
-#include <linux/crypto.h>
+#include <linux/cacheflush.h>
+#include <linux/cleanup.h>
 #include <linux/device.h>
 #include <linux/dma-mapping.h>
+#include <linux/err.h>
 #include <linux/firmware/xlnx-zynqmp.h>
-#include <linux/init.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/spinlock.h>
 #include <linux/platform_device.h>
 
 #define CONTINUE_PACKET		BIT(31)
@@ -52,6 +53,8 @@ struct zynqmp_sha_desc_ctx {
 
 static dma_addr_t update_dma_addr, final_dma_addr;
 static char *ubuf, *fbuf;
+
+static DEFINE_SPINLOCK(zynqmp_sha_lock);
 
 static int zynqmp_sha_init_tfm(struct crypto_tfm *tfm)
 {
