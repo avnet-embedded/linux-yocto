@@ -516,6 +516,8 @@ struct dpaa2_eth_priv {
 	u16 tx_data_offset;
 	void __iomem *onestep_reg_base;
 	u8 ptp_correction_off;
+	void (*dpaa2_set_onestep_params_cb)(struct dpaa2_eth_priv *priv,
+					    u32 offset, u8 udp);
 	struct fsl_mc_device *dpbp_dev;
 	u16 rx_buf_size;
 	u16 bpid;
