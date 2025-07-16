@@ -229,6 +229,9 @@ struct aie_partition_query {
 	aie_part_id_get_val((part_id), START_COL)
 #define aie_part_id_get_num_cols(part_id) \
 	aie_part_id_get_val((part_id), NUM_COLS)
+#define aie_calc_part_id(start_col, num_col) \
+	(((start_col) << AIE_PART_ID_START_COL_SHIFT) + \
+	((num_col) << AIE_PART_ID_NUM_COLS_SHIFT))
 
 /**
  * struct aie_partition_req - AIE request partition arguments
@@ -295,6 +298,8 @@ struct aie_partition_init_args {
 #define AIE_PART_INIT_OPT_HW_ERR_STS		BIT(18)
 #define AIE_PART_INIT_OPT_DIS_MEM_INTERLEAVE	BIT(19)
 #define AIE_PART_INIT_OPT_HANDSHAKE		BIT(20)
+#define AIE_PART_INIT_OPT_DIS_TLAST_ERROR	BIT(21)
+#define AIE_PART_INIT_OPT_EN_TLAST_ERROR	BIT(22)
 
 #define AIE_PART_INIT_OPT_DEFAULT	(AIE_PART_INIT_OPT_COLUMN_RST		|	\
 					 AIE_PART_INIT_OPT_SHIM_RST		|	\
@@ -781,47 +786,5 @@ struct aie_rsc_user_stat_array {
  */
 #define AIE_UPDATE_SHIMDMA_DMABUF_BD_ADDR_IOCTL	_IOW(AIE_IOCTL_BASE, 0x1e, \
 						struct aie_dmabuf_bd_args)
-#if IS_ENABLED(CONFIG_XILINX_AIE)
-
-int aie_partition_write_privileged_mem(struct device *dev, size_t offset, size_t len, void *data);
-int aie_partition_read_privileged_mem(struct device *dev, size_t offset, size_t len, void *data);
-bool aie_partition_check_noc_aximm(struct device *dev, struct aie_location *loc);
-int aie_partition_check_uc_aximm(struct device *dev, struct aie_location *loc);
-int aie_partition_uc_zeroize_mem(struct device *dev, struct aie_location *loc, u32 regval);
-int aie_load_cert(struct device *dev, unsigned char *elf_addr);
-
-#else /* IS_ENABLED(CONFIG_XILINX_AIE) */
-
-int aie_partition_write_privileged_mem(struct device *dev, size_t offset, size_t len, void *data)
-{
-	return -EINVAL;
-}
-
-int aie_partition_read_privileged_mem(struct device *dev, size_t offset, size_t len, void *data)
-{
-	return -EINVAL;
-}
-
-bool aie_partition_check_noc_aximm(struct device *dev, struct aie_location *loc)
-{
-	return false;
-}
-
-int aie_partition_check_uc_aximm(struct device *dev, struct aie_location *loc)
-{
-	return 0;
-}
-
-int aie_partition_uc_zeroize_mem(struct device *dev, struct aie_location *loc, u32 regval)
-{
-	return -EINVAL;
-}
-
-int aie_load_cert(struct device *dev, unsigned char *elf_addr)
-{
-	return -EINVAL;
-}
-
-#endif /* IS_ENABLED(CONFIG_XILINX_AIE) */
 
 #endif

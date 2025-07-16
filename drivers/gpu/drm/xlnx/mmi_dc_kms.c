@@ -188,12 +188,10 @@ static void mmi_dc_crtc_atomic_flush(struct drm_crtc *crtc,
 {
 	struct drm_pending_vblank_event *vblank;
 	struct mmi_dc *dc = crtc_to_dc(crtc);
-	struct drm_display_mode *adjusted_mode = &crtc->state->adjusted_mode;
 
-	if (dc->reconfig_hw) {
+	if (dc->reconfig_hw || !mmi_dc_has_visible_planes(dc, state)) {
 		dc->reconfig_hw = false;
-		mmi_dc_toggle_ext_reset(dc);
-		mmi_dc_enable(dc, adjusted_mode);
+		mmi_dc_reset_hw(dc);
 		mmi_dc_reconfig_planes(dc, state);
 	}
 
@@ -520,6 +518,12 @@ static int mmi_dc_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, dc);
 	dc->dev = &pdev->dev;
+
+	ret = dma_set_mask_and_coherent(dc->dev, DMA_BIT_MASK(48));
+	if (ret < 0) {
+		dev_err(dc->dev, "failed to set DMA mask %d\n", ret);
+		return ret;
+	}
 
 	dc->pixel_clk = devm_clk_get(dc->dev, "pl_vid_func_clk");
 	if (IS_ERR(dc->pixel_clk)) {

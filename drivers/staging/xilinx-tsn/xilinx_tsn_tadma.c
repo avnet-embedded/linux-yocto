@@ -95,7 +95,7 @@ static inline bool mac_vlan_equal(const u8 addr1[8],
 	bool ret = 1;
 
 	if ((a[0] ^ b[0]) | (a[1] ^ b[1]) |
-		(a[2] ^ b[2]) | (a[3] ^ a[3])) {
+		(a[2] ^ b[2]) | (a[3] ^ b[3])) {
 		ret = 0;
 	}
 
@@ -285,14 +285,29 @@ static int tadma_sfm_program(struct net_device *ndev, int sid,
 	return 0;
 }
 
+static u32 tadma_get_last_sfm_trigger(struct axienet_local *lp)
+{
+	u32 sfm_offset, trigger;
+
+	if (lp->get_sid == 0)
+		return 0;
+
+	sfm_offset = sfm_entry_offset(lp, lp->get_sid - 1);
+	trigger = tadma_ior(lp, sfm_offset) & XTADMA_STR_TIME_TICKS_MASK;
+	trigger *= XTADMA_STR_TIME_NS_PER_TICK;
+
+	return trigger;
+}
+
 static int tadma_set_contiguous_mode(struct net_device *ndev, enum qtype qtype)
 {
 	struct axienet_local *lp = netdev_priv(ndev);
+	u32 last_trigger;
 	int sid, ret;
 
-	if (lp->get_sid >= lp->num_streams - 1) {
+	if (lp->get_sid >= lp->num_streams) {
 		dev_info(&ndev->dev, "Can't support more than %d streams\n",
-			 lp->get_sid + 1);
+			 lp->get_sid);
 		return -EINVAL;
 	}
 
@@ -302,9 +317,18 @@ static int tadma_set_contiguous_mode(struct net_device *ndev, enum qtype qtype)
 		return -EINVAL;
 	}
 
+	last_trigger = tadma_get_last_sfm_trigger(lp);
+	if (last_trigger + NSEC_PER_MSEC > XTADMA_STR_TIME_MAX) {
+		dev_warn(&ndev->dev,
+			 "Can't add contiguous mode stream for qt %d as it exceeds max time %ld ns\n",
+			 qtype, XTADMA_STR_TIME_MAX);
+		return -ERANGE;
+	}
+
 	sid = lp->get_sid++;
 	lp->get_sfm++;
-	ret = tadma_sfm_program(ndev, sid, qtype, NSEC_PER_MSEC, 0);
+	ret = tadma_sfm_program(ndev, sid, qtype, last_trigger + NSEC_PER_MSEC,
+				0);
 	if (ret)
 		return ret;
 
@@ -501,9 +525,10 @@ static int tadma_get_strid(struct sk_buff *skb,
 
 	memcpy(mac_vlan, vhdr->h_dest, 6);
 
-	vlan_tci = ntohs(vhdr->h_vlan_TCI);
+	vlan_tci = (ntohs(vhdr->h_vlan_TCI) & VLAN_VID_MASK) |
+		(qt << VLAN_PRIO_SHIFT);
 
-	mac_vlan[6] = (vlan_tci >> 8) & 0x0f;
+	mac_vlan[6] = (vlan_tci >> 8) & 0xff;
 	mac_vlan[7] = (vlan_tci & 0xff);
 	if (qt == qt_st && lp->default_st_sid >= 0)
 		return lp->default_st_sid;
@@ -809,8 +834,8 @@ int axienet_tadma_add_stream(struct net_device *ndev, void __user *useraddr)
 
 	memcpy(mac_vlan, stream.dmac, 6);
 
-	vlan_tci = stream.vid & VLAN_VID_MASK;
-	mac_vlan[6] = (vlan_tci >> 8) & 0x0f;
+	vlan_tci = (stream.vid & VLAN_VID_MASK) | (qtype << VLAN_PRIO_SHIFT);
+	mac_vlan[6] = (vlan_tci >> 8) & 0xff;
 	mac_vlan[7] = (vlan_tci & 0xff);
 
 	idx = tadma_macvlan_hash(lp, mac_vlan);

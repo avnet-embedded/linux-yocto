@@ -65,6 +65,7 @@
 #define XAS_MAC_MSB_OFFSET			0x00010
 #define XAS_MAC_MSB_FF_MASK_SHIFT		(16)
 #define XAS_PREEMPTION_QUEUE_MAP_OFFSET		0x00014
+#define XAS_PTP_SCHED_CTRL_OFFSET		0x00018
 
 #define XAS_EP2MAC_PRI7_FIFOT_OFFSET		0x00020
 #define XAS_EP2MAC_PRI6_FIFOT_OFFSET		0x00024
@@ -191,6 +192,7 @@
 /* endpoint extension control register */
 #define XAE_EP_EXT_CTRL_OFFSET			0x0058
 #define XAE_EP_EXT_CTRL1_OFFSET			0x005C
+#define XAE_EP_EXT_MGMT_DMA_MAP_OFFSET		0x00AC
 #define XAE_MGMT_QUEUING_OPTIONS_OFFSET		0x0054
 #define XAE_EX_EP_BROADCAST_PKT_SWITCH		BIT(7)
 #define XAE_EX_EP_MULTICAST_PKT_SWITCH		BIT(6)
@@ -494,4 +496,11 @@ int tsn_switch_pvid_add(struct native_vlan *port);
 int xlnx_switchdev_init(void);
 void xlnx_switchdev_remove(void);
 #endif
+
+u8 xlnx_switch_get_ptp_rel_prio(u8 switch_prt);
+u8 xlnx_switch_get_ptp_gates(u8 switch_prt);
+void xlnx_switch_set_ptp_rel_prio(u8 switch_prt, u8 value);
+void xlnx_switch_set_ptp_gates(u8 switch_prt, u8 value);
+u32 xlnx_switch_get_pqmr(void);
+
 #endif /* XILINX_TSN_SWITCH_H */

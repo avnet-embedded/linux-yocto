@@ -593,7 +593,14 @@ static inline void axienet_mrmac_reset(struct axienet_local *lp)
 	reg = axienet_ior(lp, MRMAC_MODE_OFFSET);
 	reg &= ~MRMAC_CTL_RATE_CFG_MASK;
 
-	if (lp->max_speed == SPEED_25000) {
+	if (lp->max_speed == SPEED_100000) {
+		axis_cfg = MRMAC_CTL_AXIS_CFG_100G_IND_384;
+		serdes_width = (lp->gt_mode_narrow ?
+				MRMAC_CTL_SERDES_WIDTH_100G_NRW :
+				MRMAC_CTL_SERDES_WIDTH_100G_WIDE);
+		reg |= MRMAC_CTL_DATA_RATE_100G;
+
+	} else if (lp->max_speed == SPEED_25000) {
 		axis_cfg = (lp->mrmac_stream_dwidth == MRMAC_STREAM_DWIDTH_128 ?
 			    MRMAC_CTL_AXIS_CFG_25G_IND_128 :
 			    MRMAC_CTL_AXIS_CFG_25G_IND_64);
@@ -835,14 +842,35 @@ static int dcmac_gt_reset(struct net_device *ndev)
 	return ret;
 }
 
+static inline int get_mrmac_gtlanes_count(int port_speed)
+{
+	int lane_count;
+
+	switch (port_speed) {
+	case SPEED_40000:
+	case SPEED_100000:
+		lane_count = 1;
+		break;
+	case SPEED_50000:
+		lane_count = 2;
+		break;
+	default:
+		/* 10G / 25G */
+		lane_count = 4;
+		break;
+	}
+	return lane_count;
+}
+
 static inline int axienet_mrmac_gt_reset(struct net_device *ndev)
 {
 	struct axienet_local *lp = netdev_priv(ndev);
 	u32 err, val;
-	int i;
+	int i, num_gtlanes;
 
+	num_gtlanes = get_mrmac_gtlanes_count(lp->max_speed);
 	if (mrmac_pll_rst == 0) {
-		for (i = 0; i < MRMAC_MAX_GT_LANES; i++) {
+		for (i = 0; i < num_gtlanes; i++) {
 			iowrite32(MRMAC_GT_RST_ALL_MASK, (lp->gt_ctrl +
 				  (MRMAC_GT_LANE_OFFSET * i) +
 				  MRMAC_GT_CTRL_OFFSET));
@@ -862,7 +890,11 @@ static inline int axienet_mrmac_gt_reset(struct net_device *ndev)
 		mrmac_pll_rst = 1;
 	}
 
-	if (lp->max_speed == SPEED_25000)
+	if (lp->max_speed == SPEED_100000)
+		iowrite32(MRMAC_GT_100G_MASK, (lp->gt_ctrl +
+			  MRMAC_GT_LANE_OFFSET * lp->gt_lane +
+			  MRMAC_GT_RATE_OFFSET));
+	else if (lp->max_speed == SPEED_25000)
 		iowrite32(MRMAC_GT_25G_MASK, (lp->gt_ctrl +
 			  MRMAC_GT_LANE_OFFSET * lp->gt_lane +
 			  MRMAC_GT_RATE_OFFSET));
@@ -2001,9 +2033,9 @@ static int axienet_queue_xmit(struct sk_buff *skb,
 			return NETDEV_TX_BUSY;
 		}
 #ifdef CONFIG_AXIENET_HAS_MCDMA
-			mcdma_desc_set_phys_addr(lp, phys, cur_p);
+		mcdma_desc_set_phys_addr(lp, phys, cur_p);
 #else
-			desc_set_phys_addr(lp, phys, cur_p);
+		desc_set_phys_addr(lp, phys, cur_p);
 #endif
 	}
 
@@ -2038,9 +2070,9 @@ static int axienet_queue_xmit(struct sk_buff *skb,
 		phys = skb_frag_dma_map(ndev->dev.parent, frag, 0, len,
 					DMA_TO_DEVICE);
 #ifdef CONFIG_AXIENET_HAS_MCDMA
-			mcdma_desc_set_phys_addr(lp, phys, cur_p);
+		mcdma_desc_set_phys_addr(lp, phys, cur_p);
 #else
-			desc_set_phys_addr(lp, phys, cur_p);
+		desc_set_phys_addr(lp, phys, cur_p);
 #endif
 		cur_p->cntrl = len;
 		cur_p->tx_desc_mapping = DESC_DMA_MAP_PAGE;
@@ -2056,7 +2088,6 @@ out:
 #endif
 	cur_p->tx_skb = skb;
 
-	tail_p = q->tx_bd_p + sizeof(*q->tx_bd_v) * q->tx_bd_tail;
 	/* Ensure BD write before starting transfer */
 	wmb();
 
@@ -2258,7 +2289,7 @@ static int axienet_recv(struct net_device *ndev, int budget,
 				skb->ip_summed = CHECKSUM_COMPLETE;
 			}
 
-		napi_gro_receive(napi, skb);
+			napi_gro_receive(napi, skb);
 
 			size += length;
 			packets++;
@@ -2273,9 +2304,9 @@ static int axienet_recv(struct net_device *ndev, int budget,
 				      lp->max_frm_size,
 				      DMA_FROM_DEVICE);
 #ifdef CONFIG_AXIENET_HAS_MCDMA
-			mcdma_desc_set_phys_addr(lp, phys, cur_p);
+		mcdma_desc_set_phys_addr(lp, phys, cur_p);
 #else
-			desc_set_phys_addr(lp, phys, cur_p);
+		desc_set_phys_addr(lp, phys, cur_p);
 #endif
 		if (unlikely(dma_mapping_error(ndev->dev.parent, phys))) {
 			phys = 0;
@@ -2890,14 +2921,19 @@ static int axienet_open(struct net_device *ndev)
 			goto err_phy;
 		}
 
-		axienet_iow(lp, MRMAC_STATRX_VALID_CTRL_OFFSET, MRMAC_STS_ALL_MASK);
-		val = axienet_ior(lp, MRMAC_STATRX_VALID_CTRL_OFFSET);
+		/* Distinguish a mis-reported status=good for 10G/25G MRMAC */
+		if (lp->max_speed == SPEED_10000 ||
+		    lp->max_speed == SPEED_25000) {
+			axienet_iow(lp, MRMAC_STATRX_VALID_CTRL_OFFSET, MRMAC_STS_ALL_MASK);
+			val = axienet_ior(lp, MRMAC_STATRX_VALID_CTRL_OFFSET);
 
-		if (!(val & MRMAC_RX_VALID_MASK)) {
-			netdev_err(ndev, "MRMAC Link is down! No recent RX Valid Control Code\n");
-			ret = -ENODEV;
-			goto err_phy;
+			if (!(val & MRMAC_RX_VALID_MASK)) {
+				netdev_err(ndev, "MRMAC Link is down! No recent RX Valid Control Code\n");
+				ret = -ENODEV;
+				goto err_phy;
+			}
 		}
+
 		netdev_info(ndev, "MRMAC setup at %d\n", lp->max_speed);
 		axienet_iow(lp, MRMAC_TICK_OFFSET, MRMAC_TICK_TRIGGER);
 	}
@@ -5229,9 +5265,9 @@ static int axienet_probe(struct platform_device *pdev)
 			goto cleanup_clk;
 		if (lp->axienet_config->mactype == XAXIENET_1_2p5G &&
 		    !lp->eth_hasnobuf)
-			lp->eth_irq = platform_get_irq(pdev, 0);
+			/* Check for Ethernet core IRQ (optional) */
+			lp->eth_irq = platform_get_irq_optional(pdev, 0);
 
-		/* Check for Ethernet core IRQ (optional) */
 		if (lp->eth_irq <= 0)
 			dev_info(&pdev->dev, "Ethernet core IRQ not defined\n");
 
@@ -5402,11 +5438,6 @@ static int axienet_probe(struct platform_device *pdev)
 		ndev->netdev_ops = &axienet_netdev_dmaengine_ops;
 	else
 		ndev->netdev_ops = &axienet_netdev_ops;
-
-	lp->eth_irq = platform_get_irq(pdev, 0);
-	/* Check for Ethernet core IRQ (optional) */
-	if (lp->eth_irq <= 0)
-		dev_info(&pdev->dev, "Ethernet core IRQ not defined\n");
 
 	/* Retrieve the MAC address */
 	ret = of_get_mac_address(pdev->dev.of_node, mac_addr);

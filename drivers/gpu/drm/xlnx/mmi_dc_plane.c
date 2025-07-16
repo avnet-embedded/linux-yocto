@@ -11,6 +11,7 @@
 #include <drm/drm_fb_dma_helper.h>
 #include <drm/drm_fourcc.h>
 #include <drm/drm_framebuffer.h>
+#include <drm/drm_print.h>
 
 #include <linux/dmaengine.h>
 #include <linux/dma/xilinx_dpdma.h>
@@ -34,7 +35,7 @@ enum mmi_dc_plane_id {
 };
 
 /**
- * struct mmi_dc_format - DC format
+ * struct mmi_dc_format - DC HW config format data
  * @drm_format: DRM fourcc format
  * @buf_format: internal DC pixel format
  * @swap: swap color (U/V or R/B) channels
@@ -45,6 +46,16 @@ struct mmi_dc_format {
 	u32		buf_format;
 	bool		swap;
 	const u32	*sf;
+};
+
+/**
+ * struct mmi_dc_format_info - Cached DRM format info / HW format pair
+ * @drm: DRM format info
+ * @hw: DC format info
+ */
+struct mmi_dc_format_info {
+	const struct drm_format_info	*drm;
+	const struct mmi_dc_format	*hw;
 };
 
 /* TODO: more scaling factors */
@@ -112,8 +123,7 @@ struct mmi_dc_plane_info {
  * @dc: back pointer to the display controller device
  * @id: unique plane id
  * @info: corresponding plane info
- * @dc_format: current pixel format
- * @drm_format: DRM format description
+ * @format: active pixel format
  * @dmas: DMA channels used
  * @xt: DMA transfer template
  */
@@ -122,8 +132,7 @@ struct mmi_dc_plane {
 	struct mmi_dc			*dc;
 	enum mmi_dc_plane_id		id;
 	const struct mmi_dc_plane_info	*info;
-	const struct mmi_dc_format	*dc_format;
-	const struct drm_format_info	*drm_format;
+	struct mmi_dc_format_info	format;
 	struct dma_chan			*dmas[MMI_DC_MAX_NUM_SUB_PLANES];
 	struct dma_interleaved_template *xt;
 };
@@ -157,8 +166,8 @@ static void mmi_dc_blend_plane_set_csc(struct mmi_dc_plane *plane,
 	struct mmi_dc *dc = plane->dc;
 	unsigned int i, reg, swap[] = { 0, 1, 2 };
 
-	if (plane->dc_format->swap) {
-		if (plane->drm_format->is_yuv) {
+	if (plane->format.hw && plane->format.hw->swap) {
+		if (plane->format.drm->is_yuv) {
 			/* swap U and V */
 			swap[1] = 2;
 			swap[2] = 1;
@@ -191,12 +200,12 @@ static void mmi_dc_blend_plane_enable(struct mmi_dc_plane *plane)
 	const u32 *offsets;
 	u32 val;
 
-	val = (plane->drm_format->is_yuv ? 0 : MMI_DC_V_BLEND_RGB_MODE) |
-	      (plane->drm_format->hsub > 1 ? MMI_DC_V_BLEND_EN_US : 0);
+	val = (plane->format.drm->is_yuv ? 0 : MMI_DC_V_BLEND_RGB_MODE) |
+	      (plane->format.drm->hsub > 1 ? MMI_DC_V_BLEND_EN_US : 0);
 
 	dc_write_blend(dc, MMI_DC_V_BLEND_LAYER_CONTROL(plane->id), val);
 
-	if (plane->drm_format->is_yuv) {
+	if (plane->format.drm->is_yuv) {
 		coeffs = csc_sdtv_to_rgb_matrix;
 		offsets = csc_sdtv_to_rgb_offsets;
 	} else {
@@ -226,25 +235,24 @@ static void mmi_dc_blend_plane_disable(struct mmi_dc_plane *plane)
 /**
  * mmi_dc_avbuf_plane_set_format - Set AVBUF format
  * @plane: DC plane
- * @format: format to set
  *
  * Configure the audio/video buffer manager according to the given pixel format
  */
-static void mmi_dc_avbuf_plane_set_format(struct mmi_dc_plane *plane,
-					  const struct mmi_dc_format *format)
+static void mmi_dc_avbuf_plane_set_format(struct mmi_dc_plane *plane)
 {
 	struct mmi_dc *dc = plane->dc;
 	u32 val, i;
 
 	val = dc_read_avbuf(dc, MMI_DC_AV_BUF_FORMAT);
 	val &= ~MMI_DC_AV_BUF_FMT_MASK(plane->id);
-	val |= format->buf_format << MMI_DC_AV_BUF_FMT_SHIFT(plane->id);
+	val |= plane->format.hw->buf_format <<
+		MMI_DC_AV_BUF_FMT_SHIFT(plane->id);
 	dc_write_avbuf(dc, MMI_DC_AV_BUF_FORMAT, val);
 
-	for (i = 0; i < MMI_DC_AV_BUF_NUM_SF; ++i) {
+	for (i = 0; i < MMI_DC_NUM_CC; ++i) {
 		u32 reg = MMI_DC_AV_BUF_PLANE_CC_SCALE_FACTOR(plane->id, i);
 
-		dc_write_avbuf(dc, reg, format->sf[i]);
+		dc_write_avbuf(dc, reg, plane->format.hw->sf[i]);
 	}
 }
 
@@ -258,7 +266,7 @@ static void mmi_dc_avbuf_plane_enable(struct mmi_dc_plane *plane)
 	u32 val;
 	int ch;
 
-	for (ch = 0; ch < plane->drm_format->num_planes; ++ch)
+	for (ch = 0; ch < plane->format.drm->num_planes; ++ch)
 		dc_write_avbuf(dc, MMI_DC_AV_CHBUF(plane->id * 3 + ch),
 			       MMI_DC_AV_CHBUF_EN | MMI_DC_AV_CHBUF_BURST);
 
@@ -283,7 +291,7 @@ static void mmi_dc_avbuf_plane_disable(struct mmi_dc_plane *plane)
 	val |= MMI_DC_AV_BUF_VID_STREAM_SEL_NONE(plane->id);
 	dc_write_avbuf(dc, MMI_DC_AV_BUF_OUTPUT_AUDIO_VIDEO_SELECT, val);
 
-	for (ch = 0; ch < plane->drm_format->num_planes; ++ch)
+	for (ch = 0; ch < plane->format.drm->num_planes; ++ch)
 		dc_write_avbuf(dc, MMI_DC_AV_CHBUF(plane->id * 3 + ch),
 			       MMI_DC_AV_CHBUF_FLUSH);
 }
@@ -403,12 +411,12 @@ static void mmi_dc_plane_set_format(struct mmi_dc_plane *plane,
 {
 	unsigned int i;
 
-	plane->dc_format = mmi_dc_plane_find_format(plane, info->format);
-	if (WARN_ON(!plane->dc_format))
+	plane->format.drm = info;
+	plane->format.hw = mmi_dc_plane_find_format(plane, info->format);
+	if (WARN_ON(!plane->format.hw))
 		return;
-	plane->drm_format = info;
 
-	mmi_dc_avbuf_plane_set_format(plane, plane->dc_format);
+	mmi_dc_avbuf_plane_set_format(plane);
 
 	for (i = 0; i < info->num_planes; ++i) {
 		struct dma_chan *dma_channel = plane->dmas[i];
@@ -436,7 +444,7 @@ static void mmi_dc_plane_update(struct mmi_dc_plane *plane,
 				struct drm_plane_state *state)
 {
 	struct mmi_dc *dc = plane->dc;
-	const struct drm_format_info *info = plane->drm_format;
+	const struct drm_format_info *info = plane->format.drm;
 	unsigned int i;
 
 	for (i = 0; i < info->num_planes; ++i) {
@@ -484,7 +492,7 @@ static void mmi_dc_plane_disable(struct mmi_dc_plane *plane)
 {
 	unsigned int i;
 
-	for (i = 0; i < plane->drm_format->num_planes; ++i)
+	for (i = 0; i < plane->format.drm->num_planes; ++i)
 		dmaengine_terminate_sync(plane->dmas[i]);
 
 	mmi_dc_avbuf_plane_disable(plane);
@@ -525,16 +533,29 @@ static void mmi_dc_plane_atomic_update(struct drm_plane *plane,
 	struct mmi_dc_plane *dc_plane = drm_to_dc_plane(plane);
 	struct mmi_dc *dc = dc_plane->dc;
 
-	if (!old_state->fb ||
-	    old_state->fb->format->format != new_state->fb->format->format)
-		dc->reconfig_hw = true;
-
 	if (plane->type == DRM_PLANE_TYPE_PRIMARY)
 		mmi_dc_set_global_alpha(dc_plane->dc, new_state->alpha >> 8,
 					true);
 
-	if (!dc->reconfig_hw)
-		mmi_dc_plane_update(dc_plane, new_state);
+	/* Actual FB format changed - we have to reset DC */
+	if (dc_plane->format.hw &&
+	    new_state->fb->format->format != dc_plane->format.hw->drm_format)
+		dc->reconfig_hw = true;
+
+	if (dc->reconfig_hw)
+		return;
+
+	drm_WARN_ON(plane->dev, old_state->fb &&
+		    old_state->fb->format->format !=
+		    new_state->fb->format->format);
+
+	if (!old_state->fb) {
+		mmi_dc_plane_set_format(dc_plane,
+					new_state->fb->format);
+		mmi_dc_plane_enable(dc_plane);
+	}
+
+	mmi_dc_plane_update(dc_plane, new_state);
 }
 
 static void mmi_dc_plane_atomic_disable(struct drm_plane *plane,
@@ -761,14 +782,13 @@ static void mmi_dc_enable_planes(struct mmi_dc *dc,
 		struct drm_plane_state *new_state =
 			drm_atomic_get_new_plane_state(state, plane);
 
+		if (new_state && plane->type == DRM_PLANE_TYPE_PRIMARY)
+			mmi_dc_set_global_alpha(dc_plane->dc,
+						new_state->alpha >> 8, true);
 		if (new_state && new_state->fb) {
 			mmi_dc_plane_set_format(dc_plane,
 						new_state->fb->format);
 			mmi_dc_plane_enable(dc_plane);
-			if (plane->type == DRM_PLANE_TYPE_PRIMARY)
-				mmi_dc_set_global_alpha(dc_plane->dc,
-							new_state->alpha >> 8,
-							true);
 		}
 	}
 }
@@ -795,7 +815,7 @@ static void mmi_dc_update_planes(struct mmi_dc *dc,
 }
 
 /**
- * mmi_dc_reconfig_planes - Reset and reconfigure DC planes.
+ * mmi_dc_reconfig_planes - Restore DC planes configuration.
  * @dc: DC device
  * @state: New atomic state to apply
  */
@@ -804,4 +824,43 @@ void mmi_dc_reconfig_planes(struct mmi_dc *dc, struct drm_atomic_state *state)
 	mmi_dc_disable_planes(dc, state);
 	mmi_dc_enable_planes(dc, state);
 	mmi_dc_update_planes(dc, state);
+}
+
+/**
+ * mmi_dc_reset_planes - Reset planes historic format info.
+ * @dc: DC device
+ */
+void mmi_dc_reset_planes(struct mmi_dc *dc)
+{
+	unsigned int i;
+
+	for (i = 0; i < MMI_DC_NUM_PLANES; ++i) {
+		struct mmi_dc_plane *dc_plane = dc->planes[i];
+
+		if (dc_plane)
+			dc_plane->format.hw = NULL;
+	}
+}
+
+/**
+ * mmi_dc_has_visible_planes - Check if at least one plane is visible.
+ * @dc: DC device
+ * @state: New atomic state to check planes visibility against
+ */
+bool mmi_dc_has_visible_planes(struct mmi_dc *dc,
+			       struct drm_atomic_state *state)
+{
+	unsigned int i;
+
+	for (i = 0; i < MMI_DC_NUM_PLANES; ++i) {
+		struct mmi_dc_plane *dc_plane = dc->planes[i];
+		struct drm_plane *plane = &dc_plane->base;
+		struct drm_plane_state *new_state =
+			drm_atomic_get_new_plane_state(state, plane);
+
+		if (new_state && new_state->fb)
+			return true;
+	}
+
+	return false;
 }

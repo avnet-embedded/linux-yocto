@@ -113,6 +113,12 @@ static u8 sw_mac_addr[ETH_ALEN];
 #define NATIVE_MAC2_VLAN_SHIFT			(16)
 #define NATIVE_MAC2_PCP_SHIFT			(29)
 
+#define PTP_SCHED_REL_PRIO_GATES_MASK		GENMASK(7, 0)
+#define PTP_SCHED_MAC1_GATES_SHIFT		(0)
+#define PTP_SCHED_MAC1_REL_PRIO_SHIFT		(8)
+#define PTP_SCHED_MAC2_GATES_SHIFT		(16)
+#define PTP_SCHED_MAC2_REL_PRIO_SHIFT		(24)
+
 #define DEFAULT_PVID		1
 #define DEFAULT_FWD_ALL		GENMASK(2, 0)
 #define FWD_TO_EP		0x1
@@ -126,6 +132,83 @@ static const struct of_device_id tsnswitch_of_match[] = {
 };
 
 MODULE_DEVICE_TABLE(of, tsnswitch_of_match);
+
+u8 xlnx_switch_get_ptp_rel_prio(u8 switch_prt)
+{
+	u32 shift;
+
+	if (switch_prt == PORT_MAC1) {
+		shift = PTP_SCHED_MAC1_REL_PRIO_SHIFT;
+	} else if (switch_prt == PORT_MAC2) {
+		shift = PTP_SCHED_MAC2_REL_PRIO_SHIFT;
+	} else {
+		pr_err("Invalid switch port %d for PTP config\n", switch_prt);
+		return 0;
+	}
+
+	return (axienet_ior(&lp, XAS_PTP_SCHED_CTRL_OFFSET) >> shift) &
+		PTP_SCHED_REL_PRIO_GATES_MASK;
+}
+
+u8 xlnx_switch_get_ptp_gates(u8 switch_prt)
+{
+	u32 shift;
+
+	if (switch_prt == PORT_MAC1) {
+		shift = PTP_SCHED_MAC1_GATES_SHIFT;
+	} else if (switch_prt == PORT_MAC2) {
+		shift = PTP_SCHED_MAC2_GATES_SHIFT;
+	} else {
+		pr_err("Invalid switch port %d for PTP config\n", switch_prt);
+		return 0;
+	}
+
+	return (axienet_ior(&lp, XAS_PTP_SCHED_CTRL_OFFSET) >> shift) &
+		PTP_SCHED_REL_PRIO_GATES_MASK;
+}
+
+void xlnx_switch_set_ptp_rel_prio(u8 switch_prt, u8 value)
+{
+	u32 shift, reg;
+
+	if (switch_prt == PORT_MAC1) {
+		shift = PTP_SCHED_MAC1_REL_PRIO_SHIFT;
+	} else if (switch_prt == PORT_MAC2) {
+		shift = PTP_SCHED_MAC2_REL_PRIO_SHIFT;
+	} else {
+		pr_err("Invalid switch port %d for PTP config\n", switch_prt);
+		return;
+	}
+
+	reg = axienet_ior(&lp, XAS_PTP_SCHED_CTRL_OFFSET);
+	reg &= ~(PTP_SCHED_REL_PRIO_GATES_MASK << shift);
+	reg |= ((value & PTP_SCHED_REL_PRIO_GATES_MASK) << shift);
+	axienet_iow(&lp, XAS_PTP_SCHED_CTRL_OFFSET, reg);
+}
+
+void xlnx_switch_set_ptp_gates(u8 switch_prt, u8 value)
+{
+	u32 shift, reg;
+
+	if (switch_prt == PORT_MAC1) {
+		shift = PTP_SCHED_MAC1_GATES_SHIFT;
+	} else if (switch_prt == PORT_MAC2) {
+		shift = PTP_SCHED_MAC2_GATES_SHIFT;
+	} else {
+		pr_err("Invalid switch port %d for PTP config\n", switch_prt);
+		return;
+	}
+
+	reg = axienet_ior(&lp, XAS_PTP_SCHED_CTRL_OFFSET);
+	reg &= ~(PTP_SCHED_REL_PRIO_GATES_MASK << shift);
+	reg |= ((value & PTP_SCHED_REL_PRIO_GATES_MASK) << shift);
+	axienet_iow(&lp, XAS_PTP_SCHED_CTRL_OFFSET, reg);
+}
+
+u32 xlnx_switch_get_pqmr(void)
+{
+	return axienet_ior(&lp, XAS_PREEMPTION_QUEUE_MAP_OFFSET);
+}
 
 static void tsn_switch_set_fp_map(struct platform_device *pdev, u16 num_tc)
 {
@@ -1650,6 +1733,8 @@ static int tsn_switch_fdb_init(struct platform_device *pdev)
 
 	/* If 'xlnx,packet-switch' is enabled */
 	if (lp.packet_switch) {
+		off_t ep_mac_reg;
+
 		/* Modify the Management Queue Options register of the
 		 * EP packet switch for multicast frames.
 		 */
@@ -1669,10 +1754,16 @@ static int tsn_switch_fdb_init(struct platform_device *pdev)
 		val = val | (1 << EP_PORT_STATUS_EP_STATE_SHIFT) |
 			EP_PORT_STATUS_CHG_BIT |
 			(mac_addr[5] << EP_PORT_STATUS_EP_MAC_ADDR_SHIFT);
-		/* Update Endpoint Extension Control Register with lower 4 bits of EP MAC */
 		axienet_iow(&lp, XAS_PORT_STATE_CTRL_OFFSET, val);
-		val = axienet_ior(&lp, XAS_MAC1_MNG_Q_OPTION_OFFSET);
-		axienet_iow(&lp, XAS_MAC1_MNG_Q_OPTION_OFFSET,
+
+		/* Update Endpoint Extension Control Register with lower 4 bits of EP MAC */
+		if (lp.num_tc <= XAE_MAX_LEGACY_TSN_TC)
+			ep_mac_reg = XAS_MAC1_MNG_Q_OPTION_OFFSET;
+		else
+			ep_mac_reg = XAE_EP_EXT_MGMT_DMA_MAP_OFFSET;
+
+		val = axienet_ior(&lp, ep_mac_reg);
+		axienet_iow(&lp, ep_mac_reg,
 			    (val | ((mac_addr[5] & 0xF) <<
 			     EP_EX_CTRL_REG_EP_MAC_ADDR_SHIFT)));
 	}
