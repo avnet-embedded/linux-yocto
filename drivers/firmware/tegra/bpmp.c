@@ -550,7 +550,6 @@ static int tegra_bpmp_ping(struct tegra_bpmp *bpmp)
 	struct mrq_ping_response response;
 	struct mrq_ping_request request;
 	struct tegra_bpmp_message msg;
-	unsigned long flags;
 	ktime_t start, end;
 	int err;
 
@@ -585,7 +584,6 @@ static int tegra_bpmp_get_firmware_tag_old(struct tegra_bpmp *bpmp, char *tag,
 {
 	struct mrq_query_tag_request request;
 	struct tegra_bpmp_message msg;
-	unsigned long flags;
 	dma_addr_t phys;
 	void *virt;
 	int err;
