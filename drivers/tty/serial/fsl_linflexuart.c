@@ -1707,6 +1707,12 @@ static void linflex_remove(struct platform_device *pdev)
 	clk_disable_unprepare(lfport->clk);
 	clk_disable_unprepare(lfport->clk_ipg);
 #endif
+
+	if (lfport->dma_tx_chan)
+		dma_release_channel(lfport->dma_tx_chan);
+
+	if (lfport->dma_rx_chan)
+		dma_release_channel(lfport->dma_rx_chan);
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -1719,12 +1725,6 @@ static int linflex_suspend(struct device *dev)
 
 	clk_disable_unprepare(lfport->clk);
 	clk_disable_unprepare(lfport->clk_ipg);
-
-	if (lfport->dma_tx_chan)
-		dma_release_channel(lfport->dma_tx_chan);
-
-	if (lfport->dma_rx_chan)
-		dma_release_channel(lfport->dma_rx_chan);
 
 	return 0;
 }
