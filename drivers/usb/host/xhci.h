@@ -1668,6 +1668,7 @@ struct xhci_hcd {
 #define XHCI_ZHAOXIN_HOST	BIT_ULL(50)
 #define XHCI_WRITE_64_HI_LO	BIT_ULL(51)
 #define XHCI_CDNS_SCTX_QUIRK	BIT_ULL(52)
+#define XHCI_LIMIT_ENDPOINT_INTERVAL_9 BIT_ULL(53)
 
 
 	unsigned int		num_active_eps;
