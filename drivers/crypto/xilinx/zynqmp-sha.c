@@ -17,7 +17,6 @@
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/spinlock.h>
 #include <linux/platform_device.h>
 
 #define CONTINUE_PACKET		BIT(31)
@@ -53,8 +52,6 @@ struct zynqmp_sha_desc_ctx {
 
 static dma_addr_t update_dma_addr, final_dma_addr;
 static char *ubuf, *fbuf;
-
-static DEFINE_SPINLOCK(zynqmp_sha_lock);
 
 static int zynqmp_sha_init_tfm(struct crypto_tfm *tfm)
 {
