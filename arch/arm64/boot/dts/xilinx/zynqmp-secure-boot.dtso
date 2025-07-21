@@ -1,0 +1,27 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * dts file for Xilinx ZynqMP to disable coresight in secure-boot mode
+ *
+ * (C) Copyright 2025 Wind River Systems, Inc.
+ *
+ * Quanyang Wang <quanyang.wang@windriver.com>
+ */
+
+/dts-v1/;
+/plugin/;
+
+&cpu0_debug {
+	status = "disabled";
+};
+
+&cpu1_debug {
+	status = "disabled";
+};
+
+&cpu2_debug {
+	status = "disabled";
+};
+
+&cpu3_debug {
+	status = "disabled";
+};
