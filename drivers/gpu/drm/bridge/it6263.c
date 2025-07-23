@@ -625,7 +625,7 @@ static int it6263_connector_get_modes(struct drm_connector *connector)
 
 	drm_edid_connector_update(connector, drm_edid);
 	num = drm_edid_connector_add_modes(connector);
-	kfree(drm_edid);
+	drm_edid_free(drm_edid);
 
 	ret = drm_display_info_set_bus_formats(&connector->display_info,
 					       &bus_format, 1);
