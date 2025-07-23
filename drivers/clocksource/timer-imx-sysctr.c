@@ -202,7 +202,7 @@ static int __init __sysctr_timer_init(struct device_node *np)
 	to_sysctr.private_data = priv;
 
 	base = timer_of_base(&to_sysctr);
-	priv->cmpcr = readl(base + CMPCR) & ~SYS_CTR_EN;
+	priv->cmpcr = 0;
 
 	return 0;
 }
