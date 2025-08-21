@@ -606,7 +606,7 @@ s25fs256t_post_bfpt_fixup(struct spi_nor *nor,
 	int ret;
 
 	/* Assign 4-byte address mode method that is not determined in BFPT */
-	nor->params->set_4byte_addr_mode = cypress_nor_set_4byte_addr_mode;
+	params->set_4byte_addr_mode = cypress_nor_set_4byte_addr_mode;
 
 	ret = cypress_nor_set_addr_mode_nbytes(nor);
 	if (ret)
@@ -675,7 +675,7 @@ s25hx_t_post_bfpt_fixup(struct spi_nor *nor,
 	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 
 	/* Assign 4-byte address mode method that is not determined in BFPT */
-	nor->params->set_4byte_addr_mode = cypress_nor_set_4byte_addr_mode;
+	params->set_4byte_addr_mode = cypress_nor_set_4byte_addr_mode;
 
 	ret = cypress_nor_set_addr_mode_nbytes(nor);
 	if (ret)
@@ -804,8 +804,10 @@ static int s28hx_t_post_bfpt_fixup(struct spi_nor *nor,
 				   const struct sfdp_parameter_header *bfpt_header,
 				   const struct sfdp_bfpt *bfpt)
 {
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
+
 	/* Assign 4-byte address mode method that is not determined in BFPT */
-	nor->params->set_4byte_addr_mode = cypress_nor_set_4byte_addr_mode;
+	params->set_4byte_addr_mode = cypress_nor_set_4byte_addr_mode;
 
 	return cypress_nor_set_addr_mode_nbytes(nor);
 }
