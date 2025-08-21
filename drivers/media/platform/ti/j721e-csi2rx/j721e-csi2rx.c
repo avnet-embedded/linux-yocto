@@ -792,6 +792,7 @@ static int ti_csi2rx_dma_submit_pending(struct ti_csi2rx_ctx *ctx)
 		if (ret) {
 			dev_err(ctx->csi->dev,
 				"Failed to queue the next buffer for DMA\n");
+			list_del(&buf->list);
 			vb2_buffer_done(&buf->vb.vb2_buf, VB2_BUF_STATE_ERROR);
 			break;
 		}
