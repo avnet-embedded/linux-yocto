@@ -517,20 +517,22 @@ void serial8250_clear_and_reinit_fifos(struct uart_8250_port *p)
 }
 EXPORT_SYMBOL_GPL(serial8250_clear_and_reinit_fifos);
 
-static void serial8250_rpm_get(struct uart_8250_port *p)
+void serial8250_rpm_get(struct uart_8250_port *p)
 {
 	if (!(p->capabilities & UART_CAP_RPM))
 		return;
 	pm_runtime_get_sync(p->port.dev);
 }
+EXPORT_SYMBOL_GPL(serial8250_rpm_get);
 
-static void serial8250_rpm_put(struct uart_8250_port *p)
+void serial8250_rpm_put(struct uart_8250_port *p)
 {
 	if (!(p->capabilities & UART_CAP_RPM))
 		return;
 	pm_runtime_mark_last_busy(p->port.dev);
 	pm_runtime_put_autosuspend(p->port.dev);
 }
+EXPORT_SYMBOL_GPL(serial8250_rpm_put);
 
 /**
  *	serial8250_em485_init() - put uart_8250_port into rs485 emulating
@@ -645,7 +647,7 @@ EXPORT_SYMBOL_GPL(serial8250_em485_config);
  * once and disable_runtime_pm_tx() will still disable RPM because the fifo is
  * empty and the HW can idle again.
  */
-static void serial8250_rpm_get_tx(struct uart_8250_port *p)
+void serial8250_rpm_get_tx(struct uart_8250_port *p)
 {
 	unsigned char rpm_active;
 
@@ -657,8 +659,9 @@ static void serial8250_rpm_get_tx(struct uart_8250_port *p)
 		return;
 	pm_runtime_get_sync(p->port.dev);
 }
+EXPORT_SYMBOL_GPL(serial8250_rpm_get_tx);
 
-static void serial8250_rpm_put_tx(struct uart_8250_port *p)
+void serial8250_rpm_put_tx(struct uart_8250_port *p)
 {
 	unsigned char rpm_active;
 
@@ -671,6 +674,7 @@ static void serial8250_rpm_put_tx(struct uart_8250_port *p)
 	pm_runtime_mark_last_busy(p->port.dev);
 	pm_runtime_put_autosuspend(p->port.dev);
 }
+EXPORT_SYMBOL_GPL(serial8250_rpm_put_tx);
 
 /*
  * IER sleep support.  UARTs which have EFRs need the "extended
