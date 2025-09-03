@@ -169,11 +169,11 @@ static int get_ucode_type(struct device *dev,
 	nn = ucode_hdr->ver_num.nn;
 	if (strnstr(tmp_ver_str, "se-", OTX2_CPT_UCODE_VER_STR_SZ) &&
 	    (nn == OTX2_CPT_SE_UC_TYPE1 || nn == OTX2_CPT_SE_UC_TYPE2 ||
-	     nn == OTX2_CPT_SE_UC_TYPE3 || nn == OTX2_CPT_SE_UC_TYPE4))
+	     nn == OTX2_CPT_SE_UC_TYPE3))
 		val |= 1 << OTX2_CPT_SE_TYPES;
 	if (strnstr(tmp_ver_str, "ie-", OTX2_CPT_UCODE_VER_STR_SZ) &&
 	    (nn == OTX2_CPT_IE_UC_TYPE1 || nn == OTX2_CPT_IE_UC_TYPE2 ||
-	     nn == OTX2_CPT_IE_UC_TYPE3 || nn == OTX2_CPT_IE_UC_TYPE4))
+	     nn == OTX2_CPT_IE_UC_TYPE3))
 		val |= 1 << OTX2_CPT_IE_TYPES;
 	if (strnstr(tmp_ver_str, "ae", OTX2_CPT_UCODE_VER_STR_SZ) &&
 	    nn == OTX2_CPT_AE_UC_TYPE)
@@ -1547,13 +1547,12 @@ int otx2_cpt_discover_eng_capabilities(struct otx2_cptpf_dev *cptpf)
 	union otx2_cpt_opcode opcode;
 	union otx2_cpt_res_s *result;
 	union otx2_cpt_inst_s inst;
-	dma_addr_t result_baddr;
 	dma_addr_t rptr_baddr;
 	struct pci_dev *pdev;
+	u32 len, compl_rlen;
 	int timeout = 20000;
 	int ret, etype;
 	void *rptr;
-	u32 len;
 
 	/*
 	 * We don't get capabilities if it was already done
@@ -1577,27 +1576,22 @@ int otx2_cpt_discover_eng_capabilities(struct otx2_cptpf_dev *cptpf)
 	if (ret)
 		goto delete_grps;
 
-	len = LOADFVC_RLEN + sizeof(union otx2_cpt_res_s) +
-	       OTX2_CPT_RES_ADDR_ALIGN;
+	compl_rlen = ALIGN(sizeof(union otx2_cpt_res_s), OTX2_CPT_DMA_MINALIGN);
+	len = compl_rlen + LOADFVC_RLEN;
 
-	rptr = kzalloc(len, GFP_KERNEL);
-	if (!rptr) {
+	result = kzalloc(len, GFP_KERNEL);
+	if (!result) {
 		ret = -ENOMEM;
 		goto lf_cleanup;
 	}
-
-	rptr_baddr = dma_map_single(&pdev->dev, rptr, len,
+	rptr_baddr = dma_map_single(&pdev->dev, (void *)result, len,
 				    DMA_BIDIRECTIONAL);
 	if (dma_mapping_error(&pdev->dev, rptr_baddr)) {
 		dev_err(&pdev->dev, "DMA mapping failed\n");
 		ret = -EFAULT;
-		goto free_rptr;
+		goto free_result;
 	}
-
-	result = (union otx2_cpt_res_s *)PTR_ALIGN(rptr + LOADFVC_RLEN,
-						   OTX2_CPT_RES_ADDR_ALIGN);
-	result_baddr = ALIGN(rptr_baddr + LOADFVC_RLEN,
-			     OTX2_CPT_RES_ADDR_ALIGN);
+	rptr = (u8 *)result + compl_rlen;
 
 	/* Fill in the command */
 	opcode.s.major = LOADFVC_MAJOR_OP;
@@ -1609,7 +1603,7 @@ int otx2_cpt_discover_eng_capabilities(struct otx2_cptpf_dev *cptpf)
 	/* 64-bit swap for microcode data reads, not needed for addresses */
 	cpu_to_be64s(&iq_cmd.cmd.u);
 	iq_cmd.dptr = 0;
-	iq_cmd.rptr = rptr_baddr;
+	iq_cmd.rptr = rptr_baddr + compl_rlen;
 	iq_cmd.cptr.u = 0;
 
 	for (etype = 1; etype < OTX2_CPT_MAX_ENG_TYPES; etype++) {
@@ -1620,7 +1614,7 @@ int otx2_cpt_discover_eng_capabilities(struct otx2_cptpf_dev *cptpf)
 		result->s.compcode = OTX2_CPT_COMPLETION_CODE_INIT;
 		iq_cmd.cptr.s.grp = otx2_cpt_get_eng_grp(&cptpf->eng_grps,
 							 etype);
-		otx2_cpt_fill_inst(&inst, &iq_cmd, result_baddr);
+		otx2_cpt_fill_inst(&inst, &iq_cmd, rptr_baddr);
 		lfs->ops->send_cmd(&inst, 1, &cptpf->lfs.lf[0]);
 		timeout = 20000;
 
@@ -1630,20 +1624,21 @@ int otx2_cpt_discover_eng_capabilities(struct otx2_cptpf_dev *cptpf)
 			udelay(1);
 			timeout--;
 			if (!timeout) {
+				ret = -ENODEV;
+				cptpf->is_eng_caps_discovered = false;
 				dev_warn(&pdev->dev, "Timeout on CPT load_fvc completion poll\n");
-				break;
+				goto error_no_response;
 			}
 		}
-		if (!timeout)
-			break;
 
 		cptpf->eng_caps[etype].u = be64_to_cpup(rptr);
 	}
-	dma_unmap_single(&pdev->dev, rptr_baddr, len, DMA_BIDIRECTIONAL);
 	cptpf->is_eng_caps_discovered = true;
 
-free_rptr:
-	kfree(rptr);
+error_no_response:
+	dma_unmap_single(&pdev->dev, rptr_baddr, len, DMA_BIDIRECTIONAL);
+free_result:
+	kfree(result);
 lf_cleanup:
 	otx2_cptlf_shutdown(lfs);
 delete_grps:

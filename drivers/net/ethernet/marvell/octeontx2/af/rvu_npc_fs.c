@@ -12,7 +12,6 @@
 #include "npc.h"
 #include "rvu_npc_fs.h"
 #include "rvu_npc_hash.h"
-#include "rvu_switch.h"
 #include "cn20k/npc.h"
 
 static const char * const npc_flow_names[] = {
@@ -734,7 +733,7 @@ static void npc_set_features(struct rvu *rvu, int blkaddr, u8 intf)
 
 	if (npc_check_overlap(rvu, blkaddr, NPC_IPSEC_SPI, 0, intf))
 		dev_warn(rvu->dev, "Overlap detected the field NPC_IPSEC_SPI\n");
-	/* Set SPI flag only if AH/ESP and IPSEC_SPI are in the key */
+	/* Allow extracting SPI field from AH and ESP headers at same offset */
 	if (npc_is_field_present(rvu, NPC_IPSEC_SPI, intf) &&
 	    (*features & (BIT_ULL(NPC_IPPROTO_ESP) | BIT_ULL(NPC_IPPROTO_AH))))
 		*features |= BIT_ULL(NPC_IPSEC_SPI);
@@ -1883,7 +1882,7 @@ process_flow:
 		target = req->hdr.pcifunc;
 
 	/* ignore chan_mask in case pf func is not AF, revisit later */
-	if (!req->set_chanmask && !is_pffunc_af(req->hdr.pcifunc))
+	if (!is_pffunc_af(req->hdr.pcifunc))
 		req->chan_mask = rvu_get_cpt_chan_mask(rvu);
 
 	err = npc_check_unsupported_flows(rvu, req->features, req->intf);
