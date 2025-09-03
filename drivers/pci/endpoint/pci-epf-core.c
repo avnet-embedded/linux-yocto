@@ -313,6 +313,7 @@ static void pci_epf_remove_cfs(struct pci_epf_driver *driver)
 		list_del(&group->group_entry);
 		pci_ep_cfs_remove_epf_group(group);
 	}
+	WARN_ON(!list_empty(&driver->epf_group));
 	mutex_unlock(&pci_epf_mutex);
 }
 
