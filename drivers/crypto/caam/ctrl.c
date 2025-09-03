@@ -846,7 +846,7 @@ static int caam_ctrl_suspend(struct device *dev)
 {
 	const struct caam_drv_private *ctrlpriv = dev_get_drvdata(dev);
 
-	if (ctrlpriv->caam_off_during_pm && !ctrlpriv->optee_en &&
+	if (ctrlpriv->caam_off_during_pm && !ctrlpriv->no_page0 &&
 	    !ctrlpriv->scu_en)
 		caam_state_save(dev);
 
@@ -858,7 +858,7 @@ static int caam_ctrl_resume(struct device *dev)
 	struct caam_drv_private *ctrlpriv = dev_get_drvdata(dev);
 	int ret = 0;
 
-	if (ctrlpriv->caam_off_during_pm && !ctrlpriv->optee_en &&
+	if (ctrlpriv->caam_off_during_pm && !ctrlpriv->no_page0 &&
 	    !ctrlpriv->scu_en) {
 		caam_state_restore(dev);
 
@@ -948,6 +948,7 @@ static int caam_probe(struct platform_device *pdev)
 
 		imx_soc_data = imx_soc_match->data;
 		reg_access = reg_access && imx_soc_data->page0_access;
+		ctrlpriv->no_page0 = !reg_access;
 		/*
 		 * CAAM clocks cannot be controlled from kernel.
 		 */
