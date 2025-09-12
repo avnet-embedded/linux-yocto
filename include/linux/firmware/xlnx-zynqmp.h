@@ -68,6 +68,7 @@
 #define FIRMWARE_VERSION_MASK		0xFFFFU
 
 /* ATF only commands */
+#define TF_A_CLEAR_PM_STATE		0xa05
 #define TF_A_PM_REGISTER_SGI		0xa04
 #define PM_GET_TRUSTZONE_VERSION	0xa03
 #define PM_SET_SUSPEND_MODE		0xa02
@@ -634,6 +635,7 @@ int zynqmp_pm_get_node_status(const u32 node, u32 *const status,
 int zynqmp_pm_set_sd_config(u32 node, enum pm_sd_config_type config, u32 value);
 int zynqmp_pm_set_gem_config(u32 node, enum pm_gem_config_type config,
 			     u32 value);
+int zynqmp_pm_clear_tfa_state(void);
 #else
 static inline int zynqmp_pm_get_api_version(u32 *version)
 {
@@ -950,6 +952,11 @@ static inline int zynqmp_pm_set_sd_config(u32 node,
 static inline int zynqmp_pm_set_gem_config(u32 node,
 					   enum pm_gem_config_type config,
 					   u32 value)
+{
+	return -ENODEV;
+}
+
+static inline int zynqmp_pm_clear_tfa_state(void)
 {
 	return -ENODEV;
 }
