@@ -1010,26 +1010,19 @@ static int imx_rproc_clk_enable(struct imx_rproc *priv)
 {
 	const struct imx_rproc_dcfg *dcfg = priv->dcfg;
 	struct device *dev = priv->dev;
-	int ret;
 
 	/* Remote core is not under control of Linux or it is managed by SCU API */
 	if (dcfg->method == IMX_RPROC_NONE || dcfg->method == IMX_RPROC_SCU_API)
 		return 0;
 
-	priv->clk = devm_clk_get(dev, NULL);
-	if (IS_ERR(priv->clk)) {
-		dev_err(dev, "Failed to get clock\n");
-		return PTR_ERR(priv->clk);
-	}
-
 	/*
 	 * clk for M4 block including memory. Should be
 	 * enabled before .start for FW transfer.
 	 */
-	ret = clk_prepare_enable(priv->clk);
-	if (ret) {
+	priv->clk = devm_clk_get_enabled(dev, NULL);
+	if (IS_ERR(priv->clk)) {
 		dev_err(dev, "Failed to enable clock\n");
-		return ret;
+		return PTR_ERR(priv->clk);
 	}
 
 	return 0;
@@ -1131,7 +1124,7 @@ static int imx_rproc_probe(struct platform_device *pdev)
 						    imx_rproc_sys_off_handler, rproc);
 		if (ret) {
 			dev_err(dev, "register power off handler failure\n");
-			goto err_put_clk;
+			goto err_put_scu;
 		}
 
 		ret = devm_register_sys_off_handler(dev, SYS_OFF_MODE_RESTART_PREPARE,
@@ -1139,7 +1132,7 @@ static int imx_rproc_probe(struct platform_device *pdev)
 						    imx_rproc_sys_off_handler, rproc);
 		if (ret) {
 			dev_err(dev, "register restart handler failure\n");
-			goto err_put_clk;
+			goto err_put_scu;
 		}
 	}
 
@@ -1148,7 +1141,7 @@ static int imx_rproc_probe(struct platform_device *pdev)
 		ret = pm_runtime_resume_and_get(dev);
 		if (ret) {
 			dev_err(dev, "pm_runtime get failed: %d\n", ret);
-			goto err_put_clk;
+			goto err_put_scu;
 		}
 	}
 
@@ -1165,8 +1158,6 @@ err_put_pm:
 		pm_runtime_disable(dev);
 		pm_runtime_put_noidle(dev);
 	}
-err_put_clk:
-	clk_disable_unprepare(priv->clk);
 err_put_scu:
 	imx_rproc_put_scu(rproc);
 
@@ -1182,7 +1173,6 @@ static void imx_rproc_remove(struct platform_device *pdev)
 		pm_runtime_disable(priv->dev);
 		pm_runtime_put_noidle(priv->dev);
 	}
-	clk_disable_unprepare(priv->clk);
 	rproc_del(rproc);
 	imx_rproc_put_scu(rproc);
 }
