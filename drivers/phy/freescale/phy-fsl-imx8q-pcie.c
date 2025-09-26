@@ -408,6 +408,58 @@ static int imx8q_pcie_phy_power_on(struct phy *phy)
 	return ret;
 }
 
+static int imx8q_pcie_phy_power_off(struct phy *phy)
+{
+	struct imx8q_pcie_phy *imx8_phy = phy_get_drvdata(phy);
+
+	regmap_clear_bits(imx8_phy->misc_gpr,
+			IMX8QM_MISC_CTRL0_OFFSET,
+			IMX8QM_MISC_PCIE_AB_SELECT);
+	regmap_clear_bits(imx8_phy->misc_gpr,
+			IMX8QM_MISC_CTRL0_OFFSET,
+			IMX8QM_MISC_PHYX1_EPCS_SEL);
+
+	if (imx8_phy->mode == IMX8Q_PHY_PCIE_MODE) {
+		regmap_clear_bits(imx8_phy->ctrl_gpr,
+			IMX8QM_PCIE_CTRL2_OFFSET,
+			IMX8QM_CTRL_BUTTON_RST_N);
+		regmap_clear_bits(imx8_phy->ctrl_gpr,
+			IMX8QM_PCIE_CTRL2_OFFSET,
+			IMX8QM_CTRL_PERST_N);
+		regmap_clear_bits(imx8_phy->ctrl_gpr,
+			IMX8QM_PCIE_CTRL2_OFFSET,
+			IMX8QM_CTRL_POWER_UP_RST_N);
+	} else {
+		regmap_clear_bits(imx8_phy->ctrl_gpr,
+			IMX8QM_SATA_CTRL0_OFFSET,
+			IMX8QM_SATA_CTRL_EPCS_TXDEEMP);
+		regmap_clear_bits(imx8_phy->ctrl_gpr,
+			IMX8QM_SATA_CTRL0_OFFSET,
+			IMX8QM_SATA_CTRL_EPCS_TXDEEMP_SEL);
+		regmap_clear_bits(imx8_phy->ctrl_gpr,
+			IMX8QM_SATA_CTRL0_OFFSET,
+			IMX8QM_SATA_CTRL_RESET_N);
+	}
+
+	if (imx8_phy->lane_id == 1) {
+		regmap_clear_bits(imx8_phy->phy_gpr,
+			IMX8QM_PHY_CTRL0_OFFSET,
+			IMX8QM_PHY_CTRL0_APB_RSTN_1);
+		regmap_clear_bits(imx8_phy->phy_gpr,
+			IMX8QM_PHY_CTRL0_OFFSET,
+			IMX8QM_PHY_PIPE_RSTN_1_MASK);
+	} else {
+		regmap_clear_bits(imx8_phy->phy_gpr,
+			IMX8QM_PHY_CTRL0_OFFSET,
+			IMX8QM_PHY_CTRL0_APB_RSTN_0);
+		regmap_clear_bits(imx8_phy->phy_gpr,
+			IMX8QM_PHY_CTRL0_OFFSET,
+			IMX8QM_PHY_PIPE_RSTN_0_MASK);
+	}
+
+	return 0;
+}
+
 static int imx8q_pcie_phy_init(struct phy *phy)
 {
 	int ret;
@@ -439,6 +491,7 @@ static const struct phy_ops imx8q_pcie_phy_ops = {
 	.init		= imx8q_pcie_phy_init,
 	.exit		= imx8q_pcie_phy_exit,
 	.power_on	= imx8q_pcie_phy_power_on,
+	.power_off	= imx8q_pcie_phy_power_off,
 	.owner		= THIS_MODULE,
 };
 
