@@ -2048,12 +2048,17 @@ static int imx6_pcie_probe(struct platform_device *pdev)
 static void imx6_pcie_shutdown(struct platform_device *pdev)
 {
 	struct imx6_pcie *imx6_pcie = platform_get_drvdata(pdev);
+	struct dw_pcie_rp *pp = &imx6_pcie->pci->pp;
 
 	if (imx6_pcie->host_wake_irq >= 0) {
 		device_init_wakeup(&pdev->dev, false);
 		disable_irq(imx6_pcie->host_wake_irq);
 		imx6_pcie->host_wake_irq = -1;
 	}
+
+	imx6_pcie_pm_turnoff(imx6_pcie);
+	imx6_pcie_stop_link(imx6_pcie->pci);
+	imx6_pcie_host_exit(pp);
 
 	/* bring down link, so bootloader gets clean state in case of reboot */
 	imx6_pcie_assert_core_reset(imx6_pcie);
