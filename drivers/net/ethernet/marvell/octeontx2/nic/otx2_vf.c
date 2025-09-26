@@ -1004,7 +1004,7 @@ static int otx2_sdpvf_probe(struct pci_dev *pdev, const struct pci_device_id *id
 #ifdef CONFIG_DCB
 	err = otx2_dcbnl_set_ops(netdev);
 	if (err)
-		goto err_shutdown_tc;
+		goto err_free_zc_bmap;
 #endif
 	otx2_qos_init(vf, qos_txqs);
 
@@ -1013,6 +1013,10 @@ static int otx2_sdpvf_probe(struct pci_dev *pdev, const struct pci_device_id *id
 
 	return 0;
 
+#ifdef CONFIG_DCB
+err_free_zc_bmap:
+	bitmap_free(vf->af_xdp_zc_qidx);
+#endif
 err_shutdown_tc:
 	otx2_shutdown_tc(vf);
 err_ptp_destroy:
@@ -1248,13 +1252,17 @@ static int otx2vf_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	if (!(is_otx2_lbkvf(vf->pdev) || is_otx2_sdpvf(vf->pdev))) {
 		err = otx2_dcbnl_set_ops(netdev);
 		if (err)
-			goto err_shutdown_tc;
+			goto err_free_zc_bmap;
 	}
 #endif
 	otx2_qos_init(vf, qos_txqs);
 
 	return 0;
 
+#ifdef CONFIG_DCB
+err_free_zc_bmap:
+	bitmap_free(vf->af_xdp_zc_qidx);
+#endif
 err_shutdown_tc:
 	otx2_shutdown_tc(vf);
 err_unreg_netdev:
@@ -1325,6 +1333,7 @@ static void otx2vf_remove(struct pci_dev *pdev)
 		qmem_free(vf->dev, vf->dync_lmt);
 	otx2vf_vfaf_mbox_destroy(vf);
 	pci_free_irq_vectors(vf->pdev);
+	bitmap_free(vf->af_xdp_zc_qidx);
 	pci_set_drvdata(pdev, NULL);
 	free_netdev(netdev);
 
