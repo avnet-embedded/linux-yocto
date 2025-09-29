@@ -901,6 +901,8 @@ static void __ghes_panic(struct ghes *ghes,
 
 	__ghes_print_estatus(KERN_EMERG, ghes->generic, estatus);
 
+	add_taint(TAINT_MACHINE_CHECK, LOCKDEP_STILL_OK);
+
 	ghes_clear_estatus(ghes, estatus, buf_paddr, fixmap_idx);
 
 	if (!panic_timeout)
@@ -1519,9 +1521,12 @@ void __init ghes_init(void)
 {
 	int rc;
 
+	acpi_sdei_init();
+
 	/* permit GHES initialization if either ACPI or SDEI_GHES is present */
 	if (acpi_disabled && !sdei_ghes_present_dt())
-		return -ENODEV;
+		return;
+
 
 	switch (hest_disable) {
 	case HEST_NOT_FOUND:
