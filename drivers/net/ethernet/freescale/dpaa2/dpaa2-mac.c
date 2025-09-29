@@ -333,8 +333,10 @@ int dpaa2_mac_connect(struct dpaa2_mac *mac)
 	}
 
 	err = dpaa2_mac_get_if_mode(dpmac_node, mac->attr);
-	if (err < 0)
-		return -EINVAL;
+	if (err < 0) {
+		err = -EINVAL;
+		goto err_put_node;
+	}
 	mac->if_mode = err;
 
 	/* The MAC does not have the capability to add RGMII delays so
@@ -386,6 +388,8 @@ err_phylink_destroy:
 	phylink_destroy(mac->phylink);
 err_pcs_destroy:
 	dpaa2_pcs_destroy(mac);
+err_put_node:
+	of_node_put(dpmac_node);
 
 	return err;
 }
@@ -427,7 +431,6 @@ int dpaa2_mac_open(struct dpaa2_mac *mac)
 	 */
 	mac->fw_node = dpaa2_mac_get_node(&mac->mc_dev->dev, mac->attr.id);
 	net_dev->dev.of_node = to_of_node(mac->fw_node);
-
 	return 0;
 
 err_close_dpmac:
