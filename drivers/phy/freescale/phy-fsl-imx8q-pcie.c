@@ -415,9 +415,6 @@ static int imx8q_pcie_phy_power_off(struct phy *phy)
 	regmap_clear_bits(imx8_phy->misc_gpr,
 			IMX8QM_MISC_CTRL0_OFFSET,
 			IMX8QM_MISC_PCIE_AB_SELECT);
-	regmap_clear_bits(imx8_phy->misc_gpr,
-			IMX8QM_MISC_CTRL0_OFFSET,
-			IMX8QM_MISC_PHYX1_EPCS_SEL);
 
 	if (imx8_phy->mode == IMX8Q_PHY_PCIE_MODE) {
 		regmap_clear_bits(imx8_phy->ctrl_gpr,
@@ -430,6 +427,10 @@ static int imx8q_pcie_phy_power_off(struct phy *phy)
 			IMX8QM_PCIE_CTRL2_OFFSET,
 			IMX8QM_CTRL_POWER_UP_RST_N);
 	} else {
+		regmap_clear_bits(imx8_phy->misc_gpr,
+			IMX8QM_MISC_CTRL0_OFFSET,
+			IMX8QM_MISC_PHYX1_EPCS_SEL);
+
 		regmap_clear_bits(imx8_phy->ctrl_gpr,
 			IMX8QM_SATA_CTRL0_OFFSET,
 			IMX8QM_SATA_CTRL_EPCS_TXDEEMP);
