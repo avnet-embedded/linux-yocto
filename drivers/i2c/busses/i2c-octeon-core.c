@@ -689,7 +689,8 @@ void octeon_i2c_set_clock(struct octeon_i2c *i2c)
 	 * to cover wider range of divisors, note thp = TCLK half period and
 	 * ds is OSCL output frequency divisor.
 	 */
-	unsigned int thp, mdiv_min, mdiv = 2, ndiv = 0, ds = 10;
+	int mdiv_min;
+	unsigned int thp, mdiv = 2, ndiv = 0, ds = 10;
 	unsigned int delta_hz = INITIAL_DELTA_HZ;
 
 	is_plat_otx2 = octeon_i2c_is_otx2(to_pci_dev(i2c->dev));
