@@ -480,8 +480,10 @@ static void linflex_dma_tx_complete(void *arg)
 
 	spin_lock_irqsave(&lfport->port.lock, flags);
 
-	uart_xmit_advance(&lfport->port, lfport->dma_tx_bytes);
-	lfport->dma_tx_in_progress = 0;
+	if (lfport->dma_tx_in_progress) {
+		uart_xmit_advance(&lfport->port, lfport->dma_tx_bytes);
+		lfport->dma_tx_in_progress = 0;
+	}
 
 	if (kfifo_len(&tport->xmit_fifo) < WAKEUP_CHARS)
 		uart_write_wakeup(&lfport->port);
