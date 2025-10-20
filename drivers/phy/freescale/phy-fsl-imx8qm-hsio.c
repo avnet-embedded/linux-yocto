@@ -206,6 +206,21 @@ static void imx_hsio_pcie_phy_resets(struct phy *phy)
 			  HSIO_PERST_N);
 	regmap_clear_bits(priv->ctrl, lane->ctrl_off + HSIO_CTRL2,
 			  HSIO_POWER_UP_RST_N);
+
+	if (lane->idx == 1) {
+		regmap_clear_bits(priv->phy, lane->phy_off + HSIO_CTRL0,
+				  HSIO_APB_RSTN_1);
+		regmap_clear_bits(priv->phy, lane->phy_off + HSIO_CTRL0,
+				  HSIO_PIPE_RSTN_1_MASK);
+	} else {
+		regmap_clear_bits(priv->phy, lane->phy_off + HSIO_CTRL0,
+				  HSIO_APB_RSTN_0);
+		regmap_clear_bits(priv->phy, lane->phy_off + HSIO_CTRL0,
+				  HSIO_PIPE_RSTN_0_MASK);
+	}
+
+	/* CTRL RSTN: CLEAR -> delay 1 us -> SET */
+	udelay(1);
 	regmap_set_bits(priv->ctrl, lane->ctrl_off + HSIO_CTRL2,
 			HSIO_BUTTON_RST_N);
 	regmap_set_bits(priv->ctrl, lane->ctrl_off + HSIO_CTRL2,
