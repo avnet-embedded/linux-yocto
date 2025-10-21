@@ -173,6 +173,7 @@ static void tilcdc_fini(struct drm_device *dev)
 
 	if (priv->is_registered) {
 		drm_dev_unregister(dev);
+		drm_kms_helper_poll_fini(dev);
 		drm_atomic_helper_shutdown(dev);
 	}
 
