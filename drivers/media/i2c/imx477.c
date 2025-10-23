@@ -29,6 +29,22 @@ static int trigger_mode;
 module_param(trigger_mode, int, 0644);
 MODULE_PARM_DESC(trigger_mode, "Set vsync trigger mode: 1=source, 2=sink");
 
+static int fstrobe_enable;
+module_param(fstrobe_enable, int, 0644);
+MODULE_PARM_DESC(fstrobe_enable, "Enable fstrobe signal");
+
+static int fstrobe_cont_trig;
+module_param(fstrobe_cont_trig, int, 0644);
+MODULE_PARM_DESC(fstrobe_cont_trig, "Configure fstrobe to be one-shot (0) or continuous (1)");
+
+static int fstrobe_width = 1;
+module_param(fstrobe_width, int, 0644);
+MODULE_PARM_DESC(fstrobe_width, "Set fstrobe pulse width in units of INCK");
+
+static int fstrobe_delay;
+module_param(fstrobe_delay, int, 0644);
+MODULE_PARM_DESC(fstrobe_delay, "Set fstrobe delay from end all lines starting to expose and the start of the strobe pulse");
+
 #define IMX477_REG_VALUE_08BIT		1
 #define IMX477_REG_VALUE_16BIT		2
 
@@ -111,6 +127,9 @@ MODULE_PARM_DESC(trigger_mode, "Set vsync trigger mode: 1=source, 2=sink");
 #define IMX477_REG_MS_SEL		0x3041
 #define IMX477_REG_XVS_IO_CTRL		0x3040
 #define IMX477_REG_EXTOUT_EN		0x4b81
+
+/* Temperature sensor */
+#define IMX477_REG_TEMP_SEN_CTL		0x0138
 
 /* Embedded metadata stream structure */
 #define IMX477_EMBEDDED_LINE_WIDTH 16384
@@ -1788,6 +1807,8 @@ static int imx477_start_streaming(struct imx477 *imx477)
 	struct i2c_client *client = v4l2_get_subdevdata(&imx477->sd);
 	const struct imx477_reg_list *reg_list, *freq_regs;
 	const struct imx477_reg_list *extra_regs;
+	unsigned int fst_width;
+	unsigned int fst_mult;
 	int ret, tm;
 
 	if (!imx477->common_regs_written) {
@@ -1822,6 +1843,29 @@ static int imx477_start_streaming(struct imx477 *imx477)
 		return ret;
 	}
 
+	fst_width = max((unsigned int)fstrobe_width, 1U);
+	fst_mult = 1;
+
+	while (fst_width / fst_mult > 0xffff && fst_mult < 255)
+		fst_mult++;
+
+	fst_width /= fst_mult;
+
+	// FLASH_MD_RS
+	imx477_write_reg(imx477, 0x0c1A, IMX477_REG_VALUE_08BIT,
+			 ((!!fstrobe_cont_trig) | (1 << 1)));
+	// FLASH_STRB_WIDTH
+	imx477_write_reg(imx477, 0x0c18, IMX477_REG_VALUE_16BIT, fst_width);
+	// FLASH_STRB_WIDTH adjust
+	imx477_write_reg(imx477, 0x0c12, IMX477_REG_VALUE_08BIT, fst_mult);
+	// FLASH_STRB_START_POINT
+	imx477_write_reg(imx477, 0x0c14, IMX477_REG_VALUE_16BIT, fstrobe_delay);
+	// FLASH_STRB_DLY_RS
+	imx477_write_reg(imx477, 0x0c16, IMX477_REG_VALUE_16BIT, 0);
+	// FLASH_TRIG_RS
+	imx477_write_reg(imx477, 0x0c1B, IMX477_REG_VALUE_08BIT,
+			 !!fstrobe_enable);
+
 	/* Set on-sensor DPC. */
 	imx477_write_reg(imx477, 0x0b05, IMX477_REG_VALUE_08BIT, !!dpc_enable);
 	imx477_write_reg(imx477, 0x0b06, IMX477_REG_VALUE_08BIT, !!dpc_enable);
@@ -1833,18 +1877,28 @@ static int imx477_start_streaming(struct imx477 *imx477)
 
 	/* Set vsync trigger mode: 0=standalone, 1=source, 2=sink */
 	tm = (imx477->trigger_mode_of >= 0) ? imx477->trigger_mode_of : trigger_mode;
-	imx477_write_reg(imx477, IMX477_REG_MC_MODE,
-			 IMX477_REG_VALUE_08BIT, (tm > 0) ? 1 : 0);
+	if (tm == 1)
+		imx477_write_reg(imx477, IMX477_REG_TEMP_SEN_CTL,
+				 IMX477_REG_VALUE_08BIT, 0);
+	imx477_write_reg(imx477, IMX477_REG_EXTOUT_EN,
+			IMX477_REG_VALUE_08BIT, (tm == 1) ? 1 : 0);
 	imx477_write_reg(imx477, IMX477_REG_MS_SEL,
 			 IMX477_REG_VALUE_08BIT, (tm <= 1) ? 1 : 0);
 	imx477_write_reg(imx477, IMX477_REG_XVS_IO_CTRL,
 			 IMX477_REG_VALUE_08BIT, (tm == 1) ? 1 : 0);
-	imx477_write_reg(imx477, IMX477_REG_EXTOUT_EN,
-			 IMX477_REG_VALUE_08BIT, (tm == 1) ? 1 : 0);
+	imx477_write_reg(imx477, IMX477_REG_MC_MODE,
+			 IMX477_REG_VALUE_08BIT, (tm > 0) ? 1 : 0);
 
 	/* set stream on register */
-	return imx477_write_reg(imx477, IMX477_REG_MODE_SELECT,
-				IMX477_REG_VALUE_08BIT, IMX477_MODE_STREAMING);
+	ret = imx477_write_reg(imx477, IMX477_REG_MODE_SELECT,
+			       IMX477_REG_VALUE_08BIT, IMX477_MODE_STREAMING);
+
+	/* now it's safe to re-enable temp sensor without glitching XVS */
+	if (tm == 1)
+		imx477_write_reg(imx477, IMX477_REG_TEMP_SEN_CTL,
+				 IMX477_REG_VALUE_08BIT, 1);
+
+	return ret;
 }
 
 /* Stop streaming */

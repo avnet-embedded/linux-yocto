@@ -150,11 +150,23 @@ v3d_open(struct drm_device *dev, struct drm_file *file)
 static void
 v3d_postclose(struct drm_device *dev, struct drm_file *file)
 {
+	struct v3d_dev *v3d = to_v3d_dev(dev);
 	struct v3d_file_priv *v3d_priv = file->driver_priv;
+	unsigned long irqflags;
 	enum v3d_queue q;
 
-	for (q = 0; q < V3D_MAX_QUEUES; q++)
+	for (q = 0; q < V3D_MAX_QUEUES; q++) {
+		struct v3d_queue_state *queue = &v3d->queue[q];
+		struct v3d_job *job = queue->active_job;
+
 		drm_sched_entity_destroy(&v3d_priv->sched_entity[q]);
+
+		if (job && job->base.entity == &v3d_priv->sched_entity[q]) {
+			spin_lock_irqsave(&queue->queue_lock, irqflags);
+			job->file_priv = NULL;
+			spin_unlock_irqrestore(&queue->queue_lock, irqflags);
+		}
+	}
 
 	v3d_perfmon_close_file(v3d_priv);
 	kfree(v3d_priv);
@@ -343,23 +355,13 @@ static int v3d_platform_drm_probe(struct platform_device *pdev)
 			return ret;
 	}
 
-	v3d->clk = devm_clk_get_optional(dev, NULL);
-	if (IS_ERR(v3d->clk))
-		return dev_err_probe(dev, PTR_ERR(v3d->clk), "Failed to get V3D clock\n");
-
-	ret = clk_prepare_enable(v3d->clk);
-	if (ret) {
-		dev_err(&pdev->dev, "Couldn't enable the V3D clock\n");
-		return ret;
-	}
-
 	v3d_idle_sms(v3d);
 
 	mmu_debug = V3D_READ(V3D_MMU_DEBUG_INFO);
 	mask = DMA_BIT_MASK(30 + V3D_GET_FIELD(mmu_debug, V3D_MMU_PA_WIDTH));
 	ret = dma_set_mask_and_coherent(dev, mask);
 	if (ret)
-		goto clk_disable;
+		return ret;
 
 	v3d->va_width = 30 + V3D_GET_FIELD(mmu_debug, V3D_MMU_VA_WIDTH);
 
@@ -384,32 +386,29 @@ static int v3d_platform_drm_probe(struct platform_device *pdev)
 		ret = PTR_ERR(v3d->reset);
 
 		if (ret == -EPROBE_DEFER)
-			goto clk_disable;
+			return ret;
 
 		v3d->reset = NULL;
 		ret = map_regs(v3d, &v3d->bridge_regs, "bridge");
 		if (ret) {
 			dev_err(dev,
 				"Failed to get reset control or bridge regs\n");
-			goto clk_disable;
+			return ret;
 		}
 	}
 
-	v3d->clk = devm_clk_get(dev, NULL);
-	if (IS_ERR_OR_NULL(v3d->clk)) {
-		if (PTR_ERR(v3d->clk) != -EPROBE_DEFER)
-			dev_err(dev, "Failed to get clock (%ld)\n", PTR_ERR(v3d->clk));
-		return PTR_ERR(v3d->clk);
-	}
-
 	node = rpi_firmware_find_node();
-	if (!node)
-		return -EINVAL;
+	if (!node) {
+		ret = -EINVAL;
+		goto clk_disable;
+	}
 
 	firmware = rpi_firmware_get(node);
 	of_node_put(node);
-	if (!firmware)
-		return -EPROBE_DEFER;
+	if (!firmware) {
+		ret = -EPROBE_DEFER;
+		goto clk_disable;
+	}
 
 	v3d->clk_up_rate = rpi_firmware_clk_get_max_rate(firmware,
 							 RPI_FIRMWARE_V3D_CLK_ID);
@@ -433,8 +432,7 @@ static int v3d_platform_drm_probe(struct platform_device *pdev)
 					GFP_KERNEL | __GFP_NOWARN | __GFP_ZERO);
 	if (!v3d->mmu_scratch) {
 		dev_err(dev, "Failed to allocate MMU scratch page\n");
-		ret = -ENOMEM;
-		goto clk_disable;
+		return -ENOMEM;
 	}
 
 	ret = v3d_gem_init(drm);
@@ -466,7 +464,7 @@ gem_destroy:
 dma_free:
 	dma_free_wc(dev, 4096, v3d->mmu_scratch, v3d->mmu_scratch_paddr);
 clk_disable:
-	clk_disable_unprepare(v3d->clk);
+        clk_disable_unprepare(v3d->clk);
 	return ret;
 }
 

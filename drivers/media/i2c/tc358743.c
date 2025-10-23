@@ -1960,7 +1960,7 @@ static int tc358743_probe_of(struct tc358743_state *state)
 	 * A value of 374 works with both those modes at 594Mbps, and with most
 	 * modes on 972Mbps.
 	 */
-	state->pdata.fifo_level = 374;
+	state->pdata.fifo_level = 16;
 	/*
 	 * The PLL input clock is obtained by dividing refclk by pll_prd.
 	 * It must be between 6 MHz and 40 MHz, lower frequency is better.
