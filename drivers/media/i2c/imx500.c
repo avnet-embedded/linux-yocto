@@ -37,6 +37,8 @@
 #define IMX500_IMAGE_ONLY_FALSE 0x00
 #define IMX500_IMAGE_ONLY_TRUE 0x01
 
+#define IMX500_REG_SENSOR_TEMP_CTRL CCI_REG8(0x0138)
+
 #define IMX500_REG_ORIENTATION CCI_REG8(0x101)
 
 #define IMX500_XCLK_FREQ 24000000
@@ -206,6 +208,25 @@
 
 #define IMX500_REG_MAIN_FW_VERSION CCI_REG32(0xD07C)
 
+/* Input tensor injection */
+#define IMX500_REG_DD_DAT_INJECTION_CHKSUM CCI_REG32(0xD0D4)
+#define IMX500_REG_DD_DAT_INJECTION_SPI_CMP_FRM CCI_REG8(0xD0DA)
+#define IMX500_REG_DD_DAT_INJECTION_HNDSK CCI_REG8(0xD0DB)
+#define IMX500_DD_DAT_INJECTION_HNDSK_TRANS_INIT_WAIT 1
+#define IMX500_DD_DAT_INJECTION_HNDSK_TRANS_INIT_COMP 2
+#define IMX500_DD_DAT_INJECTION_HNDSK_TRANS_READY_WAIT 3
+#define IMX500_DD_DAT_INJECTION_HNDSK_TRANS_READY_COMP 4
+#define IMX500_DD_DAT_INJECTION_HNDSK_TRANSFERRING 5
+#define IMX500_DD_DAT_INJECTION_HNDSK_TRANS_COMP_WAIT 6
+#define IMX500_DD_DAT_INJECTION_HNDSK_TRANS_COMP 7
+#define IMX500_DD_DAT_INJECTION_HNDSK_TRANS_ERROR 8
+#define IMX500_DD_DAT_INJECTION_HNDSK_TRANS_ERROR_WAIT_NOTIFY 9
+#define IMX500_DD_DAT_INJECTION_HNDSK_TRANS_COMP_WAIT_CHKSUM 10
+
+#define IMX500_REG_STRM_MODE_SEL CCI_REG8(0xD100)
+
+#define IMX500_REG_LEV_PL_MDET_OUT CCI_REG8(0xD641)
+
 /* Colour balance controls */
 #define IMX500_REG_COLOUR_BALANCE_R CCI_REG16(0xd804)
 #define IMX500_REG_COLOUR_BALANCE_GR CCI_REG16(0xd806)
@@ -237,6 +258,10 @@ enum pad_types { IMAGE_PAD, METADATA_PAD, NUM_PADS };
 
 #define V4L2_CID_USER_IMX500_INFERENCE_WINDOW (V4L2_CID_USER_IMX500_BASE + 0)
 #define V4L2_CID_USER_IMX500_NETWORK_FW_FD (V4L2_CID_USER_IMX500_BASE + 1)
+#define V4L2_CID_USER_GET_IMX500_DEVICE_ID (V4L2_CID_USER_IMX500_BASE + 2)
+#define V4L2_CID_USER_IMX500_ENABLE_INJECTION (V4L2_CID_USER_IMX500_BASE + 3)
+#define V4L2_CID_USER_IMX500_INPUT_TENSOR_FD (V4L2_CID_USER_IMX500_BASE + 4)
+#define V4L2_CID_USER_IMX500_INJECTION_CMP_FRM (V4L2_CID_USER_IMX500_BASE + 5)
 
 #define ONE_MIB (1024 * 1024)
 
@@ -1363,6 +1388,10 @@ struct imx500 {
 	struct v4l2_ctrl *vblank;
 	struct v4l2_ctrl *hblank;
 	struct v4l2_ctrl *network_fw_ctrl;
+	struct v4l2_ctrl *device_id;
+	struct v4l2_ctrl *enable_injection;
+	struct v4l2_ctrl *input_tensor_fd;
+	struct v4l2_ctrl *injection_cmp_frm;
 
 	struct v4l2_rect inference_window;
 
@@ -1383,6 +1412,12 @@ struct imx500 {
 
 	bool loader_and_main_written;
 	bool network_written;
+
+	/* Tensor injection enabled */
+	bool tensor_injection;
+
+	/* Current injection comparison frame value */
+	u8 current_injection_cmp_frm;
 
 	/* Current long exposure factor in use. Set through V4L2_CID_VBLANK */
 	unsigned int long_exp_shift;
@@ -1577,6 +1612,25 @@ static int imx500_set_inference_window(struct imx500 *imx500)
 				   ARRAY_SIZE(window_regs), NULL);
 }
 
+static int imx500_get_device_id(struct imx500 *imx500, u32 *device_id)
+{
+	const u32 addr = 0xd040;
+	unsigned int i;
+	int ret = 0;
+	u64 tmp, data;
+
+	for (i = 0; i < 4; i++) {
+		ret = cci_read(imx500->regmap, CCI_REG32(addr + i * 4), &tmp,
+			       NULL);
+		if (ret)
+			return -EREMOTEIO;
+		data = tmp & 0xffffffff;
+		device_id[i] = data;
+	}
+
+	return ret;
+}
+
 static int imx500_reg_val_write_cbk(void *arg,
 				    const struct cci_reg_sequence *reg)
 {
@@ -1617,6 +1671,7 @@ static int imx500_validate_fw_block(const char *data, size_t maxlen)
 	static const char footer_id[] = { '3', '6', '9', '5' };
 
 	u32 data_size;
+	u32 extra_bytes_size = 0;
 
 	const char *end = data + maxlen;
 
@@ -1633,13 +1688,16 @@ static int imx500_validate_fw_block(const char *data, size_t maxlen)
 	memcpy(&data_size, data + sizeof(header_id), sizeof(data_size));
 	data_size = ___constant_swab32(data_size);
 
-	if (end - data_size - footer_size < data)
+	/* check the device_lock flag */
+	extra_bytes_size = *((u8 *)(data + 0x0e)) & 0x01 ? 32 : 0;
+
+	if (end - data_size - footer_size - extra_bytes_size < data)
 		return -1;
 	if (memcmp(data + data_size + footer_size - sizeof(footer_id),
 		   &footer_id, sizeof(footer_id)))
 		return -1;
 
-	return data_size + footer_size;
+	return data_size + footer_size + extra_bytes_size;
 }
 
 /* Parse fw block by block, returning total valid fw size */
@@ -1873,6 +1931,181 @@ static void imx500_clear_fw_network(struct imx500 *imx500)
 	imx500->fw_network = NULL;
 	imx500->network_written = false;
 	imx500->fw_progress = 0;
+	v4l2_ctrl_activate(imx500->device_id, false);
+}
+
+static int __must_check imx500_spi_write(struct imx500 *state, const u8 *data,
+					 size_t size)
+{
+	if (size % 4 || size > ONE_MIB)
+		return -EINVAL;
+
+	if (!state->spi_device)
+		return -ENODEV;
+
+	return spi_write(state->spi_device, data, size);
+}
+
+static int imx500_injection_wait_transfer_complete(struct imx500 *imx500)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(&imx500->sd);
+	struct cci_reg_sequence hndsk_reg = {
+		IMX500_REG_DD_DAT_INJECTION_HNDSK,
+		IMX500_DD_DAT_INJECTION_HNDSK_TRANSFERRING
+	};
+	int ret;
+
+	/* Continue polling until we reach the final TRANS_COMP state */
+	while (hndsk_reg.val != IMX500_DD_DAT_INJECTION_HNDSK_TRANS_COMP) {
+		ret = imx500_poll_status_reg(imx500, &hndsk_reg, 5);
+		if (ret) {
+			dev_err(&client->dev,
+				"Handshake register did not update from state %llu\n",
+				hndsk_reg.val);
+			return ret;
+		}
+
+		/* Check if we've reached the final completion state */
+		if (hndsk_reg.val == IMX500_DD_DAT_INJECTION_HNDSK_TRANS_COMP) {
+			break;
+		} else if (hndsk_reg.val == IMX500_DD_DAT_INJECTION_HNDSK_TRANS_COMP_WAIT ||
+			   hndsk_reg.val == IMX500_DD_DAT_INJECTION_HNDSK_TRANS_COMP_WAIT_CHKSUM) {
+			continue;
+		} else if (hndsk_reg.val ==
+			   IMX500_DD_DAT_INJECTION_HNDSK_TRANS_ERROR) {
+			dev_err(&client->dev,
+				"Handshake register indicates transfer error\n");
+			return -EREMOTEIO;
+		} else if (hndsk_reg.val ==
+			   IMX500_DD_DAT_INJECTION_HNDSK_TRANS_ERROR_WAIT_NOTIFY) {
+			dev_err(&client->dev,
+				"Handshake register indicates transfer error (waiting for notification)\n");
+			return -EREMOTEIO;
+		}
+
+		/* Unexpected state */
+		dev_err(&client->dev,
+			"Handshake register in unexpected state %llu\n",
+			hndsk_reg.val);
+		return -EREMOTEIO;
+	}
+
+	return 0;
+}
+
+static u32 imx500_calc_injection_checksum(const u32 *data, size_t size)
+{
+	u32 checksum = 0;
+
+	while (size--) {
+		u32 val = *data++;
+
+		checksum += val;
+	}
+
+	return checksum;
+}
+
+static int imx500_inject_input_tensor(struct imx500 *imx500, const u32 *data,
+				      size_t size)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(&imx500->sd);
+
+	int ret;
+	u64 cmp_frm;
+	u8 exp_frm;
+
+	u32 checksum = imx500_calc_injection_checksum(data, size);
+
+	ret = cci_write(imx500->regmap, IMX500_REG_DD_DAT_INJECTION_CHKSUM,
+			checksum, NULL);
+	if (ret) {
+		dev_err(&client->dev, "Failed to write checksum\n");
+		return ret;
+	}
+
+	ret = cci_write(imx500->regmap, IMX500_REG_STRM_MODE_SEL, 0, NULL);
+	if (ret) {
+		dev_err(&client->dev, "Failed to stop DNN processing\n");
+		return ret;
+	}
+
+	/* The handshake register (IMX500_REG_DD_DAT_INJECTION_HNDSK) is used bidirectionally:
+	 * - We write a state to request a transition (e.g. READY_WAIT)
+	 * - The sensor responds by updating the register with the new state (e.g. READY_COMP)
+	 * This allows us to coordinate state transitions between the host and sensor.
+	 */
+	struct cci_reg_sequence hndsk_reg = {
+		IMX500_REG_DD_DAT_INJECTION_HNDSK,
+		IMX500_DD_DAT_INJECTION_HNDSK_TRANS_READY_WAIT
+	};
+
+	ret = cci_multi_reg_write(imx500->regmap, &hndsk_reg, 1, NULL);
+	if (ret) {
+		dev_err(&client->dev, "Failed to inject state transition\n");
+		return ret;
+	}
+
+	ret = imx500_poll_status_reg(imx500, &hndsk_reg, 5);
+	if (ret) {
+		dev_err(&client->dev,
+			"Handshake register did not update after READY_WAIT request\n");
+		return ret;
+	}
+
+	if (hndsk_reg.val != IMX500_DD_DAT_INJECTION_HNDSK_TRANS_READY_COMP) {
+		dev_err(&client->dev,
+			"Failed to transition to READY_COMP state: %llu\n",
+			hndsk_reg.val);
+		return -EREMOTEIO;
+	}
+
+	ret = cci_write(imx500->regmap, IMX500_REG_DD_DAT_INJECTION_HNDSK,
+			IMX500_DD_DAT_INJECTION_HNDSK_TRANSFERRING, NULL);
+	if (ret) {
+		dev_err(&client->dev,
+			"Failed to request transition to TRANSFERRING state\n");
+		return ret;
+	}
+
+	for (size_t i = 0; i < size; i++)
+		*(u32 *)(data + i) = ___constant_swab32(data[i]);
+
+	if (imx500->led_gpio)
+		gpiod_set_value_cansleep(imx500->led_gpio, 1);
+
+	ret = imx500_spi_write(imx500, (const u8 *)data, size * 4);
+	if (ret) {
+		dev_err(&client->dev, "SPI transfer of input tensor failed\n");
+		return ret;
+	}
+
+	if (imx500->led_gpio)
+		gpiod_set_value_cansleep(imx500->led_gpio, 0);
+
+	ret = imx500_injection_wait_transfer_complete(imx500);
+	if (ret) {
+		dev_err(&client->dev, "SPI transfer of input tensor failed\n");
+		return ret;
+	}
+
+	ret = cci_read(imx500->regmap, IMX500_REG_DD_DAT_INJECTION_SPI_CMP_FRM,
+		       &cmp_frm, NULL);
+	if (ret) {
+		dev_err(&client->dev,
+			"Failed to read injection frame comparison register\n");
+		return ret;
+	}
+	exp_frm = cmp_frm;
+	exp_frm += 2 << (exp_frm > 254);
+	imx500->current_injection_cmp_frm = exp_frm;
+	dev_info(&client->dev, "injection_cmp_frm set to %u\n", exp_frm);
+
+	ret = cci_write(imx500->regmap, IMX500_REG_STRM_MODE_SEL, 4, NULL);
+	if (ret)
+		dev_err(&client->dev, "Failed to enable DNN processing\n");
+
+	return ret;
 }
 
 static int imx500_set_ctrl(struct v4l2_ctrl *ctrl)
@@ -1881,6 +2114,9 @@ static int imx500_set_ctrl(struct v4l2_ctrl *ctrl)
 		container_of(ctrl->handler, struct imx500, ctrl_handler);
 	struct i2c_client *client = v4l2_get_subdevdata(&imx500->sd);
 	int ret = 0;
+
+	const u8 *tensor_data;
+	size_t tensor_data_size;
 
 	if (ctrl->id == V4L2_CID_USER_IMX500_NETWORK_FW_FD) {
 		/* Reset state of the control. */
@@ -1926,6 +2162,56 @@ static int imx500_set_ctrl(struct v4l2_ctrl *ctrl)
 		}
 
 		imx500_calc_inference_lines(imx500);
+		return 0;
+	}
+
+	if (ctrl->id == V4L2_CID_USER_IMX500_INPUT_TENSOR_FD) {
+		if (!imx500->streaming || !imx500->fw_network ||
+		    !imx500->tensor_injection) {
+			if (ctrl->val == -1)
+				return 0;
+
+			dev_err(&client->dev,
+				"Input tensor injection requires streaming, network and injection to be enabled\n");
+			return -EINVAL;
+		}
+
+		ret = kernel_read_file_from_fd(ctrl->val, 0,
+					       (void **)&tensor_data, INT_MAX,
+					       &tensor_data_size, 1);
+
+		if (ret < 0) {
+			dev_err(&client->dev,
+				"%s failed to read tensor data: %d\n", __func__,
+				ret);
+			return ret;
+		}
+
+		if (tensor_data_size % 4 != 0) {
+			dev_err(&client->dev,
+				"%s tensor data size must be multiple of 4, got %zu\n",
+				__func__, tensor_data_size);
+			vfree(tensor_data);
+			return -EINVAL;
+		}
+
+		ret = imx500_inject_input_tensor(imx500, (u32 *)tensor_data,
+						 tensor_data_size / 4);
+
+		vfree(tensor_data);
+
+		ctrl->val = -1;
+		return ret;
+	}
+
+	if (ctrl->id == V4L2_CID_USER_IMX500_ENABLE_INJECTION) {
+		/*
+		 * tensor_injection is latched-enabled as no deinitialisation is possible
+		 * without reset
+		 */
+		if (ctrl->val && !imx500->tensor_injection)
+			imx500->tensor_injection = ctrl->val;
+
 		return 0;
 	}
 
@@ -1995,7 +2281,37 @@ static int imx500_set_ctrl(struct v4l2_ctrl *ctrl)
 	return ret;
 }
 
+static int imx500_get_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct imx500 *imx500 = container_of(ctrl->handler, struct imx500,
+					     ctrl_handler);
+	struct i2c_client *client = v4l2_get_subdevdata(&imx500->sd);
+	u32 device_id[4] = {0};
+	int ret;
+
+	switch (ctrl->id) {
+	case V4L2_CID_USER_GET_IMX500_DEVICE_ID:
+		ret = imx500_get_device_id(imx500, device_id);
+		memcpy(ctrl->p_new.p_u32, device_id, sizeof(device_id));
+		break;
+	case V4L2_CID_USER_IMX500_INJECTION_CMP_FRM:
+		ctrl->val = imx500->current_injection_cmp_frm;
+		dev_dbg(&client->dev, "Injection comparison frame: %u\n",
+			ctrl->val);
+		ret = 0;
+		break;
+	default:
+		dev_info(&client->dev, "ctrl(id:0x%x,val:0x%x) is not handled\n",
+			 ctrl->id, ctrl->val);
+		ret = -EINVAL;
+		break;
+	}
+
+	return ret;
+}
+
 static const struct v4l2_ctrl_ops imx500_ctrl_ops = {
+	.g_volatile_ctrl = imx500_get_ctrl,
 	.s_ctrl = imx500_set_ctrl,
 };
 
@@ -2254,16 +2570,55 @@ static int imx500_get_selection(struct v4l2_subdev *sd,
 	return -EINVAL;
 }
 
-static int __must_check imx500_spi_write(struct imx500 *state, const u8 *data,
-					 size_t size)
+static int imx500_data_injection_init(struct imx500 *imx500)
 {
-	if (size % 4 || size > ONE_MIB)
-		return -EINVAL;
+	struct i2c_client *client = v4l2_get_subdevdata(&imx500->sd);
 
-	if (!state->spi_device)
-		return -ENODEV;
+	int ret;
 
-	return spi_write(state->spi_device, data, size);
+	ret = cci_write(imx500->regmap, IMX500_REG_LEV_PL_MDET_OUT, 1, NULL);
+	if (ret) {
+		dev_err(&client->dev,
+			"Failed to write LEV_PL_MDET_OUT register\n");
+		return ret;
+	}
+
+	ret = cci_write(imx500->regmap, IMX500_REG_DD_DAT_INJECTION_HNDSK,
+			IMX500_DD_DAT_INJECTION_HNDSK_TRANS_INIT_WAIT, NULL);
+	if (ret) {
+		dev_err(&client->dev, "Failed to write HNDSK register\n");
+		return ret;
+	}
+
+	return 0;
+}
+
+static int imx500_data_injection_init_wait(struct imx500 *imx500)
+{
+	struct i2c_client *client = v4l2_get_subdevdata(&imx500->sd);
+
+	int ret;
+
+	struct cci_reg_sequence hndsk_reg = {
+		IMX500_REG_DD_DAT_INJECTION_HNDSK,
+		IMX500_DD_DAT_INJECTION_HNDSK_TRANS_INIT_WAIT
+	};
+
+	ret = imx500_poll_status_reg(imx500, &hndsk_reg, 40);
+	if (ret) {
+		dev_err(&client->dev,
+			"Handshake register did not update after INIT_WAIT request\n");
+		return ret;
+	}
+
+	if (hndsk_reg.val != IMX500_DD_DAT_INJECTION_HNDSK_TRANS_INIT_COMP) {
+		dev_err(&client->dev,
+			"Failed to transition to INIT_COMP state: %llu\n",
+			hndsk_reg.val);
+		return -EREMOTEIO;
+	}
+
+	return 0;
 }
 
 /* Moves the IMX500 internal state machine between states or updates.
@@ -2360,9 +2715,11 @@ static int imx500_state_transition(struct imx500 *imx500, const u8 *fw,
 		}
 
 		/* Do SPI transfer */
-		gpiod_set_value_cansleep(imx500->led_gpio, 1);
+		if (imx500->led_gpio)
+			gpiod_set_value_cansleep(imx500->led_gpio, 1);
 		ret = imx500_spi_write(imx500, data, size);
-		gpiod_set_value_cansleep(imx500->led_gpio, 0);
+		if (imx500->led_gpio)
+			gpiod_set_value_cansleep(imx500->led_gpio, 0);
 
 		imx500->fw_progress += size;
 
@@ -2505,6 +2862,14 @@ static int imx500_start_streaming(struct imx500 *imx500)
 	if (ret < 0)
 		return ret;
 
+	/*
+	 * Disable the temperature sensor here - must be done else loading any
+	 * firmware fails...
+	 *
+	 * Re-enable before stream-on below.
+	 */
+	cci_write(imx500->regmap, IMX500_REG_SENSOR_TEMP_CTRL, 0, &ret);
+
 	ret = cci_write(imx500->regmap, IMX500_REG_IMAGE_ONLY_MODE,
 			imx500->fw_network ? IMX500_IMAGE_ONLY_FALSE :
 					     IMX500_IMAGE_ONLY_TRUE,
@@ -2512,7 +2877,7 @@ static int imx500_start_streaming(struct imx500 *imx500)
 	if (ret) {
 		dev_err(&client->dev, "%s failed to set image mode\n",
 			__func__);
-		return ret;
+		goto err_runtime_put;
 	}
 
 	/* Acquire loader and main firmware if needed */
@@ -2524,7 +2889,7 @@ static int imx500_start_streaming(struct imx500 *imx500)
 			if (ret) {
 				dev_err(&client->dev,
 					"Unable to acquire firmware loader\n");
-				return ret;
+				goto err_runtime_put;
 			}
 		}
 		if (!imx500->fw_main) {
@@ -2534,7 +2899,7 @@ static int imx500_start_streaming(struct imx500 *imx500)
 			if (ret) {
 				dev_err(&client->dev,
 					"Unable to acquire main firmware\n");
-				return ret;
+				goto err_runtime_put;
 			}
 		}
 	}
@@ -2546,7 +2911,7 @@ static int imx500_start_streaming(struct imx500 *imx500)
 		if (ret) {
 			dev_err(&client->dev,
 				"%s failed to set common settings\n", __func__);
-			return ret;
+			goto err_runtime_put;
 		}
 
 		imx500->common_regs_written = true;
@@ -2558,30 +2923,42 @@ static int imx500_start_streaming(struct imx500 *imx500)
 			dev_err(&client->dev,
 				"%s failed to transition from program empty state\n",
 				__func__);
-			return ret;
+			goto err_runtime_put;
 		}
 		imx500->loader_and_main_written = true;
 	}
 
 	if (imx500->fw_network && !imx500->network_written) {
+		if (imx500->tensor_injection) {
+			ret = imx500_data_injection_init(imx500);
+			if (ret) {
+				dev_err(&client->dev,
+					"%s failed to initialize data injection\n",
+					__func__);
+				return ret;
+			}
+		}
 		ret = imx500_transition_to_network(imx500);
 		if (ret) {
 			dev_err(&client->dev,
 				"%s failed to transition to network loaded\n",
 				__func__);
-			return ret;
+			goto err_runtime_put;
 		}
 		imx500->network_written = true;
 	}
 
 	/* Enable DNN */
 	if (imx500->fw_network) {
-		ret = cci_write(imx500->regmap, CCI_REG8(0xD100), 4, NULL);
+		ret = cci_write(imx500->regmap, IMX500_REG_STRM_MODE_SEL, 4,
+				NULL);
 		if (ret) {
 			dev_err(&client->dev, "%s failed to enable DNN\n",
 				__func__);
-			return ret;
+			goto err_runtime_put;
 		}
+
+		v4l2_ctrl_activate(imx500->device_id, true);
 	}
 
 	/* Apply default values of current mode */
@@ -2590,7 +2967,7 @@ static int imx500_start_streaming(struct imx500 *imx500)
 				  reg_list->num_of_regs, NULL);
 	if (ret) {
 		dev_err(&client->dev, "%s failed to set mode\n", __func__);
-		return ret;
+		goto err_runtime_put;
 	}
 
 	/* Apply customized values from user */
@@ -2599,11 +2976,145 @@ static int imx500_start_streaming(struct imx500 *imx500)
 	/* Disable any sensor startup frame drops. This must be written here! */
 	cci_write(imx500->regmap, CCI_REG8(0xD405), 0, &ret);
 
+	/* Re-enable the temperature sensor. */
+	cci_write(imx500->regmap, IMX500_REG_SENSOR_TEMP_CTRL, 1, &ret);
+
 	/* set stream on register */
 	cci_write(imx500->regmap, IMX500_REG_MODE_SELECT, IMX500_MODE_STREAMING,
 		  &ret);
 
+	if (ret)
+		goto err_runtime_put;
+
+	if (imx500->tensor_injection) {
+		ret = imx500_data_injection_init_wait(imx500);
+		if (ret) {
+			dev_err(&client->dev,
+				"%s failed to wait for data injection init\n",
+				__func__);
+			goto err_runtime_put;
+		}
+	}
+
+	return 0;
+
+err_runtime_put:
+	__v4l2_ctrl_grab(imx500->enable_injection, false);
+	pm_runtime_mark_last_busy(&client->dev);
+	pm_runtime_put_autosuspend(&client->dev);
+
 	return ret;
+}
+
+static int imx500_power_on(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct imx500 *imx500 = to_imx500(sd);
+	int ret;
+
+	/* Acquire GPIOs first to ensure reset is asserted before power is applied */
+	imx500->led_gpio = devm_gpiod_get_optional(dev, "led", GPIOD_OUT_LOW);
+	if (IS_ERR(imx500->led_gpio)) {
+		ret = PTR_ERR(imx500->led_gpio);
+		dev_err(&client->dev, "%s: failed to get led gpio\n", __func__);
+		return ret;
+	}
+
+	imx500->reset_gpio =
+		devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(imx500->reset_gpio)) {
+		ret = PTR_ERR(imx500->reset_gpio);
+		dev_err(&client->dev, "%s: failed to get reset gpio\n",
+			__func__);
+		goto gpio_led_put;
+	}
+
+	ret = regulator_bulk_enable(IMX500_NUM_SUPPLIES, imx500->supplies);
+	if (ret) {
+		dev_err(&client->dev, "%s: failed to enable regulators\n",
+			__func__);
+		goto gpio_reset_put;
+	}
+
+	/* T4 - 1us
+	 * Ambiguous: Regulators rising to INCK start is specified by the datasheet
+	 * but also "Presence of INCK during Power off is acceptable"
+	 */
+	udelay(2);
+
+	ret = clk_prepare_enable(imx500->xclk);
+	if (ret) {
+		dev_err(&client->dev, "%s: failed to enable clock\n", __func__);
+		goto reg_off;
+	}
+
+	/* T5 - 0ms
+	 * Ambiguous: Regulators rising to XCLR rising is specified by the datasheet
+	 * as 0ms but also "XCLR pin should be set to 'High' after INCK supplied.".
+	 * T4 and T5 are shown as overlapping.
+	 */
+	if (imx500->reset_gpio)
+		gpiod_set_value_cansleep(imx500->reset_gpio, 1);
+
+	/* T7 - 9ms
+	 * "INCK start and CXLR rising till Send Streaming Command wait time"
+	 */
+	usleep_range(9000, 12000);
+
+	return 0;
+
+reg_off:
+	regulator_bulk_disable(IMX500_NUM_SUPPLIES, imx500->supplies);
+gpio_reset_put:
+	if (imx500->reset_gpio) {
+		devm_gpiod_put(dev, imx500->reset_gpio);
+		imx500->reset_gpio = NULL;
+	}
+gpio_led_put:
+	if (imx500->led_gpio) {
+		devm_gpiod_put(dev, imx500->led_gpio);
+		imx500->led_gpio = NULL;
+	}
+	return ret;
+}
+
+static int imx500_power_off(struct device *dev)
+{
+	struct i2c_client *client = to_i2c_client(dev);
+	struct v4l2_subdev *sd = i2c_get_clientdata(client);
+	struct imx500 *imx500 = to_imx500(sd);
+
+	/* Datasheet specifies power down sequence as INCK disable, XCLR low,
+	 * regulator disable.  T1 (XCLR neg-edge to regulator disable) is specified
+	 * as 0us.
+	 *
+	 * Note, this is not the reverse order of power up.
+	 */
+	clk_disable_unprepare(imx500->xclk);
+	if (imx500->reset_gpio)
+		gpiod_set_value_cansleep(imx500->reset_gpio, 0);
+
+	/* Release GPIOs before disabling regulators */
+	if (imx500->reset_gpio) {
+		devm_gpiod_put(&client->dev, imx500->reset_gpio);
+		imx500->reset_gpio = NULL;
+	}
+	if (imx500->led_gpio) {
+		devm_gpiod_put(&client->dev, imx500->led_gpio);
+		imx500->led_gpio = NULL;
+	}
+
+	regulator_bulk_disable(IMX500_NUM_SUPPLIES, imx500->supplies);
+
+	/* Force reprogramming of the common registers when powered up again. */
+	imx500->fsm_state = IMX500_STATE_RESET;
+	imx500->tensor_injection = false;
+	imx500->common_regs_written = false;
+	imx500->loader_and_main_written = false;
+	imx500_clear_fw_network(imx500);
+
+	return 0;
 }
 
 /* Stop streaming */
@@ -2619,11 +3130,46 @@ static void imx500_stop_streaming(struct imx500 *imx500)
 		dev_err(&client->dev, "%s failed to set stream\n", __func__);
 
 	/* Disable DNN */
-	ret = cci_write(imx500->regmap, CCI_REG8(0xD100), 0, NULL);
+	ret = cci_write(imx500->regmap, IMX500_REG_STRM_MODE_SEL, 0, NULL);
 	if (ret)
 		dev_err(&client->dev, "%s failed to disable DNN\n", __func__);
 
 	pm_runtime_mark_last_busy(&client->dev);
+
+	if (imx500->tensor_injection) {
+		/*
+		 * The tensor_injection state is not persistent.
+		 * It must be reset on streamoff to avoid breaking
+		 * non-injection-aware applications that may use the
+		 * device next. We reset both the internal flag and the
+		 * control's value.
+		 */
+		imx500->tensor_injection = false;
+		__v4l2_ctrl_s_ctrl(imx500->enable_injection, 0);
+
+		/*
+		 * A full power cycle is required to reset the sensor's SPI
+		 * block. Disabling runtime PM allows us to do this safely.
+		 */
+		pm_runtime_disable(&client->dev);
+		imx500_power_off(&client->dev);
+		pm_runtime_set_suspended(&client->dev);
+
+		/*
+		 * If the usage count is > 1, another user (e.g. sysfs) holds
+		 * a reference, so the device must be powered on again.
+		 * Otherwise, the upcoming 'put' will suspend, so we can
+		 * leave it off.
+		 */
+		if (atomic_read(&client->dev.power.usage_count) > 1) {
+			usleep_range(5000, 10000);
+			imx500_power_on(&client->dev);
+			pm_runtime_set_active(&client->dev);
+		}
+
+		pm_runtime_enable(&client->dev);
+	}
+
 	pm_runtime_put_autosuspend(&client->dev);
 }
 
@@ -2665,77 +3211,6 @@ err_start_streaming:
 	mutex_unlock(&imx500->mutex);
 
 	return ret;
-}
-
-/* Power/clock management functions */
-static int imx500_power_on(struct device *dev)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	struct imx500 *imx500 = to_imx500(sd);
-	int ret;
-
-	ret = regulator_bulk_enable(IMX500_NUM_SUPPLIES, imx500->supplies);
-	if (ret) {
-		dev_err(&client->dev, "%s: failed to enable regulators\n",
-			__func__);
-		return ret;
-	}
-
-	/* T4 - 1us
-	 * Ambiguous: Regulators rising to INCK start is specified by the datasheet
-	 * but also "Presence of INCK during Power off is acceptable"
-	 */
-	udelay(2);
-
-	ret = clk_prepare_enable(imx500->xclk);
-	if (ret) {
-		dev_err(&client->dev, "%s: failed to enable clock\n", __func__);
-		goto reg_off;
-	}
-
-	/* T5 - 0ms
-	 * Ambiguous: Regulators rising to XCLR rising is specified by the datasheet
-	 * as 0ms but also "XCLR pin should be set to 'High' after INCK supplied.".
-	 * T4 and T5 are shown as overlapping.
-	 */
-	gpiod_set_value_cansleep(imx500->reset_gpio, 1);
-
-	/* T7 - 9ms
-	 * "INCK start and CXLR rising till Send Streaming Command wait time"
-	 */
-	usleep_range(9000, 12000);
-
-	return 0;
-
-reg_off:
-	regulator_bulk_disable(IMX500_NUM_SUPPLIES, imx500->supplies);
-	return ret;
-}
-
-static int imx500_power_off(struct device *dev)
-{
-	struct i2c_client *client = to_i2c_client(dev);
-	struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	struct imx500 *imx500 = to_imx500(sd);
-
-	/* Datasheet specifies power down sequence as INCK disable, XCLR low,
-	 * regulator disable.  T1 (XCLR neg-edge to regulator disable) is specified
-	 * as 0us.
-	 *
-	 * Note, this is not the reverse order of power up.
-	 */
-	clk_disable_unprepare(imx500->xclk);
-	gpiod_set_value_cansleep(imx500->reset_gpio, 0);
-	regulator_bulk_disable(IMX500_NUM_SUPPLIES, imx500->supplies);
-
-	/* Force reprogramming of the common registers when powered up again. */
-	imx500->fsm_state = IMX500_STATE_RESET;
-	imx500->common_regs_written = false;
-	imx500->loader_and_main_written = false;
-	imx500_clear_fw_network(imx500);
-
-	return 0;
 }
 
 static int imx500_get_regulators(struct imx500 *imx500)
@@ -2833,6 +3308,60 @@ static const struct v4l2_ctrl_config network_fw_fd = {
 	.def		= -1,
 };
 
+/* Custom control to get camera device id */
+static const struct v4l2_ctrl_config cam_get_device_id = {
+	.name		= "Get IMX500 Device ID",
+	.id		= V4L2_CID_USER_GET_IMX500_DEVICE_ID,
+	.dims[0]	= 4,
+	.ops		= &imx500_ctrl_ops,
+	.type		= V4L2_CTRL_TYPE_U32,
+	.flags		= V4L2_CTRL_FLAG_READ_ONLY | V4L2_CTRL_FLAG_VOLATILE |
+			  V4L2_CTRL_FLAG_INACTIVE,
+	.elem_size	= sizeof(u32),
+	.min		= 0x00,
+	.max		= U32_MAX,
+	.step		= 1,
+	.def		= 0,
+};
+
+/* Custom control for enable injection */
+static const struct v4l2_ctrl_config enable_injection_ctrl = {
+	.name = "IMX500 Enable Input Tensor Injection",
+	.id = V4L2_CID_USER_IMX500_ENABLE_INJECTION,
+	.ops = &imx500_ctrl_ops,
+	.type = V4L2_CTRL_TYPE_BOOLEAN,
+	.min = 0,
+	.max = 1,
+	.step = 1,
+	.def = 0,
+};
+
+/* Custom control for input tensor file FD */
+static const struct v4l2_ctrl_config input_tensor_fd = {
+	.name = "IMX500 Input Tensor File FD",
+	.id = V4L2_CID_USER_IMX500_INPUT_TENSOR_FD,
+	.ops = &imx500_ctrl_ops,
+	.type = V4L2_CTRL_TYPE_INTEGER,
+	.flags = V4L2_CTRL_FLAG_EXECUTE_ON_WRITE | V4L2_CTRL_FLAG_WRITE_ONLY,
+	.min = -1,
+	.max = S32_MAX,
+	.step = 1,
+	.def = -1,
+};
+
+/* Custom control from tensor injection comparison frame */
+static const struct v4l2_ctrl_config injection_cmp_frm = {
+	.name = "IMX500 Injection Comparison Frame",
+	.id = V4L2_CID_USER_IMX500_INJECTION_CMP_FRM,
+	.ops = &imx500_ctrl_ops,
+	.type = V4L2_CTRL_TYPE_INTEGER,
+	.flags = V4L2_CTRL_FLAG_READ_ONLY | V4L2_CTRL_FLAG_VOLATILE,
+	.min = 1,
+	.max = 254,
+	.step = 1,
+	.def = 42,
+};
+
 /* Initialize control handlers */
 static int imx500_init_controls(struct imx500 *imx500)
 {
@@ -2896,6 +3425,14 @@ static int imx500_init_controls(struct imx500 *imx500)
 	v4l2_ctrl_new_custom(ctrl_hdlr, &inf_window_ctrl, NULL);
 	imx500->network_fw_ctrl =
 		v4l2_ctrl_new_custom(ctrl_hdlr, &network_fw_fd, NULL);
+	imx500->device_id =
+		v4l2_ctrl_new_custom(ctrl_hdlr, &cam_get_device_id, NULL);
+	imx500->enable_injection =
+		v4l2_ctrl_new_custom(ctrl_hdlr, &enable_injection_ctrl, NULL);
+	imx500->input_tensor_fd =
+		v4l2_ctrl_new_custom(ctrl_hdlr, &input_tensor_fd, NULL);
+	imx500->injection_cmp_frm =
+		v4l2_ctrl_new_custom(ctrl_hdlr, &injection_cmp_frm, NULL);
 
 	if (ctrl_hdlr->error) {
 		ret = ctrl_hdlr->error;
@@ -3044,14 +3581,14 @@ static int imx500_probe(struct i2c_client *client)
 		return ret;
 	}
 
-	imx500->led_gpio = devm_gpiod_get_optional(dev, "led", GPIOD_OUT_LOW);
-
-	imx500->reset_gpio =
-		devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
+	/* GPIOs are acquired in imx500_power_on() to avoid preventing
+	 * regulator power down when shared with other drivers.
+	 */
 
 	/*
 	 * The sensor must be powered for imx500_identify_module()
-	 * to be able to read the CHIP_ID register
+	 * to be able to read the CHIP_ID register. This also ensures
+	 * GPIOs are available.
 	 */
 	ret = imx500_power_on(dev);
 	if (ret)
@@ -3069,6 +3606,9 @@ static int imx500_probe(struct i2c_client *client)
 
 	/* Initialize default format */
 	imx500_set_default_format(imx500);
+
+	/* Initialize injection comparison frame to default value */
+	imx500->current_injection_cmp_frm = 0;
 
 	/* This needs the pm runtime to be registered. */
 	ret = imx500_init_controls(imx500);

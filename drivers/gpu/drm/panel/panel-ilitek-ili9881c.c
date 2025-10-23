@@ -2306,7 +2306,7 @@ static const struct drm_display_mode cfaf7201280a0_050tx_default_mode = {
 	.vsync_end	= 1280 + 16 + 8,
 	.vtotal		= 1280 + 16 + 8 + 16,
 	.width_mm	= 62,
-	.height_mm	= 1108
+	.height_mm	= 110,
 };
 
 static const struct drm_display_mode rpi_5inch_default_mode = {
@@ -2508,6 +2508,7 @@ static const struct ili9881c_desc nwe080_desc = {
 	.init_length = ARRAY_SIZE(nwe080_init),
 	.mode = &nwe080_default_mode,
 	.mode_flags = MIPI_DSI_MODE_VIDEO_SYNC_PULSE | MIPI_DSI_MODE_VIDEO,
+	.lanes = 4,
 };
 
 static const struct ili9881c_desc cfaf7201280a0_050tx_desc = {

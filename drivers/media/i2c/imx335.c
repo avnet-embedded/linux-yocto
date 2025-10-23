@@ -633,13 +633,6 @@ static int imx335_set_ctrl(struct v4l2_ctrl *ctrl)
 		return 0;
 
 	switch (ctrl->id) {
-	case V4L2_CID_VBLANK:
-		exposure = imx335->exp_ctrl->val;
-		analog_gain = imx335->again_ctrl->val;
-
-		ret = imx335_update_exp_gain(imx335, exposure, analog_gain);
-
-		break;
 	case V4L2_CID_EXPOSURE:
 		exposure = ctrl->val;
 		analog_gain = imx335->again_ctrl->val;
