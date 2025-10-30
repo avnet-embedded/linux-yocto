@@ -1786,7 +1786,7 @@ static void am65_cpsw_nuss_free_tx_chns(struct am65_cpsw_common *common)
 		/* Don't clear tx_chn memory as we need to preserve
 		 * data between suspend/resume
 		 */
-		if (!(tx_chn->irq < 0))
+		if (tx_chn->irq > 0)
 			devm_free_irq(dev, tx_chn->irq, tx_chn);
 	}
 }
