@@ -382,11 +382,15 @@ static void am65_cpsw_init_host_port_switch(struct am65_cpsw_common *common);
 static void am65_cpsw_init_host_port_emac(struct am65_cpsw_common *common);
 static void am65_cpsw_init_port_switch_ale(struct am65_cpsw_port *port);
 static void am65_cpsw_init_port_emac_ale(struct am65_cpsw_port *port);
+static void am65_cpsw_nuss_tx_cleanup(void *data, dma_addr_t desc_dma);
+static void am65_cpsw_nuss_rx_cleanup(void *data, dma_addr_t desc_dma);
 
 static int am65_cpsw_nuss_common_open(struct am65_cpsw_common *common,
 				      netdev_features_t features)
 {
 	struct am65_cpsw_host *host_p = am65_common_get_host(common);
+	struct am65_cpsw_rx_chn *rx_chan = &common->rx_chns;
+	struct am65_cpsw_tx_chn *tx_chan = common->tx_chns;
 	int port_idx, i, ret;
 	struct sk_buff *skb;
 	u32 val, port_mask;
@@ -407,6 +411,22 @@ static int am65_cpsw_nuss_common_open(struct am65_cpsw_common *common,
 		am65_cpsw_nuss_free_tx_chns(common);
 		return ret;
 	}
+
+	/* The DMA Channels are not guaranteed to be in a clean state.
+	 * Reset and disable them to ensure that they are back to the
+	 * clean state and ready to be used.
+	 */
+	for (i = 0; i < common->tx_ch_num; i++) {
+		k3_udma_glue_reset_tx_chn(tx_chan[i].tx_chn, &tx_chan[i],
+					  am65_cpsw_nuss_tx_cleanup);
+		k3_udma_glue_disable_tx_chn(tx_chan[i].tx_chn);
+	}
+
+	for (i = 0; i < AM65_CPSW_MAX_RX_FLOWS; i++)
+		k3_udma_glue_reset_rx_chn(rx_chan->rx_chn, i, rx_chan,
+					  am65_cpsw_nuss_rx_cleanup, !!i);
+
+	k3_udma_glue_disable_rx_chn(rx_chan->rx_chn);
 
 	/* Control register */
 	writel(AM65_CPSW_CTL_P0_ENABLE | AM65_CPSW_CTL_P0_TX_CRC_REMOVE |
@@ -505,9 +525,6 @@ err:
 
 	return ret;
 }
-
-static void am65_cpsw_nuss_tx_cleanup(void *data, dma_addr_t desc_dma);
-static void am65_cpsw_nuss_rx_cleanup(void *data, dma_addr_t desc_dma);
 
 static int am65_cpsw_nuss_common_stop(struct am65_cpsw_common *common)
 {
@@ -2857,8 +2874,6 @@ static void am65_cpsw_unregister_devlink(struct am65_cpsw_common *common)
 
 static int am65_cpsw_nuss_register_ndevs(struct am65_cpsw_common *common)
 {
-	struct am65_cpsw_rx_chn *rx_chan = &common->rx_chns;
-	struct am65_cpsw_tx_chn *tx_chan = common->tx_chns;
 	struct device *dev = common->dev;
 	struct devlink_port *dl_port;
 	struct am65_cpsw_port *port;
@@ -2867,22 +2882,6 @@ static int am65_cpsw_nuss_register_ndevs(struct am65_cpsw_common *common)
 	ret = am65_cpsw_nuss_ndev_add_tx_napi(common);
 	if (ret)
 		return ret;
-
-	/* The DMA Channels are not guaranteed to be in a clean state.
-	 * Reset and disable them to ensure that they are back to the
-	 * clean state and ready to be used.
-	 */
-	for (i = 0; i < common->tx_ch_num; i++) {
-		k3_udma_glue_reset_tx_chn(tx_chan[i].tx_chn, &tx_chan[i],
-					  am65_cpsw_nuss_tx_cleanup);
-		k3_udma_glue_disable_tx_chn(tx_chan[i].tx_chn);
-	}
-
-	for (i = 0; i < AM65_CPSW_MAX_RX_FLOWS; i++)
-		k3_udma_glue_reset_rx_chn(rx_chan->rx_chn, i, rx_chan,
-					  am65_cpsw_nuss_rx_cleanup, !!i);
-
-	k3_udma_glue_disable_rx_chn(rx_chan->rx_chn);
 
 	ret = am65_cpsw_nuss_register_devlink(common);
 	if (ret)
