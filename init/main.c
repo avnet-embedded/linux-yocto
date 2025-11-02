@@ -1621,7 +1621,6 @@ static noinline void __init kernel_init_freeable(void)
 	initrd_available = initrd_start || phys_initrd_size;
 #endif
 
-	wait_for_initramfs();
 	console_on_rootfs();
 
 	/*
@@ -1631,6 +1630,7 @@ static noinline void __init kernel_init_freeable(void)
 	int ramdisk_command_access;
 	if (ramdisk_execute_command &&
 	    (initrd_available || rdinit_cmdline_set)) {
+		wait_for_initramfs();
 		ramdisk_command_access = init_eaccess(ramdisk_execute_command);
 		if (ramdisk_command_access != 0) {
 			if (initrd_available)
