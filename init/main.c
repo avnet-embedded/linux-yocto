@@ -1629,18 +1629,12 @@ static noinline void __init kernel_init_freeable(void)
 	 * the work
 	 */
 	int ramdisk_command_access;
-	if (ramdisk_execute_command &&
-	    (initrd_available || rdinit_cmdline_set)) {
-		ramdisk_command_access = init_eaccess(ramdisk_execute_command);
-		if (ramdisk_command_access != 0) {
-			if (initrd_available)
-				pr_warn("check access for rdinit=%s failed: %i, ignoring\n",
-					ramdisk_execute_command,
-					ramdisk_command_access);
-			ramdisk_execute_command = NULL;
-			prepare_namespace();
+	ramdisk_command_access = init_eaccess(ramdisk_execute_command);
+	if (ramdisk_command_access != 0) {
+		if (initrd_available || rdinit_cmdline_set) {
+			pr_warn("check access for rdinit=%s failed: %i, ignoring\n",
+				ramdisk_execute_command, ramdisk_command_access);
 		}
-	} else if (ramdisk_execute_command) {
 		ramdisk_execute_command = NULL;
 		prepare_namespace();
 	}
