@@ -418,6 +418,6 @@ static void __exit brd_exit(void)
 	pr_info("brd: module unloaded\n");
 }
 
-late_initcall(brd_init);
+module_init(brd_init);
 module_exit(brd_exit);
 
