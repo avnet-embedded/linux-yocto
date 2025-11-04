@@ -2311,16 +2311,12 @@ static int spi_nor_read(struct mtd_info *mtd, loff_t from, size_t len,
 #define OFFSET_16_MB 0x1000000
 	dev_dbg(nor->dev, "from 0x%08x, len %zd\n", (u32)from, len);
 
-	ret = spi_nor_prep_and_lock_rd(nor, from_lock, len_lock);
-	if (ret)
-		return ret;
-
 	params = spi_nor_get_params(nor, 0);
 	sz = params->size;
 
 	/*
 	 * When even number of flashes are connected in parallel and the
-	 * requested read length is odd then read (len + 1) from offset + 1
+	 * requested read offset is odd then read (len + 1) from offset + 1
 	 * and ignore offset[0] data.
 	 */
 	if ((nor->flags & SNOR_F_HAS_PARALLEL) && (!(nor->num_flash % 2)) && (from & 0x01)) {
@@ -2342,6 +2338,10 @@ static int spi_nor_read(struct mtd_info *mtd, loff_t from, size_t len,
 			sz += params->size;
 		}
 	}
+
+	ret = spi_nor_prep_and_lock_rd(nor, from_lock, len_lock);
+	if (ret)
+		return ret;
 
 	reinit_completion(&nor->spimem->request_completion);
 
@@ -2505,10 +2505,6 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 #define OFFSET_16_MB 0x1000000
 	dev_dbg(nor->dev, "to 0x%08x, len %zd\n", (u32)to, len);
 
-	ret = spi_nor_prep_and_lock_pe(nor, to, len);
-	if (ret)
-		return ret;
-
 	params = spi_nor_get_params(nor, 0);
 	page_size = params->page_size;
 	sz = params->size;
@@ -2516,7 +2512,7 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 	if (nor->flags & SNOR_F_HAS_PARALLEL) {
 		/*
 		 * When even number of flashes are connected in parallel and the
-		 * requested write length is odd then first write 2 bytes.
+		 * requested write offset is odd then first write 2 bytes.
 		 */
 		if ((!(nor->num_flash % 2)) && (to & 0x01)) {
 			u8 two[2] = {0xff, buf[0]};
@@ -2546,6 +2542,10 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 			sz += params->size;
 		}
 	}
+
+	ret = spi_nor_prep_and_lock_pe(nor, to, len);
+	if (ret)
+		return ret;
 
 	reinit_completion(&nor->spimem->request_completion);
 
