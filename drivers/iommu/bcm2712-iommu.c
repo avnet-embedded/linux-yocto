@@ -607,6 +607,7 @@ static int bcm2712_iommu_probe(struct platform_device *pdev)
 	 */
 	ret = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(36));
 	WARN_ON(ret);
+	dma_set_max_seg_size(&pdev->dev, UINT_MAX);
 	mmu->sgt = dma_alloc_noncontiguous(&pdev->dev, TABLES_ALLOC_SIZE,
 					   DMA_TO_DEVICE, GFP_KERNEL,
 					   DMA_ATTR_ALLOC_SINGLE_PAGES);
