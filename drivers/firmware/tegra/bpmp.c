@@ -352,9 +352,7 @@ int tegra_bpmp_transfer_atomic(struct tegra_bpmp *bpmp,
 {
 	struct tegra_bpmp_channel *channel;
 	int err;
-
-	if (WARN_ON(!irqs_disabled()))
-		return -EPERM;
+	unsigned long flags;
 
 	if (!tegra_bpmp_message_valid(msg))
 		return -EINVAL;
@@ -369,16 +367,16 @@ int tegra_bpmp_transfer_atomic(struct tegra_bpmp *bpmp,
 
 	channel = bpmp->tx_channel;
 
-	spin_lock(&bpmp->atomic_tx_lock);
+	spin_lock_irqsave(&bpmp->atomic_tx_lock, flags);
 
 	err = tegra_bpmp_channel_write(channel, msg->mrq, MSG_ACK,
 				       msg->tx.data, msg->tx.size);
 	if (err < 0) {
-		spin_unlock(&bpmp->atomic_tx_lock);
+		spin_unlock_irqrestore(&bpmp->atomic_tx_lock, flags);
 		return err;
 	}
 
-	spin_unlock(&bpmp->atomic_tx_lock);
+	spin_unlock_irqrestore(&bpmp->atomic_tx_lock, flags);
 
 	err = tegra_bpmp_ring_doorbell(bpmp);
 	if (err < 0)
@@ -594,7 +592,6 @@ static int tegra_bpmp_ping(struct tegra_bpmp *bpmp)
 	struct mrq_ping_response response;
 	struct mrq_ping_request request;
 	struct tegra_bpmp_message msg;
-	unsigned long flags;
 	ktime_t start, end;
 	int err;
 
@@ -610,11 +607,9 @@ static int tegra_bpmp_ping(struct tegra_bpmp *bpmp)
 	msg.rx.data = &response;
 	msg.rx.size = sizeof(response);
 
-	local_irq_save(flags);
 	start = ktime_get();
 	err = tegra_bpmp_transfer_atomic(bpmp, &msg);
 	end = ktime_get();
-	local_irq_restore(flags);
 
 	if (!err)
 		dev_dbg(bpmp->dev,
@@ -631,7 +626,6 @@ static int tegra_bpmp_get_firmware_tag_old(struct tegra_bpmp *bpmp, char *tag,
 {
 	struct mrq_query_tag_request request;
 	struct tegra_bpmp_message msg;
-	unsigned long flags;
 	dma_addr_t phys;
 	void *virt;
 	int err;
@@ -652,9 +646,7 @@ static int tegra_bpmp_get_firmware_tag_old(struct tegra_bpmp *bpmp, char *tag,
 	msg.tx.data = &request;
 	msg.tx.size = sizeof(request);
 
-	local_irq_save(flags);
 	err = tegra_bpmp_transfer_atomic(bpmp, &msg);
-	local_irq_restore(flags);
 
 	if (err == 0)
 		memcpy(tag, virt, TAG_SZ);
