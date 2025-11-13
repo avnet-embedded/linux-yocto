@@ -3390,6 +3390,7 @@ static void tegra186_pmc_process_wake_events(struct tegra_pmc *pmc, unsigned int
 					     unsigned long status)
 {
 	unsigned int wake;
+	unsigned long flags;
 
 	dev_dbg(pmc->dev, "Wake[%d:%d]  status=%#lx\n", (index * 32) + 31, index * 32, status);
 
@@ -3407,7 +3408,11 @@ static void tegra186_pmc_process_wake_events(struct tegra_pmc *pmc, unsigned int
 		}
 
 		dev_dbg(pmc->dev, "Resume caused by WAKE%ld, %s\n", hwirq, desc->action->name);
+		local_irq_save(flags);
+		irq_enter();
 		generic_handle_irq(irq);
+		irq_exit();
+		local_irq_restore(flags);
 	}
 }
 
