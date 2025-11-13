@@ -545,6 +545,7 @@ static int rtl8211f_config_init(struct phy_device *phydev)
 				ERR_PTR(ret));
 			return ret;
 		}
+	}
 	
 	ret = phy_modify_paged_changed(phydev, RTL8211F_WOL_MAC_PAGE, RTL8211F_WOL_REG_MAC_WORD_0, 0x0,
 			phydev->attached_dev->dev_addr[MAC_ADDRESS_BYTE_0] |
@@ -567,10 +568,7 @@ static int rtl8211f_config_init(struct phy_device *phydev)
 	if (ret < 0)
 		return ret;
 
-		clk_disable_unprepare(priv->clk);
-	}
-
-	return ret;
+	return genphy_soft_reset(phydev);
 }
 
 static int rtl821x_resume(struct phy_device *phydev)
@@ -1134,7 +1132,9 @@ static struct phy_driver realtek_drvs[] = {
 		.read_status	= rtlgen_read_status,
 		.config_intr	= &rtl8211f_config_intr,
 		.handle_interrupt = rtl8211f_handle_interrupt,
-		.suspend	= rtl821x_suspend,
+		.get_wol        = &rtl8211f_get_wol,
+		.set_wol        = &rtl8211f_set_wol,
+		.suspend        = genphy_suspend,
 		.resume		= rtl821x_resume,
 		.read_page	= rtl821x_read_page,
 		.write_page	= rtl821x_write_page,
