@@ -196,10 +196,6 @@
 #define VEND1_GLOBAL_SYS_CONFIG_SGMII		(BIT(0) | BIT(1) | BIT(3))
 #define VEND1_GLOBAL_SYS_CONFIG_XFI		BIT(8)
 
-#define VEND1_GLOBAL_CFG_2_5G			0x031D
-#define VEND1_GLOBAL_CFG_5G			0x031E
-#define VEND1_GLOBAL_CFG_10G			0x031F
-
 #define BIT_SHIFT_8 8
 #define MAC_ADDRESS_BYTE_0 0
 #define MAC_ADDRESS_BYTE_1 1
@@ -1292,25 +1288,6 @@ static struct phy_driver aqr_driver[] = {
 	.get_sset_count = aqr107_get_sset_count,
 	.get_strings	= aqr107_get_strings,
 	.get_stats	= aqr107_get_stats,
-	.link_change_notify = aqr107_link_change_notify,
-},
-{
-	PHY_ID_MATCH_MODEL(PHY_ID_AQR113C),
-	.name           = "Aquantia AQR113C",
-	.probe          = aqr107_probe,
-	.get_rate_matching = aqr107_get_rate_matching,
-	.config_init    = aqr107_config_init,
-	.config_aneg    = aqr_config_aneg,
-	.config_intr    = aqr_config_intr,
-	.handle_interrupt       = aqr_handle_interrupt,
-	.read_status    = aqr107_read_status,
-	.get_tunable    = aqr107_get_tunable,
-	.set_tunable    = aqr107_set_tunable,
-	.suspend        = aqr107_suspend,
-	.resume         = aqr107_resume,
-	.get_sset_count = aqr107_get_sset_count,
-	.get_strings    = aqr107_get_strings,
-	.get_stats      = aqr107_get_stats,
 	.link_change_notify = aqr107_link_change_notify,
 },
 };
