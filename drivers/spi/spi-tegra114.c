@@ -975,6 +975,11 @@ static int tegra_spi_setup(struct spi_device *spi)
 	unsigned long flags;
 	int ret;
 
+	/* Set the default unit for CS delays */
+	spi->cs_setup.unit = SPI_DELAY_UNIT_SCK;
+	spi->cs_hold.unit = SPI_DELAY_UNIT_SCK;
+	spi->cs_inactive.unit = SPI_DELAY_UNIT_SCK;
+
 	dev_dbg(&spi->dev, "setup %d bpw, %scpol, %scpha, %dHz\n",
 		spi->bits_per_word,
 		spi->mode & SPI_CPOL ? "" : "~",
