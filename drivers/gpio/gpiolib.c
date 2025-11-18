@@ -122,7 +122,9 @@ static LIST_HEAD(gpio_lookup_list);
 
 static LIST_HEAD(gpio_devices);
 /* Protects the GPIO device list against concurrent modifications. */
+#ifndef REJECT_HOTPLUG_TAX
 static DEFINE_MUTEX(gpio_devices_lock);
+#endif
 /* Ensures coherence during read-only accesses to the list of GPIO devices. */
 DEFINE_STATIC_SRCU(gpio_devices_srcu);
 
