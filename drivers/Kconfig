@@ -85,6 +85,8 @@ source "drivers/ptp/Kconfig"
 
 source "drivers/dpll/Kconfig"
 
+source "drivers/resctrl/Kconfig"
+
 source "drivers/pinctrl/Kconfig"
 
 source "drivers/gpio/Kconfig"
