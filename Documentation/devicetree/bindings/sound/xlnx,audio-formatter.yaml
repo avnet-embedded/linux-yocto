@@ -41,12 +41,36 @@ properties:
     items:
       - const: s_axi_lite_aclk
       - const: aud_mclk
+      - const: m_axis_mm2s_aclk
+      - const: s_axis_s2mm_aclk
 
   clocks:
     minItems: 1
     items:
       - description: clock for the axi data stream
       - description: clock for the MEMS microphone data stream
+      - description: master AXI interface
+      - description: slave AXI interface
+
+  xlnx,tx:
+    description: |
+      Connected audio sink node.
+           Should be one of below supported nodes:
+               1. HDMI video Tx output
+               2. I2S transmitter
+               3. UHDSDI audio embed
+           Only those nodes were supported in sound card driver
+    $ref: /schemas/types.yaml#/definitions/phandle
+
+  xlnx,rx:
+    description: |
+      Connected audio source node.
+           Should be one of below supported nodes:
+               1. HDMI video Rx input
+               2. I2S receiver
+               3. UHDSDI audio extract
+           Only those nodes were supported in sound card driver
+    $ref: /schemas/types.yaml#/definitions/phandle
 
 required:
   - compatible
@@ -55,6 +79,8 @@ required:
   - interrupts
   - clock-names
   - clocks
+  - xlnx,tx
+  - xlnx,rx
 
 additionalProperties: false
 
@@ -66,7 +92,9 @@ examples:
       interrupt-names = "irq_mm2s", "irq_s2mm";
       interrupt-parent = <&gic>;
       interrupts = <0 104 4>, <0 105 4>;
-      clock-names = "s_axi_lite_aclk", "aud_mclk";
-      clocks = <&clk 71>, <&clk_wiz_1 0>;
+      xlnx,tx = <&i2s_transmitter>;
+      xlnx,rx = <&i2s_receiver>;
+      clock-names = "s_axi_lite_aclk", "aud_mclk", "m_axis_mm2s_aclk", "s_axis_s2mm_aclk";
+      clocks = <&clk 71>, <&audio_ss_0_clk_wiz_0 0>, <&audio_ss_0_clk_wiz_0 0>, <&clk 71>;
     };
 ...
