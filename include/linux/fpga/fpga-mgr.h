@@ -91,7 +91,7 @@ enum fpga_mgr_states {
 #define FPGA_MGR_USERKEY_ENCRYPTED_BITSTREAM	BIT(5)
 #define FPGA_MGR_DDR_MEM_AUTH_BITSTREAM		BIT(6)
 #define FPGA_MGR_SECURE_MEM_AUTH_BITSTREAM	BIT(7)
-#define FPGA_MGR_CONFIG_DMA_BUF		BIT(5)
+#define FPGA_MGR_CONFIG_DMA_BUF		BIT(8)
 
 /**
  * struct fpga_image_info - information specific to an FPGA image
