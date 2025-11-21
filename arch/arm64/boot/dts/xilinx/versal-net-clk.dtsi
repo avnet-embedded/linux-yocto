@@ -8,6 +8,8 @@
  * Michal Simek <michal.simek@amd.com>
  */
 
+#include <dt-bindings/reset/xlnx-versal-resets.h>
+
 / {
 	clk60: clk60 {
 		compatible = "fixed-clock";
@@ -74,6 +76,11 @@
 			compatible = "xlnx,versal-net-firmware", "xlnx,versal-firmware";
 			bootph-all;
 			method = "smc";
+
+			versal_net_reset: reset-controller {
+				compatible = "xlnx,versal-net-reset";
+				#reset-cells = <1>;
+			};
 		};
 	};
 };
@@ -152,6 +159,7 @@
 
 &ospi {
 	clocks = <&clk200>;
+	resets = <&versal_net_reset VERSAL_RST_OSPI>;
 };
 
 &qspi {
@@ -172,10 +180,12 @@
 
 &serial0 {
 	clocks = <&clk100>, <&clk100>;
+	clock = <1000000>;
 };
 
 &serial1 {
 	clocks = <&clk100>, <&clk100>;
+	clock = <100000000>;
 };
 
 &spi0 {
@@ -195,7 +205,7 @@
 };
 
 &dwc3_0 {
-	clocks = <&clk60>;
+	/* Nothing */
 };
 
 &usb1 {
@@ -203,7 +213,7 @@
 };
 
 &dwc3_1 {
-	clocks = <&clk60>;
+	/* Nothing */
 };
 
 &wwdt0 {

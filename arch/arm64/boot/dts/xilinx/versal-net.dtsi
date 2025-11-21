@@ -728,11 +728,64 @@
 
 	timer: timer {
 		compatible = "arm,armv8-timer";
-		interrupts = <1 13 4>, <1 14 4>, <1 11 4>, <1 10 4>;
+		interrupts = <1 13 4>, <1 14 4>, <1 11 4>, <1 10 4>; /* FIXME 3rd cell */
 	};
 
 	versal_fpga: versal-fpga {
 		compatible = "xlnx,versal-fpga";
+	};
+
+	sensor0: versal-thermal-sensor {
+		compatible = "xlnx,versal-thermal";
+		#thermal-sensor-cells = <1>;
+		io-channels = <&sysmon0 0>;
+		io-channel-names = "sysmon-temp-channel";
+	};
+
+	thermal-zones {
+		versal_thermal: versal-thermal {
+			polling-delay-passive = <250>; /* milliseconds */
+			polling-delay = <1000>; /* milliseconds */
+			thermal-sensors = <&sensor0 0>;
+
+			trips {
+				temp_alert: temp-alert {
+					temperature = <70000>; /* millicelsius */
+					hysteresis = <0>; /* millicelsius */
+					type = "passive";
+				};
+
+				ot_crit: ot-crit {
+					temperature = <125000>; /* millicelsius */
+					hysteresis = <0>; /* millicelsius */
+					type = "critical";
+				};
+			};
+
+			cooling-maps {};
+		};
+
+		versal_thermal_aie: versal-aie-thermal {
+			polling-delay-passive = <250>; /* milliseconds */
+			polling-delay = <1000>; /* milliseconds */
+			thermal-sensors = <&sensor0 1>;
+
+			trips {
+				temp_alert_aie: temp-alert-aie {
+					temperature = <70000>; /* millicelsius */
+					hysteresis = <0>; /* millicelsius */
+					type = "passive";
+				};
+
+				ot_crit_aie: ot-crit-aie {
+					temperature = <125000>; /* millicelsius */
+					hysteresis = <0>; /* millicelsius */
+					type = "critical";
+				};
+			};
+
+			cooling-maps {};
+		};
 	};
 
 	amba: axi {
@@ -748,6 +801,7 @@
 			reg = <0 0xebd00000 0 0x1000>;
 			interrupts = <0 72 4>;
 			clock-names = "clk_main", "clk_apb";
+			/* iommus = <&smmu 0x210>; */
 			#dma-cells = <1>;
 			xlnx,bus-width = <64>;
 		};
@@ -758,6 +812,7 @@
 			reg = <0 0xebd10000 0 0x1000>;
 			interrupts = <0 73 4>;
 			clock-names = "clk_main", "clk_apb";
+			/* iommus = <&smmu 0x212>; */
 			#dma-cells = <1>;
 			xlnx,bus-width = <64>;
 		};
@@ -768,6 +823,7 @@
 			reg = <0 0xebd20000 0 0x1000>;
 			interrupts = <0 74 4>;
 			clock-names = "clk_main", "clk_apb";
+			/* iommus = <&smmu 0x214>; */
 			#dma-cells = <1>;
 			xlnx,bus-width = <64>;
 		};
@@ -778,6 +834,7 @@
 			reg = <0 0xebd30000 0 0x1000>;
 			interrupts = <0 75 4>;
 			clock-names = "clk_main", "clk_apb";
+			/* iommus = <&smmu 0x216>; */
 			#dma-cells = <1>;
 			xlnx,bus-width = <64>;
 		};
@@ -788,6 +845,7 @@
 			reg = <0 0xebd40000 0 0x1000>;
 			interrupts = <0 76 4>;
 			clock-names = "clk_main", "clk_apb";
+			/* iommus = <&smmu 0x218>; */
 			#dma-cells = <1>;
 			xlnx,bus-width = <64>;
 		};
@@ -798,6 +856,7 @@
 			reg = <0 0xebd50000 0 0x1000>;
 			interrupts = <0 77 4>;
 			clock-names = "clk_main", "clk_apb";
+			/* iommus = <&smmu 0x21A>; */
 			#dma-cells = <1>;
 			xlnx,bus-width = <64>;
 		};
@@ -808,6 +867,7 @@
 			reg = <0 0xebd60000 0 0x1000>;
 			interrupts = <0 78 4>;
 			clock-names = "clk_main", "clk_apb";
+			/* iommus = <&smmu 0x21C>; */
 			#dma-cells = <1>;
 			xlnx,bus-width = <64>;
 		};
@@ -818,6 +878,7 @@
 			reg = <0 0xebd70000 0 0x1000>;
 			interrupts = <0 79 4>;
 			clock-names = "clk_main", "clk_apb";
+			/* iommus = <&smmu 0x21E>; */
 			#dma-cells = <1>;
 			xlnx,bus-width = <64>;
 		};
@@ -849,6 +910,7 @@
 			interrupts = <0 39 4>, <0 39 4>;
 			clock-names = "pclk", "hclk", "tx_clk", "rx_clk",
 				      "tsu_clk";
+			/* iommus = <&smmu 0x234>; */
 		};
 
 		gem1: ethernet@f19f0000 {
@@ -858,6 +920,7 @@
 			interrupts = <0 41 4>, <0 41 4>;
 			clock-names = "pclk", "hclk", "tx_clk", "rx_clk",
 				      "tsu_clk";
+			/* iommus = <&smmu 0x235>; */
 		};
 
 		gic: interrupt-controller@e2000000 {
@@ -944,18 +1007,21 @@
 			reg = <0 0xf1010000 0 0x10000>,
 			      <0 0xc0000000 0 0x20000000>;
 			interrupts = <0 182 4>;
+			/* iommus = <&smmu 0x245>; */
 			cdns,fifo-depth = <256>;
 			cdns,fifo-width = <4>;
 			cdns,is-dma = <1>; /* u-boot specific */
+			/* cdns,is-stig-pgm = <1>; - unused - checking with Sai */
 			cdns,trigger-address = <0xc0000000>;
 		};
 
 		qspi: spi@f1030000 {
 			compatible = "xlnx,versal-qspi-1.0";
 			status = "disabled";
-			reg = <0 0xf1030000 0 0x1000>;
+			reg = <0 0xf1030000 0 0x1000>; /* missing one more reg range - checking with Sai */
 			interrupts = <0 183 4>;
 			clock-names = "ref_clk", "pclk";
+			/* iommus = <&smmu 0x244>; */
 		};
 
 		rtc: rtc@f12a0000 {
@@ -973,6 +1039,7 @@
 			reg = <0 0xf1040000 0 0x10000>;
 			interrupts = <0 184 4>;
 			clock-names = "clk_xin", "clk_ahb", "gate";
+			/* iommus = <&smmu 0x242>; */
 			#clock-cells = <1>;
 			clock-output-names = "clk_out_sd0", "clk_in_sd0";
 		};
@@ -983,6 +1050,7 @@
 			reg = <0 0xf1050000 0 0x10000>;
 			interrupts = <0 186 4>;
 			clock-names = "clk_xin", "clk_ahb", "gate";
+			/* iommus = <&smmu 0x243>; */
 			#clock-cells = <1>;
 			clock-output-names = "clk_out_sd1", "clk_in_sd1";
 		};
@@ -1033,6 +1101,15 @@
 			clock-names = "ref_clk", "pclk";
 		};
 
+		sysmon0: sysmon@f1270000 {
+			compatible = "xlnx,versal-sysmon";
+			status = "disabled";
+			#io-channel-cells = <1>;
+			reg = <0x0 0xf1270000 0x0 0x4000>;
+			interrupts = <0 202 4>;
+			xlnx,numchannels = /bits/8 <0>;
+		};
+
 		ttc0: timer@f1dc0000 {
 			compatible = "cdns,ttc";
 			status = "disabled";
@@ -1080,6 +1157,7 @@
 				reg = <0 0xf1b00000 0 0x10000>;
 				interrupt-names = "host", "peripheral", "otg", "wakeup";
 				interrupts = <0 29 4>, <0 29 4>, <0 33 4>, <0 98 4>;
+				/* iommus = <&smmu 0x230>; */
 				snps,dis_u2_susphy_quirk;
 				snps,dis_u3_susphy_quirk;
 				snps,quirk-frame-length-adjustment = <0x20>;
@@ -1087,6 +1165,7 @@
 				maximum-speed = "high-speed";
 				snps,usb3_lpm_capable;
 				clock-names = "ref";
+				/* phy-names = "usb3-phy";- checking with Pyiush */
 			};
 		};
 
@@ -1105,6 +1184,7 @@
 				reg = <0x0 0xf1c00000 0x0 0x10000>;
 				interrupt-names = "host", "peripheral", "otg", "wakeup";
 				interrupts = <0 34 4>, <0 34 4>, <0 38 4>, <0 99 4>;
+				/* iommus = <&smmu 0x232>; */
 				snps,dis_u2_susphy_quirk;
 				snps,dis_u3_susphy_quirk;
 				snps,quirk-frame-length-adjustment = <0x20>;
@@ -1112,6 +1192,7 @@
 				maximum-speed = "high-speed";
 				snps,usb3_lpm_capable;
 				clock-names = "ref";
+				/* phy-names = "usb3-phy"; - checking with Pyiush */
 			};
 		};
 
@@ -1155,6 +1236,12 @@
 			status = "disabled";
 			reg = <0 0xea430000 0 0x10000>;
 			timeout-sec = <30>;
+		};
+
+		xilsem_edac: edac@f2014050 {
+			compatible = "xlnx,versal-xilsem-edac";
+			status = "disabled";
+			reg = <0x0 0xf2014050 0x0 0xc4>;
 		};
 	};
 };
