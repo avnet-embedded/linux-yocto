@@ -17,6 +17,8 @@ obj-$(CONFIG_CV1800_MBOX)	+= cv1800-mailbox.o
 
 obj-$(CONFIG_EXYNOS_MBOX)	+= exynos-mailbox.o
 
+obj-$(CONFIG_MVL_MHU)	+= mvl_mhu.o
+
 obj-$(CONFIG_IMX_MBOX)	+= imx-mailbox.o
 
 obj-$(CONFIG_ARMADA_37XX_RWTM_MBOX)	+= armada-37xx-rwtm-mailbox.o
