@@ -67,6 +67,7 @@ int intel_pmc_ipc(struct pmc_ipc_cmd *ipc_cmd, u32 *rbuf)
 		return -EINVAL;
 	}
 
+	kfree(obj);
 	return 0;
 }
 EXPORT_SYMBOL(intel_pmc_ipc);
