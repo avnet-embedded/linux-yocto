@@ -28,7 +28,7 @@ int intel_pmc_ipc(struct pmc_ipc_cmd *ipc_cmd, u32 *rbuf)
 	};
 	struct acpi_object_list arg_list = { PMC_IPCS_PARAM_COUNT, params };
 	union acpi_object *obj;
-	int status;
+	int status, ret = 0;
 
 	if (!ipc_cmd || !rbuf)
 		return -EINVAL;
@@ -56,18 +56,22 @@ int intel_pmc_ipc(struct pmc_ipc_cmd *ipc_cmd, u32 *rbuf)
 	if (obj && obj->type == ACPI_TYPE_PACKAGE && obj->package.count == 5) {
 		const union acpi_object *objs = obj->package.elements;
 
-		if ((u8)objs[0].integer.value != 0)
-			return -EINVAL;
+		if ((u8)objs[0].integer.value != 0) {
+			ret = -EINVAL;
+			goto out;
+		}
 
 		rbuf[0] = objs[1].integer.value;
 		rbuf[1] = objs[2].integer.value;
 		rbuf[2] = objs[3].integer.value;
 		rbuf[3] = objs[4].integer.value;
 	} else {
-		return -EINVAL;
+		ret = -EINVAL;
 	}
 
-	return 0;
+out:
+	kfree(obj);
+	return ret;
 }
 EXPORT_SYMBOL(intel_pmc_ipc);
 
