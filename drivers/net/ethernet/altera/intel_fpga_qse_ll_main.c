@@ -672,7 +672,7 @@ static int qse_change_mtu(struct net_device *dev, int new_mtu)
 	return 0;
 }
 
-static void qse_update_mac_addr(struct intel_fpga_qse_private *priv, u8 *addr)
+static void qse_update_mac_addr(struct intel_fpga_qse_private *priv, const u8 *addr)
 {
 	u32 msb;
 	u32 lsb;
@@ -1387,6 +1387,7 @@ static int intel_fpga_qse_ll_probe(struct platform_device *pdev)
 	struct intel_fpga_qse_private *priv;
 	struct device_node *np = pdev->dev.of_node;
 	const struct of_device_id *of_id = NULL;
+	u8 addr[ETH_ALEN];
 
 	ndev = alloc_etherdev(sizeof(struct intel_fpga_qse_private));
 	if (!ndev) {
@@ -1573,8 +1574,10 @@ static int intel_fpga_qse_ll_probe(struct platform_device *pdev)
 	}
 
 	/* get default MAC address from device tree */
-	ret = of_get_mac_address(pdev->dev.of_node, ndev->dev_addr);
-	if (ret)
+	ret = of_get_mac_address(pdev->dev.of_node, addr);
+	if (!ret)
+		eth_hw_addr_set(ndev, addr);
+	else
 		eth_hw_addr_random(ndev);
 
 	/* initialize netdev */
