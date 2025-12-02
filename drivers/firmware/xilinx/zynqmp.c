@@ -1974,7 +1974,7 @@ static ssize_t feature_config_value_store(struct device *device,
 
 static DEVICE_ATTR_RW(feature_config_value);
 
-static struct attribute *zynqmp_firmware_attrs[] = {
+static const struct attribute *zynqmp_firmware_attrs[] = {
 	&dev_attr_ggs0.attr,
 	&dev_attr_ggs1.attr,
 	&dev_attr_ggs2.attr,
@@ -1990,7 +1990,18 @@ static struct attribute *zynqmp_firmware_attrs[] = {
 	NULL,
 };
 
-ATTRIBUTE_GROUPS(zynqmp_firmware);
+static int zynqmp_firmware_pm_sysfs_entry(struct platform_device *pdev)
+{
+	int ret;
+
+	ret = sysfs_create_files(&pdev->dev.kobj, zynqmp_firmware_attrs);
+	if (ret) {
+		pr_err("%s() Failed to create PM firmware attrs, err=%d\n",
+		       __func__, ret);
+	}
+
+	return ret;
+}
 
 static int zynqmp_firmware_probe(struct platform_device *pdev)
 {
@@ -2066,6 +2077,13 @@ static int zynqmp_firmware_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	ret = zynqmp_firmware_pm_sysfs_entry(pdev);
+	if (ret) {
+		pr_err("%s() Failed to create sysfs file with error%d\n",
+		       __func__, ret);
+		return ret;
+	}
+
 	zynqmp_pm_api_debugfs_init();
 
 	if (pm_family_code != PM_ZYNQMP_FAMILY_CODE) {
@@ -2132,7 +2150,6 @@ static struct platform_driver zynqmp_firmware_driver = {
 	.driver = {
 		.name = "zynqmp_firmware",
 		.of_match_table = zynqmp_firmware_of_match,
-		.dev_groups = zynqmp_firmware_groups,
 		.sync_state = zynqmp_firmware_sync_state,
 	},
 	.probe = zynqmp_firmware_probe,
