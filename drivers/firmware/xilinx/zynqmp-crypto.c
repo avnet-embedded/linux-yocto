@@ -51,6 +51,29 @@ int zynqmp_pm_sha_hash(const u64 address, const u32 size, const u32 flags)
 }
 EXPORT_SYMBOL_GPL(zynqmp_pm_sha_hash);
 
+int versal_pm_puf_registration(const u64 in_addr)
+{
+	return zynqmp_pm_invoke_fn(XPUF_API_PUF_REGISTRATION, NULL,
+				   2, lower_32_bits(in_addr),
+				   upper_32_bits(in_addr));
+}
+EXPORT_SYMBOL_GPL(versal_pm_puf_registration);
+
+int versal_pm_puf_clear_id(void)
+{
+	return zynqmp_pm_invoke_fn(XPUF_API_PUF_CLEAR_PUF_ID, NULL,
+				   2, NULL, NULL);
+}
+EXPORT_SYMBOL_GPL(versal_pm_puf_clear_id);
+
+int versal_pm_puf_regeneration(const u64 in_addr)
+{
+	return zynqmp_pm_invoke_fn(XPUF_API_PUF_REGENERATION, NULL,
+				   2, lower_32_bits(in_addr),
+				   upper_32_bits(in_addr));
+}
+EXPORT_SYMBOL_GPL(versal_pm_puf_regeneration);
+
 /**
  * zynqmp_pm_aes_engine - Access AES hardware to encrypt/decrypt the data using
  * AES-GCM core.
