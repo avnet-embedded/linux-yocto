@@ -17,6 +17,7 @@
 
 #include <linux/err.h>
 #include <linux/firmware/xlnx-zynqmp-fpga.h>
+#include <linux/firmware/xlnx-zynqmp-nvm.h>
 #include <linux/firmware/xlnx-zynqmp-pdi.h>
 #include <linux/firmware/xlnx-zynqmp-crypto.h>
 #include <linux/firmware/xlnx-zynqmp-ufs.h>
@@ -671,7 +672,6 @@ int zynqmp_pm_release_node(const u32 node);
 int zynqmp_pm_set_requirement(const u32 node, const u32 capabilities,
 			      const u32 qos,
 			      const enum zynqmp_pm_request_ack ack);
-int zynqmp_pm_efuse_access(const u64 address, u32 *out);
 int zynqmp_pm_config_reg_access(u32 register_access_id, u32 address, u32 mask,
 				u32 value, u32 *out);
 int zynqmp_pm_write_ggs(u32 index, u32 value);
@@ -863,11 +863,6 @@ static inline int zynqmp_pm_set_requirement(const u32 node,
 					    const u32 capabilities,
 					    const u32 qos,
 					    const enum zynqmp_pm_request_ack ack)
-{
-	return -ENODEV;
-}
-
-static inline int zynqmp_pm_efuse_access(const u64 address, u32 *out)
 {
 	return -ENODEV;
 }

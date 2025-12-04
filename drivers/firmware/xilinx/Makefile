@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
 # Makefile for Xilinx firmwares
 
-obj-$(CONFIG_ZYNQMP_FIRMWARE) += zynqmp-core.o zynqmp-crypto.o zynqmp-fpga.o zynqmp-pm.o zynqmp-pdi.o zynqmp-ufs.o
+obj-$(CONFIG_ZYNQMP_FIRMWARE) += zynqmp-core.o zynqmp-crypto.o zynqmp-fpga.o zynqmp-nvm.o zynqmp-pdi.o zynqmp-pm.o zynqmp-ufs.o
 obj-$(CONFIG_ZYNQMP_FIRMWARE_DEBUG) += zynqmp-debug.o
