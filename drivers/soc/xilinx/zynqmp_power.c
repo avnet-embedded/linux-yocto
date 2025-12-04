@@ -2,7 +2,8 @@
 /*
  * Xilinx Zynq MPSoC Power Management
  *
- *  Copyright (C) 2014-2019 Xilinx, Inc.
+ *  Copyright (C), 2014 - 2022 Xilinx, Inc.
+ *  Copyright (C), 2022 - 2025 Advanced Micro Devices, Inc.
  *
  *  Davorin Mista <davorin.mista@aggios.com>
  *  Jolly Shah <jollys@xilinx.com>
@@ -319,7 +320,8 @@ static int zynqmp_pm_probe(struct platform_device *pdev)
 		if (ret < 0)
 			return ret;
 
-		if (pm_family_code == PM_VERSAL_NET_FAMILY_CODE)
+		if ((pm_family_code == PM_VERSAL_NET_FAMILY_CODE) ||
+		    (pm_family_code == PM_VERSAL2_FAMILY_CODE))
 			node_id = PM_DEV_ACPU_0_0;
 		else if (pm_family_code == PM_VERSAL_FAMILY_CODE)
 			node_id = PM_DEV_ACPU_0;
