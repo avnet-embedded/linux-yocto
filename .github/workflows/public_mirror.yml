@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: checkout
-        uses: actions/checkout@v6.0.1
+        uses: actions/checkout@v5.0.1
         with:
           token: ${{ secrets.DISPATCH_PAT }}
       - name: get upstream repo
