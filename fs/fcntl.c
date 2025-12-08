@@ -87,7 +87,6 @@ static int setfl(int fd, struct file * filp, unsigned int arg)
  out:
 	return error;
 }
-EXPORT_SYMBOL_GPL(setfl);
 
 /*
  * Allocate an file->f_owner struct if it doesn't exist, handling racing
