@@ -218,13 +218,9 @@ struct dentry *vfsub_lookup_one_len_unlocked(const char *name,
 					     struct path *ppath, int len)
 {
 	struct path path;
-	struct qstr this = {
-		.name = name,
-		.len = len,
-		.hash = 0	/* will be set by lookup function if needed */
-	};
 
-	path.dentry = lookup_noperm_unlocked(&this, ppath->dentry);
+	path.dentry = lookup_noperm_unlocked(&QSTR_LEN(name, len),
+					     ppath->dentry);
 	if (IS_ERR(path.dentry))
 		goto out;
 	if (d_is_positive(path.dentry)) {
@@ -244,13 +240,8 @@ struct dentry *vfsub_lookup_one_len(const char *name, struct path *ppath,
 
 	/* VFS checks it too, but by WARN_ON_ONCE() */
 	IMustLock(d_inode(ppath->dentry));
-	struct qstr this = {
-		.name = name,
-		.len = len,
-		.hash = 0	/* will be set by lookup function if needed */
-	};
 
-	path.dentry = lookup_noperm(&this, ppath->dentry);
+	path.dentry = lookup_noperm(&QSTR_LEN(name, len), ppath->dentry);
 	if (IS_ERR(path.dentry))
 		goto out;
 	if (d_is_positive(path.dentry)) {
@@ -484,18 +475,11 @@ int vfsub_rename(struct inode *src_dir, struct dentry *src_dentry,
 		goto out;
 
 	rd.old_mnt_idmap = mnt_idmap(path->mnt);
-
-	/* convert old/new dir (inode) style -> parent dentry style */
-	rd.old_parent = dget_parent(src_dentry);   /* parent dentry of source */
-	rd.old_dentry = src_dentry;                 /* the dentry being renamed */
-	rd.new_parent = dget_parent(path->dentry);        /* parent dentry of target */
-	rd.new_dentry = path->dentry;                     /* the target dentry */
-	
-	/* rd.old_dir = src_dir; */
-	/* rd.old_dentry = src_dentry; */
+	rd.old_dentry = src_dentry;
+	rd.old_parent = rd.old_dentry->d_parent;
 	rd.new_mnt_idmap = rd.old_mnt_idmap;
-	/* rd.new_dir = dir; */
-	/* rd.new_dentry = path->dentry; */
+	rd.new_dentry = path->dentry;
+	rd.new_parent = rd.new_dentry->d_parent;
 	rd.delegated_inode = delegated_inode;
 	rd.flags = flags;
 	lockdep_off();
