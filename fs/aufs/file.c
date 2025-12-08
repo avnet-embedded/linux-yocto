@@ -790,15 +790,14 @@ static ssize_t aufs_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 
 /* they will never be called. */
 #ifdef CONFIG_AUFS_DEBUG
-static int aufs_write_begin(struct file *file, struct address_space *mapping,
-			    loff_t pos, unsigned len,
-			    struct folio **foliop, void **fsdata)
+static int aufs_write_begin(const struct kiocb *iocb,
+			    struct address_space *mapping, loff_t pos,
+			    unsigned len, struct folio **foliop, void **fsdata)
 { AuUnsupport(); return 0; }
-static int aufs_write_end(struct file *file, struct address_space *mapping,
-			  loff_t pos, unsigned len, unsigned copied,
-			  struct folio *folio, void *fsdata)
-{ AuUnsupport(); return 0; }
-static int aufs_writepage(struct page *page, struct writeback_control *wbc)
+static int aufs_write_end(const struct kiocb *iocb,
+			  struct address_space *mapping, loff_t pos,
+			  unsigned len, unsigned copied, struct folio *folio,
+			  void *fsdata)
 { AuUnsupport(); return 0; }
 
 static bool aufs_dirty_folio(struct address_space *mapping, struct folio *folio)
@@ -836,8 +835,6 @@ const struct address_space_operations aufs_aop = {
 	.read_folio		= aufs_read_folio,
 	.direct_IO		= aufs_direct_IO,
 #ifdef CONFIG_AUFS_DEBUG
-	.writepage		= aufs_writepage,
-	/* no writepages, because of writepage */
 	.dirty_folio		= aufs_dirty_folio,
 	/* no readpages, because of readpage */
 	.write_begin		= aufs_write_begin,
