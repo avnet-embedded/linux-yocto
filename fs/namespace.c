@@ -1019,13 +1019,6 @@ static inline int check_mnt(struct mount *mnt)
 	return mnt->mnt_ns == current->nsproxy->mnt_ns;
 }
 
-/* for aufs, CONFIG_AUFS_BR_FUSE */
-int is_current_mnt_ns(struct vfsmount *mnt)
-{
-	return check_mnt(real_mount(mnt));
-}
-EXPORT_SYMBOL_GPL(is_current_mnt_ns);
-
 static inline bool check_anonymous_mnt(struct mount *mnt)
 {
 	u64 seq;
