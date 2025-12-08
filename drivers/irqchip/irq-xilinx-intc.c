@@ -178,16 +178,17 @@ static int xilinx_intc_of_init(struct device_node *intc,
 			       struct device_node *parent)
 #endif
 {
+	struct platform_device *pdev = of_find_device_by_node(intc);
 	struct xintc_irq_chip *irqc;
 	int ret, irq;
 
-	if (parent) {
-		struct platform_device *pdev;
-		struct clk *clkin;
+#ifdef CONFIG_IRQCHIP_XILINX_INTC_MODULE_SUPPORT_EXPERIMENTAL
+	if (!pdev)
+		return -ENODEV;
+#endif
 
-		pdev = of_find_device_by_node(intc);
-		if (!pdev)
-			return -ENODEV;
+	if (parent && pdev) {
+		struct clk *clkin;
 
 		clkin = devm_clk_get_optional_enabled(&pdev->dev, NULL);
 		if (IS_ERR(clkin)) {
