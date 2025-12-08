@@ -107,13 +107,21 @@ int aufs_release_nondir(struct inode *inode __maybe_unused, struct file *file)
 {
 	struct au_finfo *finfo;
 	aufs_bindex_t bindex;
+	struct file *h_file;
 
 	finfo = au_fi(file);
 	au_hbl_del(&finfo->fi_hlist,
 		   &au_sbi(file->f_path.dentry->d_sb)->si_files);
 	bindex = finfo->fi_btop;
-	if (bindex >= 0)
+	if (bindex >= 0) {
+		if (au_test_mmapped(file)) {
+			/* h_file = au_hf_top(file); */
+			h_file = finfo->fi_htop.hf_file;
+			if (h_file)
+				au_mf_del(h_file, file);
+		}
 		au_set_h_fptr(file, bindex, NULL);
+	}
 
 	au_finfo_fin(file);
 	return 0;
@@ -224,7 +232,8 @@ static struct file *au_write_pre(struct file *file, int do_ready,
 	if (do_ready)
 		au_unpin(&pin);
 	di_read_unlock(dentry, /*flags*/0);
-	vfsub_file_start_write(h_file);
+	if (do_ready)
+		vfsub_file_start_write(h_file);
 
 out_fi:
 	fi_write_unlock(file);
@@ -628,7 +637,7 @@ static int aufs_mmap(struct file *file, struct vm_area_struct *vma)
 	lockdep_off();
 	si_read_lock(sb, AuLock_NOPLMW);
 
-	h_file = au_write_pre(file, wlock, /*wpre*/NULL);
+	h_file = au_write_pre(file, /*do_ready*/wlock, /*wpre*/NULL);
 	lockdep_on();
 	err = PTR_ERR(h_file);
 	if (IS_ERR(h_file))
@@ -645,10 +654,9 @@ static int aufs_mmap(struct file *file, struct vm_area_struct *vma)
 	 *			 au_flag_conv(vma->vm_flags));
 	 */
 	if (!err)
-		/* modern helper name (vfs wrapper for mmap/mmap_prepare) */
 		err = vfs_mmap(h_file, vma);
 	if (!err) {
-		au_vm_prfile_set(vma, file);
+		au_mf_add(h_file, file);
 		fsstack_copy_attr_atime(inode, file_inode(h_file));
 		goto out_fput; /* success */
 	}

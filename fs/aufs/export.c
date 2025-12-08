@@ -272,33 +272,11 @@ out:
 /* todo: dirty? */
 /* if exportfs_decode_fh() passed vfsmount*, we could be happy */
 
-struct au_compare_mnt_args {
-	/* input */
-	struct super_block *sb;
-
-	/* output */
-	struct vfsmount *mnt;
-};
-
-/* static int au_compare_mnt(struct vfsmount *mnt, void *arg) */
-/* { */
-/* 	struct au_compare_mnt_args *a = arg; */
-
-/* 	if (mnt->mnt_sb != a->sb) */
-/* 		return 0; */
-/* 	a->mnt = mntget(mnt); */
-/* 	return 1; */
-/* } */
-
 static struct vfsmount *au_mnt_get(struct super_block *sb)
 {
-	int err;
-	struct path root;
-	struct path array[16];
-	struct path *paths;
-	struct au_compare_mnt_args args = {
-		.sb = sb
-	};
+	struct vfsmount *mnt;
+	struct path root, *paths, *p;
+	struct path a[8];
 
 	get_fs_root(current->fs, &root);
 	/*
@@ -306,30 +284,26 @@ static struct vfsmount *au_mnt_get(struct super_block *sb)
 	 * Really?
 	 */
 	si_read_unlock(sb);
-	paths = collect_paths(&root, array, 16);
+	paths = collect_paths(&root, a, ARRAY_SIZE(a));
 	if (IS_ERR(paths)) {
-		args.mnt = paths.mnt;
-		drop_collected_paths(paths,array);
+		mnt = ERR_CAST(paths);
 		goto out;
 	}
 
-	rcu_read_lock();
-	// err = iterate_mounts(au_compare_mnt, &args, mnt);
-	for (struct path *p = paths; p->dentry; p++) {
-		if (p->mnt->mnt_sb == sb ) {
-			args.mnt = mntget(p->mnt)
+	for (p = paths; p->dentry; p++) {
+		mnt = p->mnt;
+		if (mnt->mnt_sb == sb) {
+			mntget(mnt);
+			break;
 		}
 	}
-	rcu_read_unlock();
-	drop_collected_paths(paths,array);
-	// drop_collected_mounts(mnt);
-	AuDebugOn(!err);
+	drop_collected_paths(paths, a);
 
 out:
 	si_noflush_read_lock(sb);
-	AuDebugOn(!args.mnt);
+	AuDebugOn(!mnt);
 	path_put(&root);
-	return args.mnt;
+	return mnt;
 }
 
 struct au_nfsd_si_lock {
