@@ -314,6 +314,7 @@ config ARCH_TEGRA
 	select PM
 	select PM_GENERIC_DOMAINS
 	select RESET_CONTROLLER
+	select MMU_NOTIFIER
 	help
 	  This enables support for the NVIDIA Tegra SoC family.
 
