@@ -708,21 +708,11 @@ static void power_down(void)
 	if (hibernation_mode == HIBERNATION_SUSPEND) {
 		pm_restore_gfp_mask();
 		error = suspend_devices_and_enter(mem_sleep_current);
-		if (error) {
-			hibernation_mode = hibernation_ops ?
-						HIBERNATION_PLATFORM :
-						HIBERNATION_SHUTDOWN;
-		} else {
-			/* Match pm_restore_gfp_mask() call in hibernate() */
-			pm_restrict_gfp_mask();
+		if (!error)
+			goto exit;
 
-			/* Restore swap signature. */
-			error = swsusp_unmark();
-			if (error)
-				pr_err("Swap will be unusable! Try swapon -a.\n");
-
-			return;
-		}
+		hibernation_mode = hibernation_ops ? HIBERNATION_PLATFORM :
+						     HIBERNATION_SHUTDOWN;
 	}
 #endif
 
@@ -733,12 +723,9 @@ static void power_down(void)
 	case HIBERNATION_PLATFORM:
 		error = hibernation_platform_enter();
 		if (error == -EAGAIN || error == -EBUSY) {
-			/* Match pm_restore_gfp_mask() in hibernate(). */
-			pm_restrict_gfp_mask();
-			swsusp_unmark();
 			events_check_enabled = false;
 			pr_info("Wakeup event detected during hibernation, rolling back.\n");
-			return;
+			goto exit;
 		}
 		fallthrough;
 	case HIBERNATION_SHUTDOWN:
@@ -757,6 +744,12 @@ static void power_down(void)
 	pr_crit("Power down manually\n");
 	while (1)
 		cpu_relax();
+
+exit:
+	/* Restore swap signature. */
+	error = swsusp_unmark();
+	if (error)
+		pr_err("Swap will be unusable! Try swapon -a.\n");
 }
 
 static int load_image_and_restore(void)
@@ -829,8 +822,7 @@ int hibernate(void)
 		goto Restore;
 
 	ksys_sync_helper();
-	if (filesystem_freeze_enabled)
-		filesystems_freeze();
+	filesystems_freeze(filesystem_freeze_enabled);
 
 	error = freeze_processes();
 	if (error)
@@ -936,8 +928,7 @@ int hibernate_quiet_exec(int (*func)(void *data), void *data)
 	if (error)
 		goto restore;
 
-	if (filesystem_freeze_enabled)
-		filesystems_freeze();
+	filesystems_freeze(filesystem_freeze_enabled);
 
 	error = freeze_processes();
 	if (error)
@@ -1087,8 +1078,7 @@ static int software_resume(void)
 	if (error)
 		goto Restore;
 
-	if (filesystem_freeze_enabled)
-		filesystems_freeze();
+	filesystems_freeze(filesystem_freeze_enabled);
 
 	pm_pr_dbg("Preparing processes for hibernation restore.\n");
 	error = freeze_processes();

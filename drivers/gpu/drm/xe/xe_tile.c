@@ -95,6 +95,35 @@ static int xe_tile_alloc(struct xe_tile *tile)
 	if (!tile->mem.ggtt)
 		return -ENOMEM;
 
+	tile->migrate = xe_migrate_alloc(tile);
+	if (!tile->migrate)
+		return -ENOMEM;
+
+	return 0;
+}
+
+/**
+ * xe_tile_alloc_vram - Perform per-tile VRAM structs allocation
+ * @tile: Tile to perform allocations for
+ *
+ * Allocates VRAM per-tile data structures using DRM-managed allocations.
+ * Does not touch the hardware.
+ *
+ * Returns -ENOMEM if allocations fail, otherwise 0.
+ */
+int xe_tile_alloc_vram(struct xe_tile *tile)
+{
+	struct xe_device *xe = tile_to_xe(tile);
+	struct xe_vram_region *vram;
+
+	if (!IS_DGFX(xe))
+		return 0;
+
+	vram = xe_vram_region_alloc(xe, tile->id, XE_PL_VRAM0 + tile->id);
+	if (!vram)
+		return -ENOMEM;
+	tile->mem.vram = vram;
+
 	return 0;
 }
 

@@ -41,15 +41,31 @@ static struct irq_chip fake_irq_chip = {
 	.flags          = IRQCHIP_SKIP_SET_WAKE,
 };
 
+static int irq_test_setup_fake_irq(struct kunit *test, struct irq_affinity_desc *affd)
+{
+	struct irq_desc *desc;
+	int virq;
+
+	virq = irq_domain_alloc_descs(-1, 1, 0, NUMA_NO_NODE, affd);
+	KUNIT_ASSERT_GE(test, virq, 0);
+
+	irq_set_chip_and_handler(virq, &fake_irq_chip, handle_simple_irq);
+
+	desc = irq_to_desc(virq);
+	KUNIT_ASSERT_PTR_NE(test, desc, NULL);
+
+	/* On some architectures, IRQs are NOREQUEST | NOPROBE by default. */
+	irq_settings_clr_norequest(desc);
+
+	return virq;
+}
+
 static void irq_disable_depth_test(struct kunit *test)
 {
 	struct irq_desc *desc;
 	int virq, ret;
 
-	virq = irq_domain_alloc_descs(-1, 1, 0, NUMA_NO_NODE, NULL);
-	KUNIT_ASSERT_GE(test, virq, 0);
-
-	irq_set_chip_and_handler(virq, &dummy_irq_chip, handle_simple_irq);
+	virq = irq_test_setup_fake_irq(test, NULL);
 
 	desc = irq_to_desc(virq);
 	KUNIT_ASSERT_PTR_NE(test, desc, NULL);
@@ -58,7 +74,7 @@ static void irq_disable_depth_test(struct kunit *test)
 	irq_settings_clr_norequest(desc);
 
 	ret = request_irq(virq, noop_handler, 0, "test_irq", NULL);
-	KUNIT_EXPECT_EQ(test, ret, 0);
+	KUNIT_ASSERT_EQ(test, ret, 0);
 
 	KUNIT_EXPECT_EQ(test, desc->depth, 0);
 
@@ -76,10 +92,7 @@ static void irq_free_disabled_test(struct kunit *test)
 	struct irq_desc *desc;
 	int virq, ret;
 
-	virq = irq_domain_alloc_descs(-1, 1, 0, NUMA_NO_NODE, NULL);
-	KUNIT_ASSERT_GE(test, virq, 0);
-
-	irq_set_chip_and_handler(virq, &dummy_irq_chip, handle_simple_irq);
+	virq = irq_test_setup_fake_irq(test, NULL);
 
 	desc = irq_to_desc(virq);
 	KUNIT_ASSERT_PTR_NE(test, desc, NULL);
@@ -88,7 +101,7 @@ static void irq_free_disabled_test(struct kunit *test)
 	irq_settings_clr_norequest(desc);
 
 	ret = request_irq(virq, noop_handler, 0, "test_irq", NULL);
-	KUNIT_EXPECT_EQ(test, ret, 0);
+	KUNIT_ASSERT_EQ(test, ret, 0);
 
 	KUNIT_EXPECT_EQ(test, desc->depth, 0);
 
@@ -99,7 +112,7 @@ static void irq_free_disabled_test(struct kunit *test)
 	KUNIT_EXPECT_GE(test, desc->depth, 1);
 
 	ret = request_irq(virq, noop_handler, 0, "test_irq", NULL);
-	KUNIT_EXPECT_EQ(test, ret, 0);
+	KUNIT_ASSERT_EQ(test, ret, 0);
 	KUNIT_EXPECT_EQ(test, desc->depth, 0);
 
 	free_irq(virq, NULL);
@@ -118,10 +131,7 @@ static void irq_shutdown_depth_test(struct kunit *test)
 	if (!IS_ENABLED(CONFIG_SMP))
 		kunit_skip(test, "requires CONFIG_SMP for managed shutdown");
 
-	virq = irq_domain_alloc_descs(-1, 1, 0, NUMA_NO_NODE, &affinity);
-	KUNIT_ASSERT_GE(test, virq, 0);
-
-	irq_set_chip_and_handler(virq, &dummy_irq_chip, handle_simple_irq);
+	virq = irq_test_setup_fake_irq(test, &affinity);
 
 	desc = irq_to_desc(virq);
 	KUNIT_ASSERT_PTR_NE(test, desc, NULL);
@@ -133,7 +143,7 @@ static void irq_shutdown_depth_test(struct kunit *test)
 	KUNIT_ASSERT_PTR_NE(test, data, NULL);
 
 	ret = request_irq(virq, noop_handler, 0, "test_irq", NULL);
-	KUNIT_EXPECT_EQ(test, ret, 0);
+	KUNIT_ASSERT_EQ(test, ret, 0);
 
 	KUNIT_EXPECT_TRUE(test, irqd_is_activated(data));
 	KUNIT_EXPECT_TRUE(test, irqd_is_started(data));
@@ -183,10 +193,7 @@ static void irq_cpuhotplug_test(struct kunit *test)
 
 	cpumask_copy(&affinity.mask, cpumask_of(1));
 
-	virq = irq_domain_alloc_descs(-1, 1, 0, NUMA_NO_NODE, &affinity);
-	KUNIT_ASSERT_GE(test, virq, 0);
-
-	irq_set_chip_and_handler(virq, &fake_irq_chip, handle_simple_irq);
+	virq = irq_test_setup_fake_irq(test, &affinity);
 
 	desc = irq_to_desc(virq);
 	KUNIT_ASSERT_PTR_NE(test, desc, NULL);
@@ -198,7 +205,7 @@ static void irq_cpuhotplug_test(struct kunit *test)
 	KUNIT_ASSERT_PTR_NE(test, data, NULL);
 
 	ret = request_irq(virq, noop_handler, 0, "test_irq", NULL);
-	KUNIT_EXPECT_EQ(test, ret, 0);
+	KUNIT_ASSERT_EQ(test, ret, 0);
 
 	KUNIT_EXPECT_TRUE(test, irqd_is_activated(data));
 	KUNIT_EXPECT_TRUE(test, irqd_is_started(data));

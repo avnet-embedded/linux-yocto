@@ -37,9 +37,7 @@ static void io_waitid_free(struct io_kiocb *req)
 	struct io_waitid_async *iwa = req->async_data;
 
 	put_pid(iwa->wo.wo_pid);
-	kfree(req->async_data);
-	req->async_data = NULL;
-	req->flags &= ~REQ_F_ASYNC_DATA;
+	io_req_async_data_free(req);
 }
 
 static bool io_waitid_compat_copy_si(struct io_waitid *iw, int signo)
@@ -252,7 +250,7 @@ int io_waitid_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
 		return -EINVAL;
 
 	iwa = io_uring_alloc_async_data(NULL, req);
-	if (!unlikely(iwa))
+	if (unlikely(!iwa))
 		return -ENOMEM;
 	iwa->req = req;
 

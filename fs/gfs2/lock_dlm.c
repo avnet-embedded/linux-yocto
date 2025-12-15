@@ -162,14 +162,6 @@ static void gdlm_ast(void *arg)
 	}
 
 	ret = gl->gl_req;
-	if (gl->gl_lksb.sb_flags & DLM_SBF_ALTMODE) {
-		if (gl->gl_req == LM_ST_SHARED)
-			ret = LM_ST_DEFERRED;
-		else if (gl->gl_req == LM_ST_DEFERRED)
-			ret = LM_ST_SHARED;
-		else
-			BUG();
-	}
 
 	/*
 	 * The GLF_INITIAL flag is initially set for new glocks.  Upon the
@@ -259,15 +251,6 @@ static u32 make_flags(struct gfs2_glock *gl, const unsigned int gfs_flags,
 	if (gfs_flags & LM_FLAG_TRY_1CB) {
 		lkf |= DLM_LKF_NOQUEUE;
 		lkf |= DLM_LKF_NOQUEUEBAST;
-	}
-
-	if (gfs_flags & LM_FLAG_ANY) {
-		if (req == DLM_LOCK_PR)
-			lkf |= DLM_LKF_ALTCW;
-		else if (req == DLM_LOCK_CW)
-			lkf |= DLM_LKF_ALTPR;
-		else
-			BUG();
 	}
 
 	if (!test_bit(GLF_INITIAL, &gl->gl_flags)) {
@@ -361,12 +344,6 @@ static void gdlm_put_lock(struct gfs2_glock *gl)
 	gfs2_sbstats_inc(gl, GFS2_LKS_DCOUNT);
 	gfs2_update_request_times(gl);
 
-	/* don't want to call dlm if we've unmounted the lock protocol */
-	if (test_bit(DFL_UNMOUNT, &ls->ls_recover_flags)) {
-		gfs2_glock_free(gl);
-		return;
-	}
-
 	/*
 	 * When the lockspace is released, all remaining glocks will be
 	 * unlocked automatically.  This is more efficient than unlocking them
@@ -394,6 +371,11 @@ again:
 	if (error == -EBUSY) {
 		msleep(20);
 		goto again;
+	}
+
+	if (error == -ENODEV) {
+		gfs2_glock_free(gl);
+		return;
 	}
 
 	if (error) {
@@ -1436,7 +1418,7 @@ static int gdlm_mount(struct gfs2_sbd *sdp, const char *table)
 	return 0;
 
 fail_release:
-	dlm_release_lockspace(ls->ls_dlm, 2);
+	dlm_release_lockspace(ls->ls_dlm, DLM_RELEASE_NORMAL);
 fail_free:
 	free_recover_size(ls);
 fail:
@@ -1474,7 +1456,7 @@ static void gdlm_unmount(struct gfs2_sbd *sdp)
 release:
 	down_write(&ls->ls_sem);
 	if (ls->ls_dlm) {
-		dlm_release_lockspace(ls->ls_dlm, 2);
+		dlm_release_lockspace(ls->ls_dlm, DLM_RELEASE_NORMAL);
 		ls->ls_dlm = NULL;
 	}
 	up_write(&ls->ls_sem);
