@@ -739,7 +739,6 @@ static void tegra_uart_rx_dma_complete(void *args)
 	unsigned long flags;
 	struct dma_tx_state state;
 	enum dma_status status;
-	unsigned long ier;
 
 	uart_port_lock_irqsave(u, &flags);
 
@@ -789,8 +788,6 @@ static void tegra_uart_terminate_rx_dma(struct tegra_uart_port *tup)
 
 static void tegra_uart_handle_rx_dma(struct tegra_uart_port *tup)
 {
-	unsigned long ier;
-
 	/* Deactivate flow control to stop sender */
 	if (tup->rts_active)
 		set_rts(tup, false);
