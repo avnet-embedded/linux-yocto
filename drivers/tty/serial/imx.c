@@ -2628,16 +2628,8 @@ static void imx_uart_save_context(struct imx_port *sport)
 static void imx_uart_enable_wakeup(struct imx_port *sport, bool on)
 {
 	struct tty_port *port = &sport->port.state->port;
-	struct device *tty_dev;
 	bool may_wake = false, wake_active = false;
 	u32 ucr3, usr1;
-
-	scoped_guard(tty_port_tty, port) {
-		struct tty_struct *tty = scoped_tty();
-
-		tty_dev = tty->dev;
-		may_wake = tty_dev && device_may_wakeup(tty_dev);
-	}
 
 	/* only configure the wake register when device set as wakeup source */
 	if (!may_wake)
