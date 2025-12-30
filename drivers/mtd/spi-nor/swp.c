@@ -8,6 +8,7 @@
 #include <linux/math64.h>
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/spi-nor.h>
+#include <linux/mtd/cfi.h>
 
 #include "core.h"
 
@@ -17,6 +18,8 @@ static u8 spi_nor_get_sr_bp_mask(struct spi_nor *nor)
 
 	if (nor->flags & SNOR_F_HAS_SR_BP3_BIT6)
 		return mask | SR_BP3_BIT6;
+	else if (nor->flags & SNOR_F_HAS_SR_BP3_BIT5)
+		return mask | SR_BP3_BIT5;
 
 	if (nor->flags & SNOR_F_HAS_4BIT_BP)
 		return mask | SR_BP3;
@@ -42,6 +45,9 @@ static u64 spi_nor_get_min_prot_length_sr(struct spi_nor *nor)
 	unsigned int sector_size = nor->info->sector_size ?: SPI_NOR_DEFAULT_SECTOR_SIZE;
 	u64 n_sectors = div_u64(nor->params->size, sector_size);
 	u8 mask = spi_nor_get_sr_bp_mask(nor);
+
+	if (nor->flags & SNOR_F_HAS_PARALLEL)
+		sector_size <<= 1;
 
 	/* Reserved one for "protect none" and one for "protect all". */
 	bp_slots = (1 << hweight8(mask)) - 2;
@@ -206,6 +212,9 @@ static int spi_nor_sr_lock(struct spi_nor *nor, loff_t ofs, u64 len)
 
 		if (nor->flags & SNOR_F_HAS_SR_BP3_BIT6 && val & SR_BP3)
 			val = (val & ~SR_BP3) | SR_BP3_BIT6;
+		else if (nor->flags & SNOR_F_HAS_SR_BP3_BIT5 &&
+			 val & SR_BP3_BIT5)
+			val |= SR_BP3_BIT5;
 
 		if (val & ~mask)
 			return -EINVAL;
@@ -239,6 +248,26 @@ static int spi_nor_sr_lock(struct spi_nor *nor, loff_t ofs, u64 len)
 	return spi_nor_write_sr_and_check(nor, status_new);
 }
 
+static bool spi_nor_is_lower_area(struct spi_nor *nor, loff_t ofs, uint64_t len)
+{
+	struct mtd_info *mtd = &nor->mtd;
+
+	if (nor->flags & SNOR_F_HAS_SR_TB)
+		return ((ofs + len) <= (mtd->size >> 1));
+
+	return false;
+}
+
+static bool spi_nor_is_upper_area(struct spi_nor *nor, loff_t ofs, uint64_t len)
+{
+	struct mtd_info *mtd = &nor->mtd;
+
+	if ((nor->flags & SNOR_F_HAS_SR_TB))
+		return (ofs >= (mtd->size >> 1));
+
+	return true;
+}
+
 /*
  * Unlock a region of the flash. See spi_nor_sr_lock() for more info
  *
@@ -266,12 +295,13 @@ static int spi_nor_sr_unlock(struct spi_nor *nor, loff_t ofs, u64 len)
 		return 0;
 
 	/* If anything below us is locked, we can't use 'top' protection */
-	if (!spi_nor_is_unlocked_sr(nor, 0, ofs, status_old))
+	if ((!spi_nor_is_unlocked_sr(nor, 0, ofs, status_old)) ||
+	    spi_nor_is_lower_area(nor, ofs, len))
 		can_be_top = false;
 
 	/* If anything above us is locked, we can't use 'bottom' protection */
 	if (!spi_nor_is_unlocked_sr(nor, ofs + len, nor->params->size - (ofs + len),
-				    status_old))
+				    status_old) || spi_nor_is_upper_area(nor, ofs, len))
 		can_be_bottom = false;
 
 	if (!can_be_bottom && !can_be_top)
@@ -295,6 +325,9 @@ static int spi_nor_sr_unlock(struct spi_nor *nor, loff_t ofs, u64 len)
 
 		if (nor->flags & SNOR_F_HAS_SR_BP3_BIT6 && val & SR_BP3)
 			val = (val & ~SR_BP3) | SR_BP3_BIT6;
+		else if (nor->flags & SNOR_F_HAS_SR_BP3_BIT5 &&
+			 val & SR_BP3_BIT5)
+			val |= SR_BP3_BIT5;
 
 		/* Some power-of-two sizes are not supported */
 		if (val & ~mask)
@@ -350,17 +383,69 @@ void spi_nor_init_default_locking_ops(struct spi_nor *nor)
 	nor->params->locking_ops = &spi_nor_sr_locking_ops;
 }
 
-static int spi_nor_lock(struct mtd_info *mtd, loff_t ofs, u64 len)
+static inline u16 min_lockable_sectors(struct spi_nor *nor,
+				       u16 n_sectors)
+{
+	u16 lock_granularity;
+
+	/*
+	 * Revisit - SST (not used by us) has the same JEDEC ID as micron but
+	 * protected area table is similar to that of spansion.
+	 */
+	lock_granularity = max(1, n_sectors / M25P_MAX_LOCKABLE_SECTORS);
+	if (nor->info->id->bytes[0] == CFI_MFR_ST ||	/* Micron */
+	    nor->info->id->bytes[0] == CFI_MFR_PMC ||	/* ISSI */
+	    nor->info->id->bytes[0] == CFI_MFR_MACRONIX)	/* Macronix */
+		lock_granularity = 1;
+
+	return lock_granularity;
+}
+
+static inline uint32_t get_protected_area_start(struct spi_nor *nor,
+						u8 lock_bits)
+{
+	struct mtd_info *mtd = &nor->mtd;
+	u32 sector_size;
+	u16 n_sectors;
+	u64 mtd_size;
+
+	n_sectors = nor->info->size / nor->info->sector_size;
+	sector_size = nor->info->sector_size;
+	mtd_size = mtd->size;
+
+	if (nor->flags & SNOR_F_HAS_PARALLEL) {
+		sector_size = (nor->info->sector_size >> 1);
+		mtd_size = (mtd->size >> 1);
+	}
+
+	return mtd_size - (1 << (lock_bits - 1)) *
+		min_lockable_sectors(nor, n_sectors) * sector_size;
+}
+
+static int spi_nor_lock(struct mtd_info *mtd, loff_t ofs, uint64_t len)
 {
 	struct spi_nor *nor = mtd_to_spi_nor(mtd);
+	struct spi_nor_flash_parameter *params;
 	int ret;
 
 	ret = spi_nor_prep_and_lock(nor);
 	if (ret)
 		return ret;
 
-	ret = nor->params->locking_ops->lock(nor, ofs, len);
+	params = nor->params;
 
+	if (nor->flags & SNOR_F_HAS_PARALLEL) {
+		nor->spimem->spi->cs_index_mask = SPI_NOR_ENABLE_MULTI_CS;
+		ofs /= 2;
+	} else {
+		nor->spimem->spi->cs_index_mask = SPI_NOR_ENABLE_CS0;
+	}
+	ret = params->locking_ops->lock(nor, ofs, len);
+	/* Wait until finished previous command */
+	ret = spi_nor_wait_till_ready(nor);
+	if (ret)
+		goto err;
+err:
 	spi_nor_unlock_and_unprep(nor);
 	return ret;
 }
@@ -368,14 +453,27 @@ static int spi_nor_lock(struct mtd_info *mtd, loff_t ofs, u64 len)
 static int spi_nor_unlock(struct mtd_info *mtd, loff_t ofs, u64 len)
 {
 	struct spi_nor *nor = mtd_to_spi_nor(mtd);
+	struct spi_nor_flash_parameter *params;
 	int ret;
 
 	ret = spi_nor_prep_and_lock(nor);
 	if (ret)
 		return ret;
 
-	ret = nor->params->locking_ops->unlock(nor, ofs, len);
+	params = nor->params;
 
+	if (nor->flags & SNOR_F_HAS_PARALLEL) {
+		nor->spimem->spi->cs_index_mask = SPI_NOR_ENABLE_MULTI_CS;
+		ofs /= 2;
+	} else {
+		nor->spimem->spi->cs_index_mask = SPI_NOR_ENABLE_CS0;
+	}
+	ret = params->locking_ops->unlock(nor, ofs, len);
+	/* Wait until finished previous command */
+	ret = spi_nor_wait_till_ready(nor);
+	if (ret)
+		goto err;
+err:
 	spi_nor_unlock_and_unprep(nor);
 	return ret;
 }
@@ -395,6 +493,26 @@ static int spi_nor_is_locked(struct mtd_info *mtd, loff_t ofs, u64 len)
 	return ret;
 }
 
+static void spi_nor_prot_unlock(struct spi_nor *nor)
+{
+	if (nor->info->flags & SST_GLOBAL_PROT_UNLK) {
+		spi_nor_write_enable(nor);
+		if (nor->spimem) {
+			struct spi_mem_op op =
+				SPI_MEM_OP(SPI_MEM_OP_CMD(GLOBAL_BLKPROT_UNLK, 1),
+					   SPI_MEM_OP_NO_ADDR,
+					   SPI_MEM_OP_NO_DUMMY,
+					   SPI_MEM_OP_NO_DATA);
+
+			spi_mem_exec_op(nor->spimem, &op);
+		} else {
+			/* Unlock global write protection bits */
+			nor->controller_ops->write_reg(nor, GLOBAL_BLKPROT_UNLK, NULL, 0);
+		}
+	}
+	spi_nor_wait_till_ready(nor);
+}
+
 /**
  * spi_nor_try_unlock_all() - Tries to unlock the entire flash memory array.
  * @nor:	pointer to a 'struct spi_nor'.
@@ -410,15 +528,23 @@ static int spi_nor_is_locked(struct mtd_info *mtd, loff_t ofs, u64 len)
 void spi_nor_try_unlock_all(struct spi_nor *nor)
 {
 	int ret;
+	const struct flash_info *info = nor->info;
 
 	if (!(nor->flags & SNOR_F_HAS_LOCK))
 		return;
 
 	dev_dbg(nor->dev, "Unprotecting entire flash array\n");
 
-	ret = spi_nor_unlock(&nor->mtd, 0, nor->params->size);
-	if (ret)
-		dev_dbg(nor->dev, "Failed to unlock the entire flash memory array\n");
+	if (nor->info->id->bytes[0] == CFI_MFR_ATMEL ||
+	    nor->flags & SNOR_F_HAS_LOCK) {
+		if (info->flags & SST_GLOBAL_PROT_UNLK) {
+			spi_nor_prot_unlock(nor);
+		} else {
+			ret = spi_nor_unlock(&nor->mtd, 0, nor->params->size);
+			if (ret)
+				dev_dbg(nor->dev, "Failed to unlock the entire flash memory array\n");
+		}
+	}
 }
 
 void spi_nor_set_mtd_locking_ops(struct spi_nor *nor)
