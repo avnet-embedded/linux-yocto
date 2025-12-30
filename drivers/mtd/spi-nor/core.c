@@ -1741,6 +1741,14 @@ static int spi_nor_erase_dice(struct spi_nor *nor, loff_t addr,
 		      (unsigned long)(nor->mtd.size / SZ_2M));
 
 	do {
+		u64 offset = addr;
+
+		if (nor->flags & SNOR_F_HAS_PARALLEL) {
+			u64 aux = offset;
+
+			ret = do_div(offset, nor->num_flash);
+			offset = aux;
+		}
 		ret = spi_nor_lock_device(nor);
 		if (ret)
 			return ret;
@@ -1751,7 +1759,7 @@ static int spi_nor_erase_dice(struct spi_nor *nor, loff_t addr,
 			return ret;
 		}
 
-		ret = spi_nor_erase_die(nor, addr, die_size);
+		ret = spi_nor_erase_die(nor, offset, die_size);
 
 		spi_nor_unlock_device(nor);
 		if (ret)
@@ -1780,14 +1788,10 @@ static int spi_nor_erase(struct mtd_info *mtd, struct erase_info *instr)
 	bool multi_die_erase = false;
 	u32 addr, len, rem, offset;
 	size_t die_size;
-	u32 n_flash = 1;
 	int ret;
 
 	dev_dbg(nor->dev, "at 0x%llx, len %lld\n", (long long)instr->addr,
 			(long long)instr->len);
-
-	if (nor->num_flash)
-		n_flash = nor->num_flash;
 
 	if (spi_nor_has_uniform_erase(nor)) {
 		div_u64_rem(instr->len, mtd->erasesize, &rem);
@@ -1841,7 +1845,7 @@ static int spi_nor_erase(struct mtd_info *mtd, struct erase_info *instr)
 			if (nor->flags & SNOR_F_HAS_PARALLEL) {
 				u64 aux = offset;
 
-				ret = do_div(aux, n_flash);
+				ret = do_div(aux, nor->num_flash);
 				offset = aux;
 				nor->spimem->spi->cs_index_mask = SPI_NOR_ENABLE_MULTI_CS;
 			}
@@ -1863,7 +1867,7 @@ static int spi_nor_erase(struct mtd_info *mtd, struct erase_info *instr)
 		if (nor->flags & SNOR_F_HAS_PARALLEL) {
 			u64 aux = addr;
 
-			ret = do_div(aux, n_flash);
+			ret = do_div(aux, nor->num_flash);
 			offset = aux;
 			ret = spi_nor_erase_multi_sectors(nor, offset, len);
 			if (ret)
@@ -2140,7 +2144,6 @@ static int spi_nor_read(struct mtd_info *mtd, loff_t from, size_t len,
 	bool is_ofst_odd = false;
 	loff_t from_lock = from;
 	u_char *readbuf;
-	u32 n_flash = 1;
 	u64 sz = 0;
 
 	dev_dbg(nor->dev, "from 0x%08x, len %zd\n", (u32)from, len);
@@ -2152,15 +2155,12 @@ static int spi_nor_read(struct mtd_info *mtd, loff_t from, size_t len,
 	params = nor->params;
 	sz = params->size;
 
-	if (nor->num_flash)
-		n_flash = nor->num_flash;
-
 	/*
 	 * When even number of flashes are connected in parallel and the
 	 * requested read length is odd then read (len + 1) from offset + 1
 	 * and ignore offset[0] data.
 	 */
-	if ((nor->flags & SNOR_F_HAS_PARALLEL) && (!(n_flash % 2)) && (from & 0x01)) {
+	if ((nor->flags & SNOR_F_HAS_PARALLEL) && (!(nor->num_flash % 2)) && (from & 0x01)) {
 		from = (loff_t)(from - 1);
 		len = (size_t)(len + 1);
 		is_ofst_odd = true;
@@ -2177,7 +2177,7 @@ static int spi_nor_read(struct mtd_info *mtd, loff_t from, size_t len,
 		if (nor->flags & SNOR_F_HAS_PARALLEL) {
 			u64 aux = addr;
 
-			ret = do_div(aux, n_flash);
+			ret = do_div(aux, nor->num_flash);
 			addr = aux;
 			nor->spimem->spi->cs_index_mask = SPI_NOR_ENABLE_MULTI_CS;
 			read_len = len;
@@ -2316,7 +2316,7 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 		 * When even number of flashes are connected in parallel and the
 		 * requested write length is odd then first write 2 bytes.
 		 */
-		if ((!(n_flash % 2)) && (to & 0x01)) {
+		if ((!(nor->num_flash % 2)) && (to & 0x01)) {
 			u8 two[2] = {0xff, buf[0]};
 			size_t written_len;
 
@@ -2347,7 +2347,7 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 		if (nor->flags & SNOR_F_HAS_PARALLEL) {
 			u64 aux = addr;
 
-			ret = do_div(aux, n_flash);
+			ret = do_div(aux, nor->num_flash);
 			addr = aux;
 			nor->spimem->spi->cs_index_mask = SPI_NOR_ENABLE_MULTI_CS;
 		} else {
@@ -3350,11 +3350,7 @@ static int spi_nor_set_octal_dtr(struct spi_nor *nor, bool enable)
 static int spi_nor_quad_enable(struct spi_nor *nor)
 {
 	struct spi_nor_flash_parameter *params = nor->params;
-	u32 n_flash = 1;
 	int err, idx = 0;
-
-	if (nor->num_flash)
-		n_flash = nor->num_flash;
 
 	if (nor->flags & SNOR_F_HAS_PARALLEL) {
 		if (!params->quad_enable)
@@ -3432,11 +3428,7 @@ int spi_nor_set_4byte_addr_mode(struct spi_nor *nor, bool enable)
 
 static int spi_nor_init(struct spi_nor *nor)
 {
-	u32 n_flash = 1;
 	int err;
-
-	if (nor->num_flash)
-		n_flash = nor->num_flash;
 
 	err = spi_nor_set_octal_dtr(nor, true);
 	if (err) {
@@ -3600,11 +3592,7 @@ static void spi_nor_put_device(struct mtd_info *mtd)
 
 static void spi_nor_restore(struct spi_nor *nor)
 {
-	u32 n_flash = 1;
 	int ret;
-
-	if (nor->num_flash)
-		n_flash = nor->num_flash;
 
 	/* restore the addressing mode */
 	if (nor->addr_nbytes == 4 && !(nor->flags & SNOR_F_4B_OPCODES) &&
@@ -3757,9 +3745,6 @@ static int spi_nor_set_mtd_info(struct spi_nor *nor)
 
 	spi_nor_set_mtd_locking_ops(nor);
 	spi_nor_set_mtd_otp_ops(nor);
-
-	if (nor->num_flash)
-		n_flash = nor->num_flash;
 
 	mtd->dev.parent = dev;
 	if (!mtd->name)
