@@ -23,6 +23,7 @@
 #include <linux/sizes.h>
 #include <linux/slab.h>
 #include <linux/spi/flash.h>
+#include <linux/mtd/cfi.h>
 
 #include "core.h"
 
@@ -281,7 +282,7 @@ static ssize_t spi_nor_spimem_write_data(struct spi_nor *nor, loff_t to,
 	if (spi_nor_spimem_bounce(nor, &op))
 		memcpy(nor->bouncebuf, buf, op.data.nbytes);
 
-	if (nor->dirmap.wdesc) {
+	if (nor->dirmap.wdesc && !(nor->info->flags & SST_WRITE)) {
 		nbytes = spi_mem_dirmap_write(nor->dirmap.wdesc, op.addr.val,
 					      op.data.nbytes, op.data.buf.out);
 	} else {
@@ -623,6 +624,116 @@ int spi_nor_set_4byte_addr_mode_brwr(struct spi_nor *nor, bool enable)
 		dev_dbg(nor->dev, "error %d setting 4-byte mode\n", ret);
 
 	return ret;
+}
+
+/**
+ * spi_nor_write_ear() - Write Extended Address Register.
+ * @nor:	pointer to 'struct spi_nor'.
+ * @addr:	value to write to the Extended Address Register.
+ *
+ * Return: 0 on success, -errno otherwise.
+ */
+static int spi_nor_write_ear(struct spi_nor *nor, u32 addr)
+{
+	struct mtd_info *mtd = &nor->mtd;
+	u8 code = SPINOR_OP_WREAR;
+	u32 ear;
+	int ret;
+
+#define OFFSET_16_MB 0x1000000
+	/* Wait until finished previous write command. */
+	if (spi_nor_wait_till_ready(nor))
+		return 1;
+
+	ret = spi_nor_write_enable(nor);
+	if (ret)
+		return ret;
+
+	if (mtd->size <= OFFSET_16_MB)
+		return 0;
+	else if ((nor->flags & SNOR_F_HAS_PARALLEL) &&
+		 mtd->size <= OFFSET_16_MB * SNOR_FLASH_CNT_MAX)
+		return 0;
+
+	if (!(nor->flags & SNOR_F_HAS_PARALLEL))
+		addr = addr % (u32)mtd->size;
+	else
+		addr = addr % (u32)(mtd->size >> 0x1);
+
+	ear = addr >> 24;
+
+	if (nor->info->id->bytes[0] == CFI_MFR_AMD)
+		code = SPINOR_OP_BRWR;
+	if (nor->info->id->bytes[0] == CFI_MFR_ST ||
+	    nor->info->id->bytes[0] == CFI_MFR_MACRONIX ||
+	    nor->info->id->bytes[0] == CFI_MFR_PMC) {
+		spi_nor_write_enable(nor);
+		code = SPINOR_OP_WREAR;
+	}
+	nor->bouncebuf[0] = ear;
+
+	if (nor->spimem) {
+		struct spi_mem_op op =
+			SPI_MEM_OP(SPI_MEM_OP_CMD(code, 0),
+				   SPI_MEM_OP_NO_ADDR,
+				   SPI_MEM_OP_NO_DUMMY,
+				   SPI_MEM_OP_DATA_OUT(1, nor->bouncebuf, 0));
+
+		spi_nor_spimem_setup_op(nor, &op, nor->reg_proto);
+
+		ret = spi_mem_exec_op(nor->spimem, &op);
+	} else {
+		ret = spi_nor_controller_ops_write_reg(nor, code, nor->bouncebuf, 1);
+		if (ret < 0)
+			return ret;
+	}
+
+	nor->curbank = ear;
+
+	return ret;
+}
+
+/**
+ * read_ear - Get the extended/bank address register value
+ * @nor:	Pointer to the flash control structure
+ * @info:	Pointer to the flash info structure
+ *
+ * This routine reads the Extended/bank address register value
+ *
+ * Return:	Negative if error occurred.
+ */
+static int read_ear(struct spi_nor *nor, struct flash_info *info)
+{
+	int ret;
+	u8 code;
+
+	/* This is actually Spansion */
+	if (nor->info->id->bytes[0] == CFI_MFR_AMD)
+		code = SPINOR_OP_BRRD;
+	/* This is actually Micron */
+	else if (nor->info->id->bytes[0] == CFI_MFR_ST ||
+		 nor->info->id->bytes[0] == CFI_MFR_MACRONIX ||
+		 nor->info->id->bytes[0] == CFI_MFR_PMC)
+		code = SPINOR_OP_RDEAR;
+	else
+		return -EINVAL;
+	if (nor->spimem) {
+		struct spi_mem_op op =
+			SPI_MEM_OP(SPI_MEM_OP_CMD(code, 1),
+				   SPI_MEM_OP_NO_ADDR,
+				   SPI_MEM_OP_NO_DUMMY,
+				   SPI_MEM_OP_DATA_IN(1, nor->bouncebuf, 1));
+
+		ret = spi_mem_exec_op(nor->spimem, &op);
+	} else {
+		ret = nor->controller_ops->read_reg(nor, code, nor->bouncebuf, 1);
+	}
+	if (ret < 0) {
+		pr_err("error %d reading EAR\n", ret);
+		return ret;
+	}
+
+	return nor->bouncebuf[0];
 }
 
 /**
@@ -1850,7 +1961,18 @@ static int spi_nor_erase(struct mtd_info *mtd, struct erase_info *instr)
 				nor->spimem->spi->cs_index_mask = SPI_NOR_ENABLE_MULTI_CS;
 			}
 
+			if (nor->addr_nbytes == 3) {
+				/* Update Extended Address Register */
+				ret = spi_nor_write_ear(nor, offset);
+				if (ret)
+					goto erase_err;
+			}
+			ret = spi_nor_wait_till_ready(nor);
+			if (ret)
+				goto erase_err;
+
 			ret = spi_nor_erase_sector(nor, offset);
+
 			spi_nor_unlock_device(nor);
 			if (ret)
 				goto erase_err;
@@ -2143,9 +2265,13 @@ static int spi_nor_read(struct mtd_info *mtd, loff_t from, size_t len,
 	ssize_t ret, read_len, len_lock =  len;
 	bool is_ofst_odd = false;
 	loff_t from_lock = from;
+	u32 rem_bank_len = 0;
 	u_char *readbuf;
+	loff_t addr;
 	u64 sz = 0;
+	u8 bank;
 
+#define OFFSET_16_MB 0x1000000
 	dev_dbg(nor->dev, "from 0x%08x, len %zd\n", (u32)from, len);
 
 	ret = spi_nor_prep_and_lock_rd(nor, from_lock, len_lock);
@@ -2172,7 +2298,18 @@ static int spi_nor_read(struct mtd_info *mtd, loff_t from, size_t len,
 	}
 
 	while (len) {
-		loff_t addr = from;
+		if (nor->addr_nbytes == 3) {
+			if (nor->flags & SNOR_F_HAS_PARALLEL) {
+				bank = (u32)from / (OFFSET_16_MB << 0x01);
+				rem_bank_len = ((OFFSET_16_MB << 0x01) *
+						(bank + 1)) - from;
+			} else {
+				bank = (u32)from / (OFFSET_16_MB);
+				rem_bank_len = ((OFFSET_16_MB) * (bank + 1)) - from;
+			}
+		}
+
+		addr = from;
 
 		if (nor->flags & SNOR_F_HAS_PARALLEL) {
 			u64 aux = addr;
@@ -2184,6 +2321,33 @@ static int spi_nor_read(struct mtd_info *mtd, loff_t from, size_t len,
 		} else {
 			nor->spimem->spi->cs_index_mask = SPI_NOR_ENABLE_CS0;
 		}
+
+		if (nor->addr_nbytes == 4) {
+			if (nor->flags & SNOR_F_HAS_PARALLEL)
+				rem_bank_len = mtd->size - (addr << 1);
+			else
+				rem_bank_len = mtd->size - addr;
+		}
+
+		if (nor->addr_nbytes == 3) {
+			ret = spi_nor_write_enable(nor);
+			if (ret)
+				goto read_err;
+			ret = spi_nor_write_ear(nor, addr);
+			if (ret) {
+				dev_err(nor->dev, "While writing ear register\n");
+				goto read_err;
+			}
+		}
+		if (len < rem_bank_len)
+			read_len = len;
+		else
+			read_len = rem_bank_len;
+
+		/* Wait till previous write/erase is done. */
+		ret = spi_nor_wait_till_ready(nor);
+		if (ret)
+			goto read_err;
 
 		if (nor->read_proto == SNOR_PROTO_8_8_8_DTR)
 			ret = spi_nor_octal_dtr_read(nor, addr, len, buf);
@@ -2297,11 +2461,14 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 	size_t *retlen, const u_char *buf)
 {
 	struct spi_nor *nor = mtd_to_spi_nor(mtd);
-	size_t i;
-	ssize_t ret;
 	u32 page_size = nor->params->page_size;
+	size_t page_offset, i, ret;
+	u32 rem_bank_len = 0;
 	u32 n_flash = 1;
+	loff_t addr;
+	u8 bank;
 
+#define OFFSET_16_MB 0x1000000
 	dev_dbg(nor->dev, "to 0x%08x, len %zd\n", (u32)to, len);
 
 	ret = spi_nor_prep_and_lock_pe(nor, to, len);
@@ -2339,8 +2506,31 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 
 	for (i = 0; i < len; ) {
 		ssize_t written;
-		loff_t addr = to + i;
-		size_t page_offset = addr & (page_size - 1);
+
+		if (nor->addr_nbytes == 3) {
+			if (nor->flags & SNOR_F_HAS_PARALLEL) {
+				bank = (u32)to / (OFFSET_16_MB << 0x01);
+				rem_bank_len = ((OFFSET_16_MB << 0x01) *
+						(bank + 1)) - to;
+			} else {
+				bank = (u32)to / (OFFSET_16_MB);
+				rem_bank_len = ((OFFSET_16_MB) * (bank + 1)) - to;
+			}
+		}
+		addr = to + i;
+
+		/*
+		 * If page_size is a power of two, the offset can be quickly
+		 * calculated with an AND operation. On the other cases we
+		 * need to do a modulus operation (more expensive).
+		 */
+		if (is_power_of_2(page_size)) {
+			page_offset = addr & (page_size - 1);
+		} else {
+			u64 aux = addr;
+
+			page_offset = do_div(aux, page_size);
+		}
 		/* the size of data remaining on the first page */
 		size_t page_remain = min_t(size_t, page_size - page_offset, len - i);
 
@@ -2354,6 +2544,25 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 			nor->spimem->spi->cs_index_mask = SPI_NOR_ENABLE_CS0;
 		}
 
+		if (nor->addr_nbytes == 4) {
+			if (nor->flags & SNOR_F_HAS_PARALLEL)
+				rem_bank_len = mtd->size - (addr << 1);
+			else
+				rem_bank_len = mtd->size - addr;
+		}
+
+		if (nor->addr_nbytes == 3) {
+			ret = spi_nor_write_enable(nor);
+			if (ret)
+				goto write_err;
+			ret = spi_nor_write_ear(nor, addr);
+			if (ret) {
+				dev_err(nor->dev, "While writing ear register\n");
+				goto write_err;
+			}
+		}
+
+		page_remain = min_t(size_t, page_size - page_offset, len - i);
 		ret = spi_nor_lock_device(nor);
 		if (ret)
 			goto write_err;
@@ -2375,6 +2584,13 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 			goto write_err;
 		*retlen += written;
 		i += written;
+		if (written != page_remain) {
+			dev_err(nor->dev,
+				"While writing %zu bytes written %zd bytes\n",
+				page_remain, written);
+			ret = -EIO;
+			goto write_err;
+		}
 	}
 
 write_err:
@@ -2823,8 +3039,13 @@ static int spi_nor_select_erase(struct spi_nor *nor)
 
 static int spi_nor_set_addr_nbytes(struct spi_nor *nor)
 {
-	if (nor->params->addr_nbytes) {
-		nor->addr_nbytes = nor->params->addr_nbytes;
+	struct spi_nor_flash_parameter *params = nor->params;
+	struct device_node *np = spi_nor_get_flash_node(nor);
+	struct device_node *np_spi;
+	int status;
+
+	if (params->addr_nbytes) {
+		nor->addr_nbytes = params->addr_nbytes;
 	} else if (nor->read_proto == SNOR_PROTO_8_8_8_DTR) {
 		/*
 		 * In 8D-8D-8D mode, one byte takes half a cycle to transfer. So
@@ -2845,9 +3066,55 @@ static int spi_nor_set_addr_nbytes(struct spi_nor *nor)
 		nor->addr_nbytes = 3;
 	}
 
-	if (nor->addr_nbytes == 3 && nor->params->size > 0x1000000) {
-		/* enable 4-byte addressing if the device exceeds 16MiB */
-		nor->addr_nbytes = 4;
+	if (nor->addr_nbytes == 3 && params->size > 0x1000000) {
+		np_spi = of_get_next_parent(np);
+		if (of_property_match_string(np_spi, "compatible",
+					     "xlnx,zynq-qspi-1.0") >= 0) {
+			nor->addr_nbytes = 3;
+			if (nor->flags & SNOR_F_HAS_PARALLEL) {
+				/*
+				 * In parallel mode both chip selects i.e., CS0 &
+				 * CS1 need to be asserted simulatneously.
+				 */
+				nor->spimem->spi->cs_index_mask = SPI_NOR_ENABLE_MULTI_CS;
+				params->set_4byte_addr_mode(nor, false);
+			} else {
+				/*
+				 * Set the CS before issuing the command.
+				 */
+				nor->spimem->spi->cs_index_mask = SPI_NOR_ENABLE_CS0;
+				params->set_4byte_addr_mode(nor, false);
+			}
+			nor->spimem->spi->cs_index_mask = 0x01;
+			status = read_ear(nor, (struct flash_info *)nor->info);
+			if (status < 0)
+				dev_warn(nor->dev, "failed to read ear reg\n");
+			else
+				nor->curbank = status & EAR_SEGMENT_MASK;
+		} else if (of_property_match_string(np_spi, "compatible",
+						    "xlnx,xps-spi-2.00.a") >= 0) {
+			nor->addr_nbytes = 3;
+			nor->spimem->spi->cs_index_mask = 0x01;
+			params->set_4byte_addr_mode(nor, false);
+
+		} else {
+			/* enable 4-byte addressing if the device exceeds 16MiB */
+			nor->addr_nbytes = 4;
+			if (nor->flags & SNOR_F_HAS_PARALLEL) {
+				/*
+				 * In parallel mode both chip selects i.e., CS0 &
+				 * CS1 need to be asserted simulatneously.
+				 */
+				nor->spimem->spi->cs_index_mask = SPI_NOR_ENABLE_MULTI_CS;
+				params->set_4byte_addr_mode(nor, true);
+			} else {
+				/*
+				 * Set the CS before issuing the command.
+				 */
+				nor->spimem->spi->cs_index_mask = SPI_NOR_ENABLE_CS0;
+				params->set_4byte_addr_mode(nor, true);
+			}
+		}
 	}
 
 	if (nor->addr_nbytes > SPI_NOR_MAX_ADDR_NBYTES) {
@@ -4041,6 +4308,10 @@ static void spi_nor_shutdown(struct spi_mem *spimem)
 {
 	struct spi_nor *nor = spi_mem_get_drvdata(spimem);
 
+	if (nor->addr_nbytes == 3) {
+		spi_nor_write_enable(nor);
+		spi_nor_write_ear(nor, 0x00);
+	}
 	spi_nor_restore(nor);
 }
 
