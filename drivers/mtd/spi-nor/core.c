@@ -306,6 +306,12 @@ static ssize_t spi_nor_spimem_write_data(struct spi_nor *nor, loff_t to,
 ssize_t spi_nor_write_data(struct spi_nor *nor, loff_t to, size_t len,
 			   const u8 *buf)
 {
+	int ret;
+
+	ret = spi_nor_write_enable(nor);
+	if (ret)
+		return ret;
+
 	if (nor->spimem)
 		return spi_nor_spimem_write_data(nor, to, len, buf);
 
@@ -1073,6 +1079,10 @@ static int spi_nor_erase_die(struct spi_nor *nor, loff_t addr, size_t die_size)
 
 	dev_dbg(nor->dev, " %lldKiB\n", (long long)(die_size >> 10));
 
+	ret = spi_nor_write_enable(nor);
+	if (ret)
+		return ret;
+
 	if (nor->spimem) {
 		struct spi_mem_op op =
 			SPI_NOR_DIE_ERASE_OP(nor->params->die_erase_opcode,
@@ -1445,7 +1455,11 @@ static void spi_nor_unlock_and_unprep_rd(struct spi_nor *nor, loff_t start, size
  */
 int spi_nor_erase_sector(struct spi_nor *nor, u32 addr)
 {
-	int i;
+	int i, ret;
+
+	ret = spi_nor_write_enable(nor);
+	if (ret)
+		return ret;
 
 	if (nor->spimem) {
 		struct spi_mem_op op =
@@ -1675,12 +1689,6 @@ static int spi_nor_erase_multi_sectors(struct spi_nor *nor, u64 addr, u32 len)
 			if (ret)
 				goto destroy_erase_cmd_list;
 
-			ret = spi_nor_write_enable(nor);
-			if (ret) {
-				spi_nor_unlock_device(nor);
-				goto destroy_erase_cmd_list;
-			}
-
 			ret = spi_nor_erase_sector(nor, addr);
 			spi_nor_unlock_device(nor);
 			if (ret)
@@ -1804,12 +1812,6 @@ static int spi_nor_erase(struct mtd_info *mtd, struct erase_info *instr)
 			ret = spi_nor_lock_device(nor);
 			if (ret)
 				goto erase_err;
-
-			ret = spi_nor_write_enable(nor);
-			if (ret) {
-				spi_nor_unlock_device(nor);
-				goto erase_err;
-			}
 
 			ret = spi_nor_erase_sector(nor, addr);
 			spi_nor_unlock_device(nor);
@@ -2220,18 +2222,13 @@ static int spi_nor_write(struct mtd_info *mtd, loff_t to, size_t len,
 		if (ret)
 			goto write_err;
 
-		ret = spi_nor_write_enable(nor);
-		if (ret) {
-			spi_nor_unlock_device(nor);
-			goto write_err;
-		}
-
 		if (nor->write_proto == SNOR_PROTO_8_8_8_DTR)
 			ret = spi_nor_octal_dtr_write(nor, addr, page_remain,
 						      buf + i);
 		else
 			ret = spi_nor_write_data(nor, addr, page_remain,
 						 buf + i);
+
 		spi_nor_unlock_device(nor);
 		if (ret < 0)
 			goto write_err;
