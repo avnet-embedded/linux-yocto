@@ -12,6 +12,7 @@
 #include <linux/skbuff.h>
 #include <linux/udp.h>
 #include <linux/tcp.h>
+#include <linux/ip.h>
 
 #include "xilinx_axienet_eoe.h"
 
@@ -24,7 +25,8 @@
  *
  * This is the probe routine for Ethernet Offload Engine and called when
  * EOE is connected to Ethernet IP. It allocates the address space
- * for EOE. Parses through device tree and updates Tx offload features in netdev.
+ * for EOE. Parses through device tree and updates Tx and RX offload features
+ * in netdev and axiethernet private structure respectively.
  */
 int axienet_eoe_probe(struct platform_device *pdev)
 {
@@ -70,6 +72,26 @@ int axienet_eoe_probe(struct platform_device *pdev)
 
 		default:
 			dev_warn(&pdev->dev, "xlnx,tx-hw-offload: %d is an invalid value\n", value);
+			return -EINVAL;
+		}
+	}
+
+	ret = of_property_read_u32(pdev->dev.of_node, "xlnx,rx-hw-offload", &value);
+	if (!ret) {
+		dev_dbg(&pdev->dev, "xlnx,rx-hw-offload %d\n", value);
+
+		switch (value) {
+		case 0:
+			lp->eoe_features |= RX_HW_NO_OFFLOAD;
+			break;
+		case 1:
+			lp->eoe_features |= RX_HW_CSO;
+			break;
+		case 2:
+			lp->eoe_features |= RX_HW_UDP_GRO;
+			break;
+		default:
+			dev_warn(&pdev->dev, "xlnx,rx-hw-offload: %d is an invalid value\n", value);
 			return -EINVAL;
 		}
 	}
@@ -143,4 +165,186 @@ void axienet_eoe_config_hwgso(struct net_device *ndev,
 		cur_p->app1 |= (XMCDMA_APP1_GSO_PKT_MASK | XMCDMA_APP1_UDP_SO_MASK |
 				XMCDMA_APP1_TCP_SO_MASK);
 	}
+}
+
+int __maybe_unused axienet_eoe_mcdma_gro_q_init(struct net_device *ndev,
+						struct axienet_dma_q *q,
+						int i)
+{
+	struct axienet_local *lp = netdev_priv(ndev);
+	dma_addr_t mapping;
+	struct page *page;
+
+	page = alloc_pages(GFP_KERNEL, 0);
+	if (!page) {
+		netdev_err(ndev, "page allocation failed\n");
+		goto out;
+	}
+	q->rxq_bd_v[i].page = page;
+	mapping = dma_map_page(ndev->dev.parent, page, 0,
+			       PAGE_SIZE, DMA_FROM_DEVICE);
+	if (unlikely(dma_mapping_error(ndev->dev.parent, mapping))) {
+		netdev_err(ndev, "dma mapping error\n");
+		goto free_page;
+	}
+	mcdma_desc_set_phys_addr(lp, mapping, &q->rxq_bd_v[i]);
+	q->rxq_bd_v[i].cntrl = PAGE_SIZE;
+
+	return 0;
+
+free_page:
+	__free_pages(q->rxq_bd_v[i].page, 0);
+out:
+	return -ENOMEM;
+}
+
+void __maybe_unused axienet_eoe_mcdma_gro_bd_free(struct net_device *ndev,
+						  struct axienet_dma_q *q)
+{
+	struct axienet_local *lp = netdev_priv(ndev);
+	dma_addr_t phys;
+	int i;
+
+	if (!q->rxq_bd_v)
+		return;
+
+	for (i = 0; i < lp->rx_bd_num; i++) {
+		phys = mcdma_desc_get_phys_addr(lp, &q->rxq_bd_v[i]);
+		if (phys) {
+			dma_unmap_page(ndev->dev.parent, phys, PAGE_SIZE,
+				       DMA_FROM_DEVICE);
+			__free_pages(q->rxq_bd_v[i].page, 0);
+		}
+	}
+
+	dma_free_coherent(ndev->dev.parent,
+			  sizeof(*q->rxq_bd_v) * lp->rx_bd_num,
+			  q->rxq_bd_v,
+			  q->rx_bd_p);
+
+	q->rxq_bd_v = NULL;
+}
+
+int axienet_eoe_recv_gro(struct net_device *ndev, int budget,
+			 struct axienet_dma_q *q)
+{
+	struct axienet_local *lp = netdev_priv(ndev);
+	u32 length, packets = 0, size = 0;
+	dma_addr_t phys, tail_p = 0;
+	unsigned int numbdfree = 0;
+	struct aximcdma_bd *cur_p;
+	struct iphdr *iphdr;
+	struct page *page;
+	struct udphdr *uh;
+	void *page_addr;
+
+	/* Get relevat BD status value */
+	rmb();
+	cur_p = &q->rxq_bd_v[q->rx_bd_ci];
+
+	while ((numbdfree < budget) &&
+	       (cur_p->status & XAXIDMA_BD_STS_COMPLETE_MASK)) {
+		tail_p = q->rx_bd_p + sizeof(*q->rxq_bd_v) * q->rx_bd_ci;
+		phys = mcdma_desc_get_phys_addr(lp, cur_p);
+		dma_unmap_page(ndev->dev.parent, phys, PAGE_SIZE,
+			       DMA_FROM_DEVICE);
+
+		length = cur_p->status & XAXIDMA_BD_STS_ACTUAL_LEN_MASK;
+
+		page = (struct page *)cur_p->page;
+		if (!page) {
+			netdev_err(ndev, "Page is Not Defined\n");
+			break;
+		}
+
+		page_addr = page_address(page);
+
+		q->rx_data += length;
+
+		if (!q->skb)
+			return -ENOMEM;
+
+		else
+			skb_add_rx_frag(q->skb,
+					skb_shinfo(q->skb)->nr_frags,
+					page, 0, length, q->rx_data);
+
+		if (((cur_p->app0 & XEOE_UDP_GRO_RXSOP_MASK) >> XEOE_UDP_GRO_RXSOP_SHIFT)) {
+			/* Allocate new skb and update in BD */
+			q->skb = netdev_alloc_skb(ndev, length);
+			if (!q->skb)
+				return -ENOMEM;
+			memcpy(q->skb->data, page_addr, length);
+			skb_put(q->skb, length);
+			put_page(page);
+		} else if (((cur_p->app0 & XEOE_UDP_GRO_RXEOP_MASK) >> XEOE_UDP_GRO_RXEOP_SHIFT)) {
+			skb_set_network_header(q->skb, XEOE_MAC_HEADER_LENGTH);
+			iphdr = (struct iphdr *)skb_network_header(q->skb);
+			skb_set_transport_header(q->skb,
+						 iphdr->ihl * 4 + XEOE_MAC_HEADER_LENGTH);
+			uh = (struct udphdr *)skb_transport_header(q->skb);
+
+			/* App Fields are in Little Endian Byte Order */
+			iphdr->tot_len = htons(cur_p->app1 & XEOE_UDP_GRO_PKT_LEN_MASK);
+			iphdr->check = (__force __sum16)htons((cur_p->app1 &
+					XEOE_UDP_GRO_RX_CSUM_MASK) >> XEOE_UDP_GRO_RX_CSUM_SHIFT);
+			uh->len = htons((cur_p->app1 & XEOE_UDP_GRO_PKT_LEN_MASK) - iphdr->ihl * 4);
+			q->skb->protocol = eth_type_trans(q->skb, ndev);
+			q->skb->ip_summed = CHECKSUM_UNNECESSARY;
+			q->rx_data = 0;
+			/* This will give SKB to n/w Stack */
+			if (skb_shinfo(q->skb)->nr_frags <= XEOE_UDP_GRO_MAX_FRAG) {
+				netif_receive_skb(q->skb);
+				q->skb = NULL;
+			}
+		}
+
+		size += length;
+		packets++;
+		/* Ensure that the skb is completely updated
+		 * prior to mapping the MCDMA
+		 */
+		wmb();
+		cur_p->status = 0;
+		cur_p->app0 = 0;
+		cur_p->app1 = 0;
+		page = alloc_pages(GFP_KERNEL, 0);
+		if (!page) {
+			netdev_err(ndev, "Page allocation failed\n");
+			break;
+		}
+		cur_p->page = page;
+		phys = dma_map_page(ndev->dev.parent, page, 0,
+				    PAGE_SIZE, DMA_FROM_DEVICE);
+
+		if (unlikely(dma_mapping_error(ndev->dev.parent, phys))) {
+			phys = 0;
+			mcdma_desc_set_phys_addr(lp, phys, cur_p);
+			__free_pages(cur_p->page, 0);
+			netdev_err(ndev, "dma mapping failed\n");
+			break;
+		}
+		mcdma_desc_set_phys_addr(lp, phys, cur_p);
+		cur_p->cntrl = PAGE_SIZE;
+
+		if (++q->rx_bd_ci >= lp->rx_bd_num)
+			q->rx_bd_ci = 0;
+
+		/* Get relevat BD status value */
+		rmb();
+		cur_p = &q->rxq_bd_v[q->rx_bd_ci];
+		numbdfree++;
+	}
+
+	ndev->stats.rx_packets += packets;
+	ndev->stats.rx_bytes += size;
+	q->rxq_packets += packets;
+	q->rxq_bytes += size;
+
+	if (tail_p) {
+		axienet_dma_bdout(q, XMCDMA_CHAN_TAILDESC_OFFSET(q->chan_id) +
+				q->rx_offset, tail_p);
+	}
+
+	return numbdfree;
 }

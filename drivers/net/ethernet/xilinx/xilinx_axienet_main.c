@@ -51,6 +51,7 @@
 #include <net/sock.h>
 #include <linux/ptp/ptp_xilinx.h>
 #include <linux/gpio/consumer.h>
+#include <linux/inetdevice.h>
 
 #include "xilinx_axienet.h"
 #include "xilinx_axienet_eoe.h"
@@ -233,7 +234,10 @@ void axienet_dma_bd_release(struct net_device *ndev)
 #endif
 	for_each_rx_dma_queue(lp, i) {
 #ifdef CONFIG_AXIENET_HAS_MCDMA
-		axienet_mcdma_rx_bd_free(ndev, lp->dq[i]);
+		if (axienet_eoe_is_channel_gro(lp, lp->dq[i]))
+			axienet_eoe_mcdma_gro_bd_free(ndev, lp->dq[i]);
+		else
+			axienet_mcdma_rx_bd_free(ndev, lp->dq[i]);
 #else
 		axienet_bd_free(ndev, lp->dq[i]);
 #endif
@@ -2566,7 +2570,12 @@ int xaxienet_rx_poll(struct napi_struct *napi, int quota)
 			dev_err(lp->dev, "Rx error 0x%x\n\r", status);
 			break;
 		}
-		work_done += axienet_recv(lp->ndev, quota - work_done, q);
+
+		if (axienet_eoe_is_channel_gro(lp, q))
+			work_done += axienet_eoe_recv_gro(lp->ndev, quota - work_done, q);
+		else
+			work_done += axienet_recv(lp->ndev, quota - work_done, q);
+
 		status = axienet_dma_in32(q, XMCDMA_CHAN_SR_OFFSET(q->chan_id) +
 					  q->rx_offset);
 	}
@@ -2926,6 +2935,31 @@ err_tx_irq:
 	return ret;
 }
 
+static void axienet_eoe_set_gro_address(struct axienet_local *lp)
+{
+	struct in_ifaddr *ifa = NULL;
+	struct in_device *in_dev;
+	struct axienet_dma_q *q;
+	int i;
+
+	in_dev = __in_dev_get_rcu(lp->ndev);
+	if (in_dev)
+		ifa = rcu_dereference((in_dev)->ifa_list);
+
+	if (!ifa) {
+		netdev_dbg(lp->ndev, "IP address not assigned\n");
+		return;
+	}
+
+	for_each_rx_dma_queue(lp, i) {
+		q = lp->dq[i];
+		if (axienet_eoe_is_channel_gro(lp, q))
+			axienet_eoe_iow(lp,
+					XEOE_UDP_GRO_DST_IP_OFFSET(q->chan_id),
+					ntohl(ifa->ifa_address));
+	}
+}
+
 /**
  * axienet_open - Driver open routine.
  * @ndev:	Pointer to net_device structure
@@ -3119,6 +3153,9 @@ static int axienet_open(struct net_device *ndev)
 		if (ret)
 			goto err_phy;
 	}
+
+	if (lp->eoe_features & RX_HW_UDP_GRO)
+		axienet_eoe_set_gro_address(lp);
 
 	netif_tx_start_all_queues(ndev);
 	return 0;
@@ -5072,6 +5109,49 @@ static const struct of_device_id axienet_of_match[] = {
 
 MODULE_DEVICE_TABLE(of, axienet_of_match);
 
+static int axienet_eoe_netdev_event(struct notifier_block *this, unsigned long event,
+				    void *ptr)
+{
+	struct axienet_local *lp = container_of(this, struct axienet_local,
+						inetaddr_notifier);
+	struct in_ifaddr *ifa = ptr;
+	struct axienet_dma_q *q;
+	int i;
+
+	struct net_device *ndev = ifa->ifa_dev->dev;
+
+	if (lp->ndev != ndev) {
+		dev_err(lp->dev, " ndev is not matched to configure GRO IP address\n");
+	} else {
+		switch (event) {
+		case NETDEV_UP:
+			dev_dbg(lp->dev, "%s:NETDEV_UP\n", __func__);
+			for_each_rx_dma_queue(lp, i) {
+				q = lp->dq[i];
+				if (axienet_eoe_is_channel_gro(lp, q))
+					axienet_eoe_iow(lp,
+							XEOE_UDP_GRO_DST_IP_OFFSET(q->chan_id),
+							ntohl(ifa->ifa_address));
+			}
+		break;
+		case NETDEV_DOWN:
+			dev_dbg(lp->dev, "%s:NETDEV_DOWN\n", __func__);
+			for_each_rx_dma_queue(lp, i) {
+				q = lp->dq[i];
+				if (axienet_eoe_is_channel_gro(lp, q))
+					axienet_eoe_iow(lp,
+							XEOE_UDP_GRO_DST_IP_OFFSET(q->chan_id),
+							0);
+			}
+		break;
+		default:
+			dev_err(lp->dev, "IPv4 Ethernet address is not set\n");
+		}
+	}
+
+	return NOTIFY_DONE;
+}
+
 static struct gpio_descs *axienet_mrmac_gpio_get_array(struct platform_device *pdev,
 						       int count, const char *name,
 						       enum gpiod_flags flags)
@@ -5648,12 +5728,6 @@ static int axienet_probe(struct platform_device *pdev)
 			}
 		}
 
-		/* Set the TX coalesce count to 1. With offload enabled, there are not as
-		 * many interrupts as before and the interrupt for every 64KB segment needs
-		 * to be handled immediately to ensure better performance.
-		 */
-		if (ndev->hw_features & NETIF_F_GSO_UDP_L4)
-			lp->coalesce_count_tx = XMCDMA_DFT_TX_THRESHOLD;
 	} else {
 		struct xilinx_vdma_config cfg;
 		struct dma_chan *tx_chan;
@@ -5704,6 +5778,20 @@ static int axienet_probe(struct platform_device *pdev)
 		lp->coalesce_count_tx = XAXIDMA_DFT_TX_THRESHOLD;
 		lp->coalesce_usec_rx = XAXIDMA_DFT_RX_USEC;
 		lp->coalesce_usec_tx = XAXIDMA_DFT_TX_USEC;
+
+		/* Set the TX coalesce count to 1. With offload enabled, there are not as
+		 * many interrupts as before and the interrupt for every 64KB segment needs
+		 * to be handled immediately to ensure better performance.
+		 */
+		if (ndev->hw_features & NETIF_F_GSO_UDP_L4)
+			lp->coalesce_count_tx = XMCDMA_DFT_TX_THRESHOLD;
+
+		/* Update the required thresholds for Rx HW UDP GRO
+		 * GRO receives 16 segmented data packets from MAC
+		 * and packet coalescing increases performance.
+		 */
+		if (lp->eoe_features & RX_HW_UDP_GRO)
+			lp->coalesce_count_rx = XMCDMA_DFT_RX_THRESHOLD;
 #else
 		for_each_rx_dma_queue(lp, i) {
 			q = lp->dq[i];
@@ -5869,7 +5957,24 @@ static int axienet_probe(struct platform_device *pdev)
 		goto cleanup_phylink;
 	}
 
+	/* Register notifier for inet address additions/deletions.
+	 * It should be called after register_netdev to access the interface's
+	 * network configuration parameters.
+	 */
+
+	if (lp->eoe_features & RX_HW_UDP_GRO) {
+		lp->inetaddr_notifier.notifier_call = axienet_eoe_netdev_event;
+		ret = register_inetaddr_notifier(&lp->inetaddr_notifier);
+		if (ret) {
+			dev_err(lp->dev, "register_netdevice_notifier() error\n");
+			goto err_unregister_netdev;
+		}
+	}
+
 	return 0;
+
+err_unregister_netdev:
+	unregister_netdev(lp->ndev);
 
 cleanup_phylink:
 	phylink_destroy(lp->phylink);
@@ -5902,6 +6007,9 @@ static void axienet_remove(struct platform_device *pdev)
 		netif_napi_del(&lp->dq[i]->napi_rx);
 		netif_napi_del(&lp->dq[i]->napi_tx);
 	}
+
+	if (lp->eoe_features & RX_HW_UDP_GRO)
+		unregister_inetaddr_notifier(&lp->inetaddr_notifier);
 
 	unregister_netdev(ndev);
 	axienet_clk_disable(pdev);

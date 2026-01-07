@@ -874,6 +874,7 @@ struct axidma_bd {
  *		   Otherwise reserved.
  * @tx_skb:	  Transmit skb address
  * @tx_desc_mapping: Tx Descriptor DMA mapping type.
+ * @page:	page buffer to access the data passed by GRO packet
  */
 struct aximcdma_bd {
 	u32 next;	/* Physical address of next buffer descriptor */
@@ -894,6 +895,7 @@ struct aximcdma_bd {
 	u32 ptp_tx_ts_tag;
 	struct sk_buff *tx_skb;
 	u32 tx_desc_mapping;
+	struct page *page;
 } __aligned(XAXIDMA_BD_MINIMUM_ALIGNMENT);
 
 #define XAE_NUM_MISC_CLOCKS 3
@@ -1021,6 +1023,8 @@ struct skbuf_dma_descriptor {
  * @switch_lock: Spinlock for switchable IP.
  * @eoe_regs: Ethernet offload IP base address.
  * @eoe_connected: Tells whether ethernet offload IP is connected to Ethernet IP.
+ * @eoe_features: EOE IP supported configuration.
+ * @inetaddr_notifier: Notifier callback function for specific event.
  * @gt_reset_done: GT Reset Status
  * @use_gt_gpio: flag to check GT gpio enabled
  */
@@ -1140,6 +1144,8 @@ struct axienet_local {
 	spinlock_t switch_lock; /* To protect Link training programming from multiple context */
 	void __iomem *eoe_regs;
 	bool eoe_connected;
+	u32 eoe_features;
+	struct notifier_block inetaddr_notifier;
 	bool gt_reset_done;
 	bool use_gt_gpio;
 };
@@ -1186,6 +1192,8 @@ struct axienet_local {
  * @txq_bytes:   Number of transmit bytes processed by the dma queue.
  * @rxq_packets: Number of receive packets processed by the dma queue.
  * @rxq_bytes:	Number of receive bytes processed by the dma queue.
+ * @skb:	Socket buffer for GRO.
+ * @rx_data:	stores the length of GRO skb fragments.
  */
 struct axienet_dma_q {
 	struct axienet_local	*lp; /* parent */
@@ -1233,6 +1241,8 @@ struct axienet_dma_q {
 	unsigned long txq_bytes;
 	unsigned long rxq_packets;
 	unsigned long rxq_bytes;
+	struct sk_buff *skb;
+	u32 rx_data;
 };
 
 #define AXIENET_ETHTOOLS_SSTATS_LEN 6
