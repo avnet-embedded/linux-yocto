@@ -164,6 +164,25 @@ static dma_addr_t desc_get_phys_addr(struct axienet_local *lp,
 }
 
 /**
+ * axienet_dma_bdout - Memory mapped Axi DMA register Buffer Descriptor write.
+ * @lp:		Pointer to axienet local structure
+ * @reg:	Address offset from the base address of the Axi DMA core
+ * @value:	Value to be written into the Axi DMA register
+ *
+ * This function writes the desired value into the corresponding Axi DMA
+ * register.
+ */
+static inline void axienet_dma_bdout(struct axienet_local *lp,
+				     off_t reg, dma_addr_t value)
+{
+#if defined(CONFIG_PHYS_ADDR_T_64BIT)
+	writeq(value, (lp->dma_regs + reg));
+#else
+	writel(value, (lp->dma_regs + reg));
+#endif
+}
+
+/**
  * axienet_dma_bd_release - Release buffer descriptor rings
  * @ndev:	Pointer to the net_device structure
  *
@@ -288,11 +307,11 @@ static void axienet_dma_start(struct axienet_local *lp)
 	/* Populate the tail pointer and bring the Rx Axi DMA engine out of
 	 * halted state. This will make the Rx side ready for reception.
 	 */
-	axienet_dma_out_addr(lp, XAXIDMA_RX_CDESC_OFFSET, lp->rx_bd_p);
+	axienet_dma_bdout(lp, XAXIDMA_RX_CDESC_OFFSET, lp->rx_bd_p);
 	lp->rx_dma_cr |= XAXIDMA_CR_RUNSTOP_MASK;
 	axienet_dma_out32(lp, XAXIDMA_RX_CR_OFFSET, lp->rx_dma_cr);
-	axienet_dma_out_addr(lp, XAXIDMA_RX_TDESC_OFFSET, lp->rx_bd_p +
-			     (sizeof(*lp->rx_bd_v) * (lp->rx_bd_num - 1)));
+	axienet_dma_bdout(lp, XAXIDMA_RX_TDESC_OFFSET, lp->rx_bd_p +
+			  (sizeof(*lp->rx_bd_v) * (lp->rx_bd_num - 1)));
 	lp->rx_dma_started = true;
 
 	spin_unlock_irq(&lp->rx_cr_lock);
@@ -306,7 +325,7 @@ static void axienet_dma_start(struct axienet_local *lp)
 	 * Tx channel is now ready to run. But only after we write to the
 	 * tail pointer register that the Tx channel will start transmitting.
 	 */
-	axienet_dma_out_addr(lp, XAXIDMA_TX_CDESC_OFFSET, lp->tx_bd_p);
+	axienet_dma_bdout(lp, XAXIDMA_TX_CDESC_OFFSET, lp->tx_bd_p);
 	lp->tx_dma_cr |= XAXIDMA_CR_RUNSTOP_MASK;
 	axienet_dma_out32(lp, XAXIDMA_TX_CR_OFFSET, lp->tx_dma_cr);
 	lp->tx_dma_started = true;
@@ -409,6 +428,9 @@ static void axienet_set_mac_address(struct net_device *ndev,
 	if (!is_valid_ether_addr(ndev->dev_addr))
 		eth_hw_addr_random(ndev);
 
+	if (lp->axienet_config->mactype != XAXIENET_1_2p5G)
+		return;
+
 	/* Set up unicast MAC address filter set its mac address */
 	axienet_iow(lp, XAE_UAW0_OFFSET,
 		    (ndev->dev_addr[0]) |
@@ -458,7 +480,7 @@ static void axienet_set_multicast_list(struct net_device *ndev)
 	u32 reg, af0reg, af1reg;
 	struct axienet_local *lp = netdev_priv(ndev);
 
-	if (lp->eth_hasnobuf)
+	if (lp->axienet_config->mactype != XAXIENET_1_2p5G || lp->eth_hasnobuf)
 		return;
 	reg = axienet_ior(lp, XAE_FMI_OFFSET);
 	reg &= ~XAE_FMI_PM_MASK;
@@ -1068,7 +1090,8 @@ axienet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 		return NETDEV_TX_BUSY;
 	}
 
-	if (skb->ip_summed == CHECKSUM_PARTIAL && !lp->eth_hasnobuf) {
+	if (skb->ip_summed == CHECKSUM_PARTIAL && !lp->eth_hasnobuf &&
+	    lp->axienet_config->mactype == XAXIENET_1_2p5G) {
 		if (lp->features & XAE_FEATURE_FULL_TX_CSUM) {
 			/* Tx Full Checksum Offload Enabled */
 			cur_p->app0 |= 2;
@@ -1080,7 +1103,8 @@ axienet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 			cur_p->app1 = (csum_start_off << 16) | csum_index_off;
 		}
 	} else if (skb->ip_summed == CHECKSUM_UNNECESSARY &&
-		   !lp->eth_hasnobuf) {
+		   !lp->eth_hasnobuf &&
+		   (lp->axienet_config->mactype == XAXIENET_1_2p5G)) {
 		cur_p->app0 |= 2; /* Tx Full Checksum Offload Enabled */
 	}
 
@@ -1128,7 +1152,7 @@ axienet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 	netdev_sent_queue(ndev, skb->len);
 
 	/* Start the transfer */
-	axienet_dma_out_addr(lp, XAXIDMA_TX_TDESC_OFFSET, tail_p);
+	axienet_dma_bdout(lp, XAXIDMA_TX_TDESC_OFFSET, tail_p);
 
 	/* Stop queue if next transmit may not have space */
 	if (axienet_check_tx_bd_space(lp, MAX_SKB_FRAGS + 1)) {
@@ -1230,7 +1254,8 @@ static int axienet_rx_poll(struct napi_struct *napi, int budget)
 		 * receive it again.
 		 */
 		if (likely(skb)) {
-			if (lp->eth_hasnobuf)
+			if (lp->eth_hasnobuf ||
+			    lp->axienet_config->mactype != XAXIENET_1_2p5G)
 				length = cur_p->status & XAXIDMA_BD_STS_ACTUAL_LEN_MASK;
 			else
 				length = cur_p->app4 & 0x0000FFFF;
@@ -1246,6 +1271,7 @@ static int axienet_rx_poll(struct napi_struct *napi, int budget)
 
 			/* if we're doing Rx csum offload, set it up */
 			if (lp->features & XAE_FEATURE_FULL_RX_CSUM &&
+			    lp->axienet_config->mactype == XAXIENET_1_2p5G &&
 			    !lp->eth_hasnobuf) {
 				csumstatus = (cur_p->app2 &
 					      XAE_FULL_CSUM_STATUS_MASK) >> 3;
@@ -1254,7 +1280,8 @@ static int axienet_rx_poll(struct napi_struct *napi, int budget)
 					skb->ip_summed = CHECKSUM_UNNECESSARY;
 				}
 			} else if (lp->features & XAE_FEATURE_PARTIAL_RX_CSUM &&
-				   !lp->eth_hasnobuf) {
+				   !lp->eth_hasnobuf &&
+				   lp->axienet_config->mactype == XAXIENET_1_2p5G) {
 				skb->csum = be32_to_cpu(cur_p->app3 & 0xFFFF);
 				skb->ip_summed = CHECKSUM_COMPLETE;
 			}
@@ -1300,7 +1327,7 @@ static int axienet_rx_poll(struct napi_struct *napi, int budget)
 	u64_stats_update_end(&lp->rx_stat_sync);
 
 	if (tail_p)
-		axienet_dma_out_addr(lp, XAXIDMA_RX_TDESC_OFFSET, tail_p);
+		axienet_dma_bdout(lp, XAXIDMA_RX_TDESC_OFFSET, tail_p);
 
 	if (packets < budget && napi_complete_done(napi, packets)) {
 		if (READ_ONCE(lp->rx_dim_enabled)) {
@@ -1674,13 +1701,15 @@ static int axienet_open(struct net_device *ndev)
 	ret = axienet_device_reset(ndev);
 	axienet_unlock_mii(lp);
 
-	ret = phylink_of_phy_connect(lp->phylink, lp->dev->of_node, 0);
-	if (ret) {
-		dev_err(lp->dev, "phylink_of_phy_connect() failed: %d\n", ret);
-		return ret;
-	}
+	if (lp->phylink) {
+		ret = phylink_of_phy_connect(lp->phylink, lp->dev->of_node, 0);
+		if (ret) {
+			dev_err(lp->dev, "phylink_of_phy_connect() failed: %d\n", ret);
+			return ret;
+		}
 
-	phylink_start(lp->phylink);
+		phylink_start(lp->phylink);
+	}
 
 	/* Start the statistics refresh work */
 	schedule_delayed_work(&lp->stats_work, 0);
@@ -1711,8 +1740,11 @@ err_free_eth_irq:
 err_phy:
 	cancel_work_sync(&lp->rx_dim.work);
 	cancel_delayed_work_sync(&lp->stats_work);
-	phylink_stop(lp->phylink);
-	phylink_disconnect_phy(lp->phylink);
+	if (lp->phylink) {
+		phylink_stop(lp->phylink);
+		phylink_disconnect_phy(lp->phylink);
+	}
+
 	return ret;
 }
 
@@ -1742,8 +1774,10 @@ static int axienet_stop(struct net_device *ndev)
 	cancel_work_sync(&lp->rx_dim.work);
 	cancel_delayed_work_sync(&lp->stats_work);
 
-	phylink_stop(lp->phylink);
-	phylink_disconnect_phy(lp->phylink);
+	if (lp->phylink) {
+		phylink_stop(lp->phylink);
+		phylink_disconnect_phy(lp->phylink);
+	}
 
 	axienet_setoptions(ndev, lp->options &
 			   ~(XAE_OPTION_TXEN | XAE_OPTION_RXEN));
@@ -2063,7 +2097,8 @@ axienet_ethtools_get_pauseparam(struct net_device *ndev,
 {
 	struct axienet_local *lp = netdev_priv(ndev);
 
-	phylink_ethtool_get_pauseparam(lp->phylink, epauseparm);
+	if (lp->phylink)
+		phylink_ethtool_get_pauseparam(lp->phylink, epauseparm);
 }
 
 /**
@@ -2083,6 +2118,9 @@ axienet_ethtools_set_pauseparam(struct net_device *ndev,
 				struct ethtool_pauseparam *epauseparm)
 {
 	struct axienet_local *lp = netdev_priv(ndev);
+
+	if (!lp->phylink)
+		return -EOPNOTSUPP;
 
 	return phylink_ethtool_set_pauseparam(lp->phylink, epauseparm);
 }
@@ -2289,6 +2327,9 @@ axienet_ethtools_get_link_ksettings(struct net_device *ndev,
 {
 	struct axienet_local *lp = netdev_priv(ndev);
 
+	if (!lp->phylink)
+		return -EOPNOTSUPP;
+
 	return phylink_ethtool_ksettings_get(lp->phylink, cmd);
 }
 
@@ -2297,6 +2338,9 @@ axienet_ethtools_set_link_ksettings(struct net_device *ndev,
 				    const struct ethtool_link_ksettings *cmd)
 {
 	struct axienet_local *lp = netdev_priv(ndev);
+
+	if (!lp->phylink)
+		return -EOPNOTSUPP;
 
 	return phylink_ethtool_ksettings_set(lp->phylink, cmd);
 }
@@ -2776,6 +2820,11 @@ static const struct axienet_config axienet_1_2p5g_config = {
 	.setoptions = axienet_setoptions,
 };
 
+static const struct axienet_config axienet_10g_config = {
+	.mactype = XAXIENET_LEGACY_10G,
+	.setoptions = axienet_setoptions,
+};
+
 /* Match table for of_platform binding */
 static const struct of_device_id axienet_of_match[] = {
 	{ .compatible = "xlnx,axi-ethernet-1.00.a", .data = &axienet_1_2p5g_config},
@@ -2783,6 +2832,7 @@ static const struct of_device_id axienet_of_match[] = {
 	{ .compatible = "xlnx,axi-ethernet-2.01.a", .data = &axienet_1_2p5g_config},
 	{ .compatible = "xlnx,axi-2_5-gig-ethernet-1.0",
 						.data = &axienet_1_2p5g_config},
+	{ .compatible = "xlnx,ten-gig-eth-mac", .data = &axienet_10g_config},
 	{},
 };
 
@@ -3212,7 +3262,8 @@ static void axienet_remove(struct platform_device *pdev)
 	if (lp->pcs_phy)
 		put_device(&lp->pcs_phy->dev);
 
-	axienet_mdio_teardown(lp);
+	if (lp->mii_bus)
+		axienet_mdio_teardown(lp);
 
 	clk_bulk_disable_unprepare(XAE_NUM_MISC_CLOCKS, lp->misc_clks);
 	clk_disable_unprepare(lp->axi_clk);
