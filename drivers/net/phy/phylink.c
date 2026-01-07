@@ -287,6 +287,15 @@ static int phylink_interface_max_speed(phy_interface_t interface)
 	case PHY_INTERFACE_MODE_100GBASEP:
 		return SPEED_100000;
 
+	case PHY_INTERFACE_MODE_100GBASER:
+		return SPEED_100000;
+
+	case PHY_INTERFACE_MODE_200GBASER:
+		return SPEED_200000;
+
+	case PHY_INTERFACE_MODE_400GBASER:
+		return SPEED_400000;
+
 	case PHY_INTERFACE_MODE_INTERNAL:
 	case PHY_INTERFACE_MODE_NA:
 	case PHY_INTERFACE_MODE_MAX:

@@ -360,8 +360,17 @@ unsigned long phy_caps_from_interface(phy_interface_t interface)
 		link_caps |= BIT(LINK_CAPA_50000FD);
 		break;
 
+	case PHY_INTERFACE_MODE_100GBASER:
 	case PHY_INTERFACE_MODE_100GBASEP:
 		link_caps |= BIT(LINK_CAPA_100000FD);
+		break;
+
+	case PHY_INTERFACE_MODE_200GBASER:
+		link_caps |= BIT(LINK_CAPA_200000FD);
+		break;
+
+	case PHY_INTERFACE_MODE_400GBASER:
+		link_caps |= BIT(LINK_CAPA_400000FD);
 		break;
 
 	case PHY_INTERFACE_MODE_INTERNAL:
