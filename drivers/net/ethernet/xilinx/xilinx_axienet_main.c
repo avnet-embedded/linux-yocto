@@ -4604,12 +4604,14 @@ static void axienet_pcs_get_state(struct phylink_pcs *pcs,
 			state->speed = SPEED_25000;
 
 		state->duplex = DUPLEX_FULL;
-		an_status = axienet_ior(lp, XXV_STAT_AN_STS_OFFSET);
-		tx_pause = an_status & XXV_TX_PAUSE_MASK;
-		rx_pause = an_status & XXV_RX_PAUSE_MASK;
+		if (lp->auto_neg) {
+			an_status = axienet_ior(lp, XXV_STAT_AN_STS_OFFSET);
+			tx_pause = an_status & XXV_TX_PAUSE_MASK;
+			rx_pause = an_status & XXV_RX_PAUSE_MASK;
 
-		state->pause = (tx_pause & MLO_PAUSE_TX) | (rx_pause & MLO_PAUSE_RX);
-		state->an_complete = an_status & XXV_AN_COMPLETE_MASK;
+			state->pause = (tx_pause & MLO_PAUSE_TX) | (rx_pause & MLO_PAUSE_RX);
+			state->an_complete = an_status & XXV_AN_COMPLETE_MASK;
+		}
 		state->link = 0;
 
 		gt_rst = readl_poll_timeout(lp->regs + XXV_STAT_GTWIZ_OFFSET,
@@ -4689,6 +4691,9 @@ static int axienet_pcs_config(struct phylink_pcs *pcs, unsigned int neg_mode,
 		}
 	}
 	if (lp->axienet_config->mactype == XAXIENET_10G_25G) {
+		if (!lp->auto_neg)
+			return 0;
+
 		u32 autoneg_complete;
 
 		autoneg_complete = (axienet_ior(lp, XXV_STAT_AN_STS_OFFSET) &
@@ -5503,6 +5508,10 @@ static int axienet_probe(struct platform_device *pdev)
 						 "xlnx,eth-hasnobuf");
 	lp->eth_hasptp = of_property_read_bool(pdev->dev.of_node,
 					       "xlnx,eth-hasptp");
+
+	if (lp->axienet_config->mactype == XAXIENET_10G_25G)
+		lp->auto_neg = of_property_read_bool(pdev->dev.of_node,
+						     "xlnx,has-auto-neg");
 
 	if (lp->axienet_config->mactype == XAXIENET_10G_25G  ||
 	    lp->axienet_config->mactype == XAXIENET_1G_10G_25G)
