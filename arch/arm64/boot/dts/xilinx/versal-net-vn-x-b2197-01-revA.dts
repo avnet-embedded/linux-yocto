@@ -13,7 +13,7 @@
 #include "versal-net.dtsi"
 #include "versal-net-clk-ccf.dtsi"
 #include <dt-bindings/gpio/gpio.h>
-#include <dt-bindings/power/xlnx-versal-net-power.h>
+#include "xlnx-versal-net-power.h"
 
 / {
 	compatible = "xlnx,versal-net-vnx-revA", "xlnx,versal-net-vnx", "xlnx,versal-net";

@@ -12,7 +12,6 @@
  */
 
 #include <linux/bits.h>
-#include <dt-bindings/power/xlnx-versal-regnode.h>
 #include "versal-sysmon.h"
 
 #define SYSMON_EVENT_WORK_DELAY_MS	1000
