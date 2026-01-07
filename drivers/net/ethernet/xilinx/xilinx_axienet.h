@@ -379,6 +379,7 @@
 #define XAE_PHY_TYPE_SGMII		4
 #define XAE_PHY_TYPE_1000BASE_X		5
 #define XAE_PHY_TYPE_2500		6
+#define XXE_PHY_TYPE_USXGMII		7
 
  /* Total number of entries in the hardware multicast table. */
 #define XAE_MULTICAST_CAM_TABLE_NUM	4
@@ -478,6 +479,10 @@ enum temac_stat {
 #define XXV_STAT_GTWIZ_OFFSET		0x000004A0
 #define XXV_CONFIG_REVISION		0x00000024
 #define XXV_AN_CTL1_OFFSET		0x000000e0
+#define XXV_USXGMII_AN_OFFSET		0x000000C8
+#define XXV_USXGMII_AN_STS_OFFSET	0x00000458
+
+#define XXVS_RESET_OFFSET		0x00000004
 
 /* XXV MAC Register Mask Definitions */
 #define XXV_GT_RESET_MASK	BIT(0)
@@ -501,6 +506,25 @@ enum temac_stat {
 #define XXV_RX_PAUSE_MASK	BIT(5)
 #define XXV_STAT_CORE_SPEED_RTSW_MASK	BIT(1)
 #define XXV_STAT_CORE_SPEED_10G_MASK	BIT(0)
+
+/* USXGMII Register Mask Definitions  */
+#define USXGMII_AN_EN		BIT(5)
+#define USXGMII_AN_RESET	BIT(6)
+#define USXGMII_AN_RESTART	BIT(7)
+#define USXGMII_EN		BIT(16)
+#define USXGMII_RATE_MASK	0x0E000700
+#define USXGMII_RATE_1G		0x04000200
+#define USXGMII_RATE_2G5	0x08000400
+#define USXGMII_RATE_10M	0x0
+#define USXGMII_RATE_100M	0x02000100
+#define USXGMII_RATE_5G		0x0A000500
+#define USXGMII_RATE_10G	0x06000300
+#define USXGMII_FD		BIT(28)
+#define USXGMII_LINK_STS	BIT(31)
+#define USXGMII_RESET		(BIT(0) | BIT(29) | BIT(30) | BIT(31))
+
+/* USXGMII AN STS register mask definitions */
+#define USXGMII_AN_STS_COMP_MASK	BIT(16)
 
 /* MCDMA Register Definitions */
 #define XMCDMA_CR_OFFSET	0x00
@@ -782,6 +806,7 @@ struct skbuf_dma_descriptor {
  * @chan_id:  MCMDA Channel id used in conjunction with weight parameter.
  * @weight:   MCDMA Channel weight value to be configured for.
  * @dma_mask: Specify the width of the DMA address space.
+ * @usxgmii_rate: USXGMII PHY speed.
  */
 struct axienet_local {
 	struct net_device *ndev;
@@ -882,6 +907,7 @@ struct axienet_local {
 	u16 weight;
 
 	u32 dma_mask;
+	u32 usxgmii_rate;
 };
 
 /**
@@ -1000,6 +1026,7 @@ struct axienet_config {
 			struct clk **axis_clk, struct clk **ref_clk,
 			struct clk **dclk);
 	u32 tx_ptplen;
+	int (*gt_reset)(struct net_device *ndev);
 };
 
 /**
