@@ -275,6 +275,7 @@
 #define XAE_EMMC_LINKSPD_10	0x00000000 /* Link Speed mask for 10 Mbit */
 #define XAE_EMMC_LINKSPD_100	0x40000000 /* Link Speed mask for 100 Mbit */
 #define XAE_EMMC_LINKSPD_1000	0x80000000 /* Link Speed mask for 1000 Mbit */
+#define XAE_EMMC_LINKSPD_2500	0x80000000 /* Link Speed mask for 2500 Mbit */
 
 /* Bit masks for Axi Ethernet PHYC register */
 #define XAE_PHYC_SGMIILINKSPEED_MASK	0xC0000000 /* SGMII link speed mask*/
@@ -336,6 +337,7 @@
 #define XAE_PHY_TYPE_RGMII_2_0		3
 #define XAE_PHY_TYPE_SGMII		4
 #define XAE_PHY_TYPE_1000BASE_X		5
+#define XAE_PHY_TYPE_2500		6
 
  /* Total number of entries in the hardware multicast table. */
 #define XAE_MULTICAST_CAM_TABLE_NUM	4
@@ -547,6 +549,7 @@ struct skbuf_dma_descriptor {
  * @rx_ring_tail: RX skb ring buffer tail index.
  * @eth_hasnobuf: Ethernet is configured in Non buf mode.
  * @axienet_config: Ethernet config structure
+ * @max_speed: Maximum possible MAC speed.
  */
 struct axienet_local {
 	struct net_device *ndev;
@@ -630,16 +633,17 @@ struct axienet_local {
 	int rx_ring_tail;
 	bool eth_hasnobuf;
 	const struct axienet_config *axienet_config;
+	u32 max_speed;		/* Max MAC speed */
 };
 
 /**
  * enum axienet_ip_type - AXIENET IP/MAC type.
  *
- * @XAXIENET_1G:	 IP is 1G MAC
+ * @XAXIENET_1_2p5G:    IP is 1G/2.5G
  *
  */
 enum axienet_ip_type {
-	XAXIENET_1G = 0,
+	XAXIENET_1_2p5G = 0,
 };
 
 struct axienet_config {

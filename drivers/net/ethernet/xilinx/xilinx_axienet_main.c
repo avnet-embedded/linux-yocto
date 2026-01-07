@@ -1772,7 +1772,9 @@ static int axienet_stop(struct net_device *ndev)
 	}
 
 	netdev_reset_queue(ndev);
-	axienet_iow(lp, XAE_IE_OFFSET, 0);
+
+	if (lp->axienet_config->mactype == XAXIENET_1_2p5G)
+		axienet_iow(lp, XAE_IE_OFFSET, 0);
 
 	if (lp->eth_irq > 0)
 		free_irq(lp->eth_irq, ndev);
@@ -2636,6 +2638,9 @@ static void axienet_mac_link_up(struct phylink_config *config,
 	emmc_reg &= ~XAE_EMMC_LINKSPEED_MASK;
 
 	switch (speed) {
+	case SPEED_2500:
+		emmc_reg |= XAE_EMMC_LINKSPD_2500;
+		break;
 	case SPEED_1000:
 		emmc_reg |= XAE_EMMC_LINKSPD_1000;
 		break;
@@ -2766,16 +2771,18 @@ static void axienet_dma_err_handler(struct work_struct *work)
 	axienet_setoptions(ndev, lp->options);
 }
 
-static const struct axienet_config axienet_1g_config = {
-	.mactype = XAXIENET_1G,
+static const struct axienet_config axienet_1_2p5g_config = {
+	.mactype = XAXIENET_1_2p5G,
 	.setoptions = axienet_setoptions,
 };
 
 /* Match table for of_platform binding */
 static const struct of_device_id axienet_of_match[] = {
-	{ .compatible = "xlnx,axi-ethernet-1.00.a", .data = &axienet_1g_config},
-	{ .compatible = "xlnx,axi-ethernet-1.01.a", .data = &axienet_1g_config},
-	{ .compatible = "xlnx,axi-ethernet-2.01.a", .data = &axienet_1g_config},
+	{ .compatible = "xlnx,axi-ethernet-1.00.a", .data = &axienet_1_2p5g_config},
+	{ .compatible = "xlnx,axi-ethernet-1.01.a", .data = &axienet_1_2p5g_config},
+	{ .compatible = "xlnx,axi-ethernet-2.01.a", .data = &axienet_1_2p5g_config},
+	{ .compatible = "xlnx,axi-2_5-gig-ethernet-1.0",
+						.data = &axienet_1_2p5g_config},
 	{},
 };
 
@@ -2951,11 +2958,10 @@ static int axienet_probe(struct platform_device *pdev)
 		if (ret)
 			goto cleanup_clk;
 	}
-	if (lp->switch_x_sgmii && lp->phy_mode != PHY_INTERFACE_MODE_SGMII &&
-	    lp->phy_mode != PHY_INTERFACE_MODE_1000BASEX) {
-		dev_err(&pdev->dev, "xlnx,switch-x-sgmii only supported with SGMII or 1000BaseX\n");
-		ret = -EINVAL;
-		goto cleanup_clk;
+
+	if (lp->axienet_config->mactype == XAXIENET_1_2p5G) {
+		ret = of_property_read_u32(pdev->dev.of_node, "max-speed",
+					   &lp->max_speed);
 	}
 
 	lp->eth_hasnobuf = of_property_read_bool(pdev->dev.of_node,
@@ -3072,7 +3078,12 @@ static int axienet_probe(struct platform_device *pdev)
 		ndev->netdev_ops = &axienet_netdev_dmaengine_ops;
 	else
 		ndev->netdev_ops = &axienet_netdev_ops;
-	/* Check for Ethernet core IRQ (optional) */
+
+	if (lp->axienet_config->mactype == XAXIENET_1_2p5G &&
+	    !lp->eth_hasnobuf)
+		/* Check for Ethernet core IRQ (optional) */
+		lp->eth_irq = platform_get_irq_optional(pdev, 0);
+
 	if (lp->eth_irq <= 0)
 		dev_info(&pdev->dev, "Ethernet core IRQ not defined\n");
 
@@ -3133,13 +3144,25 @@ static int axienet_probe(struct platform_device *pdev)
 	lp->phylink_config.mac_capabilities = MAC_SYM_PAUSE | MAC_ASYM_PAUSE |
 		MAC_10FD | MAC_100FD | MAC_1000FD;
 
-	__set_bit(lp->phy_mode, lp->phylink_config.supported_interfaces);
-	if (lp->switch_x_sgmii) {
-		__set_bit(PHY_INTERFACE_MODE_1000BASEX,
-			  lp->phylink_config.supported_interfaces);
-		__set_bit(PHY_INTERFACE_MODE_SGMII,
-			  lp->phylink_config.supported_interfaces);
+	if (lp->axienet_config->mactype == XAXIENET_1_2p5G) {
+		/* AXI 1G/2.5G */
+		if (lp->max_speed == SPEED_1000) {
+			lp->phylink_config.mac_capabilities = (MAC_10FD | MAC_100FD |
+							       MAC_1000FD);
+			if (lp->switch_x_sgmii)
+				__set_bit(PHY_INTERFACE_MODE_SGMII |
+					  PHY_INTERFACE_MODE_1000BASEX,
+				lp->phylink_config.supported_interfaces);
+			} else {
+			/* 2.5G speed */
+				lp->phylink_config.mac_capabilities |= MAC_2500FD;
+				if (lp->switch_x_sgmii)
+					__set_bit(PHY_INTERFACE_MODE_SGMII |
+						  PHY_INTERFACE_MODE_1000BASEX,
+					lp->phylink_config.supported_interfaces);
+			}
 	}
+	__set_bit(lp->phy_mode, lp->phylink_config.supported_interfaces);
 
 	lp->phylink = phylink_create(&lp->phylink_config, pdev->dev.fwnode,
 				     lp->phy_mode,
