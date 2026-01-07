@@ -35,7 +35,7 @@
 #define XEOE_UDP_GRO_SR_OFFSET(chan_id)		(0x04 + ((chan_id) - 1) * 0x40)
 #define XEOE_UDP_GRO_SRC_IP_OFFSET(chan_id)	(0x08 + ((chan_id) - 1) * 0x40)
 #define XEOE_UDP_GRO_DST_IP_OFFSET(chan_id)	(0x0C + ((chan_id) - 1) * 0x40)
-#define XEOE_UDP_GRO_PORT__OFFSET(chan_id)	(0x10 + ((chan_id) - 1) * 0x40)
+#define XEOE_UDP_GRO_PORT_OFFSET(chan_id)	(0x10 + ((chan_id) - 1) * 0x40)
 #define XEOE_UDP_GRO_FRAG		0x10000000
 #define XEOE_UDP_GRO_TUPLE		BIT(3)
 #define XEOE_UDP_GRO_CHKSUM		BIT(1)
@@ -55,10 +55,21 @@
 #define XEOE_UDP_GRO_RX_CSUM_MASK	GENMASK(31, 16)
 #define XEOE_UDP_GRO_RX_CSUM_SHIFT	16
 
+#define XEOE_UDP_GRO_DSTPORT_SHIFT	16
+#define XEOE_UDP_GRO_PROTOCOL_SHIFT	24
+
+#define XEOE_UDP_GRO_DST_PORT_MASK	GENMASK(31, 16)
+#define XEOE_UDP_GRO_PROTOCOL_MASK	GENMASK(31, 24)
+
 /* EOE Features */
 #define RX_HW_NO_OFFLOAD		BIT(0)
 #define RX_HW_CSO			BIT(1)
 #define RX_HW_UDP_GRO			BIT(2)
+
+struct ethtool_rx_fs_item {
+	struct ethtool_rx_flow_spec fs;
+	struct list_head list;
+};
 
 #ifdef CONFIG_XILINX_AXI_EOE
 int axienet_eoe_probe(struct platform_device *pdev);
@@ -75,6 +86,15 @@ void __maybe_unused axienet_eoe_mcdma_gro_bd_free(struct net_device *ndev,
 int axienet_eoe_recv_gro(struct net_device *ndev,
 			 int budget,
 			 struct axienet_dma_q *q);
+int axienet_eoe_add_udp_port_register(struct net_device *ndev,
+				      struct ethtool_rx_flow_spec *fs,
+				      int chan_id, struct axienet_local *lp);
+int axienet_eoe_add_flow_filter(struct net_device *ndev, struct ethtool_rxnfc *cmd);
+int axienet_eoe_del_flow_filter(struct net_device *ndev, struct ethtool_rxnfc *cmd);
+int axienet_eoe_get_flow_entry(struct net_device *ndev, struct ethtool_rxnfc *cmd);
+int axienet_eoe_get_all_flow_entries(struct net_device *ndev,
+				     struct ethtool_rxnfc *cmd,
+				     u32 *rule_locs);
 #else
 static inline int axienet_eoe_probe(struct platform_device *pdev)
 {

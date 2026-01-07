@@ -907,6 +907,12 @@ struct aximcdma_bd {
 #else
 #define XAE_MAX_QUEUES		1
 #endif
+
+struct ethtool_rx_fs_list {
+	struct list_head list;
+	unsigned int count;
+};
+
 /**
  * struct skbuf_dma_descriptor - skb for each dma descriptor
  * @sgl: Pointer for sglist.
@@ -1025,6 +1031,8 @@ struct skbuf_dma_descriptor {
  * @eoe_connected: Tells whether ethernet offload IP is connected to Ethernet IP.
  * @eoe_features: EOE IP supported configuration.
  * @inetaddr_notifier: Notifier callback function for specific event.
+ * @rx_fs_list: RX queue filter rule set.
+ * @assigned_rx_port: Ports assigned to GRO Queue.
  * @gt_reset_done: GT Reset Status
  * @use_gt_gpio: flag to check GT gpio enabled
  */
@@ -1146,6 +1154,8 @@ struct axienet_local {
 	bool eoe_connected;
 	u32 eoe_features;
 	struct notifier_block inetaddr_notifier;
+	struct ethtool_rx_fs_list rx_fs_list;
+	u16 assigned_rx_port[XAE_MAX_QUEUES];
 	bool gt_reset_done;
 	bool use_gt_gpio;
 };
