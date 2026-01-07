@@ -2119,7 +2119,8 @@ static int axienet_queue_xmit(struct sk_buff *skb,
 #endif
 
 	if (skb->ip_summed == CHECKSUM_PARTIAL && !lp->eth_hasnobuf &&
-	    lp->axienet_config->mactype == XAXIENET_1_2p5G) {
+	    lp->axienet_config->mactype == XAXIENET_1_2p5G &&
+	    !(lp->eoe_connected)) {
 		if (lp->features & XAE_FEATURE_FULL_TX_CSUM) {
 			/* Tx Full Checksum Offload Enabled */
 			cur_p->app0 |= 2;
@@ -2132,7 +2133,8 @@ static int axienet_queue_xmit(struct sk_buff *skb,
 		}
 	} else if (skb->ip_summed == CHECKSUM_UNNECESSARY &&
 		   !lp->eth_hasnobuf &&
-		   (lp->axienet_config->mactype == XAXIENET_1_2p5G)) {
+		   (lp->axienet_config->mactype == XAXIENET_1_2p5G) &&
+		   !(lp->eoe_connected)) {
 		cur_p->app0 |= 2; /* Tx Full Checksum Offload Enabled */
 	}
 
@@ -2177,6 +2179,18 @@ static int axienet_queue_xmit(struct sk_buff *skb,
 	}
 
 	cur_p->tx_desc_mapping = DESC_DMA_MAP_SINGLE;
+
+	/* Update the APP fields for UDP segmentation by HW, if it is enabled.
+	 * This automatically enables the checksum calculation by HW.
+	 * If UDP segmentation by HW is not supported, then update the APP fields for
+	 * checksum calculation by HW, if it is enabled.
+	 */
+#ifdef CONFIG_AXIENET_HAS_MCDMA
+	if (ndev->hw_features & NETIF_F_GSO_UDP_L4)
+		axienet_eoe_config_hwgso(ndev, skb, cur_p);
+	else if (ndev->hw_features & NETIF_F_IP_CSUM)
+		axienet_eoe_config_hwcso(ndev, cur_p);
+#endif
 
 	for (ii = 0; ii < num_frag; ii++) {
 		u32 len;
@@ -3230,6 +3244,18 @@ static int axienet_change_mtu(struct net_device *ndev, int new_mtu)
 	return 0;
 }
 
+static netdev_features_t axienet_features_check(struct sk_buff *skb,
+						struct net_device *dev,
+						netdev_features_t features)
+{
+	struct axienet_local *lp = netdev_priv(dev);
+
+	if (lp->eoe_connected && (ip_hdr(skb)->version != 4))
+		features &= ~(NETIF_F_CSUM_MASK | NETIF_F_GSO_MASK);
+
+	return features;
+}
+
 #ifdef CONFIG_NET_POLL_CONTROLLER
 /**
  * axienet_poll_controller - Axi Ethernet poll mechanism.
@@ -3490,6 +3516,7 @@ static const struct net_device_ops axienet_netdev_ops = {
 #ifdef CONFIG_NET_POLL_CONTROLLER
 	.ndo_poll_controller = axienet_poll_controller,
 #endif
+	.ndo_features_check = axienet_features_check,
 };
 
 static const struct net_device_ops axienet_netdev_dmaengine_ops = {
@@ -5620,6 +5647,13 @@ static int axienet_probe(struct platform_device *pdev)
 				goto cleanup_clk;
 			}
 		}
+
+		/* Set the TX coalesce count to 1. With offload enabled, there are not as
+		 * many interrupts as before and the interrupt for every 64KB segment needs
+		 * to be handled immediately to ensure better performance.
+		 */
+		if (ndev->hw_features & NETIF_F_GSO_UDP_L4)
+			lp->coalesce_count_tx = XMCDMA_DFT_TX_THRESHOLD;
 	} else {
 		struct xilinx_vdma_config cfg;
 		struct dma_chan *tx_chan;
