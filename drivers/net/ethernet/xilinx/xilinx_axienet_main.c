@@ -6022,8 +6022,9 @@ static int axienet_probe(struct platform_device *pdev)
 		} else {
 			/* AXI 1G/2.5G */
 			if (lp->max_speed == SPEED_1000) {
-				lp->phylink_config.mac_capabilities = (MAC_10FD | MAC_100FD |
-								       MAC_1000FD);
+				lp->phylink_config.mac_capabilities |= (MAC_10FD |
+									MAC_100FD |
+									MAC_1000FD);
 				if (lp->switch_x_sgmii)
 					__set_bit(PHY_INTERFACE_MODE_SGMII |
 						  PHY_INTERFACE_MODE_1000BASEX,
