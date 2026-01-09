@@ -8,7 +8,6 @@
 
 #include "core.h"
 
-#define MXIC_NOR_OP_RD_CR2	0x71		/* Read configuration register 2 opcode */
 #define MXIC_NOR_OP_WR_CR2	0x72		/* Write configuration register 2 opcode */
 #define MXIC_NOR_ADDR_CR2_MODE	0x00000000	/* CR2 address for setting spi/sopi/dopi mode */
 #define MXIC_NOR_ADDR_CR2_DC	0x00000300	/* CR2 address for setting dummy cycles */
@@ -24,6 +23,132 @@
 		   SPI_MEM_OP_ADDR(4, addr, 0),			\
 		   SPI_MEM_OP_NO_DUMMY,				\
 		   SPI_MEM_OP_DATA_OUT(ndata, buf, 0))
+#define SPINOR_OP_MX_DTR_RD	0xee	/* Fast Read opcode in DTR mode */
+#define SPINOR_OP_MX_RD_ANY_REG	0x71	/* Read volatile register */
+#define SPINOR_REG_MX_CFR0V	0x00	/* For setting octal DTR mode */
+#define SPINOR_MX_OCT_DTR	0x02	/* Enable Octal DTR. */
+#define SPINOR_REG_MX_CFR2V		0x00000300
+#define SPINOR_REG_MX_CFR2V_ECC		0x00000000
+#define SPINOR_MX_CFR2_DC_VALUE		0x000  /* For setting dummy cycles to 20(default) */
+
+static int mx25um51345g_set_4byte(struct spi_nor *nor, bool enable)
+{
+	(void)enable;
+
+	return 0;
+}
+
+static void mx25um51345g_default_init_fixups(struct spi_nor *nor)
+{
+	u8 id_byte1, id_byte2;
+
+	nor->params->set_4byte_addr_mode = mx25um51345g_set_4byte;
+
+	/*
+	 * Macronix Read Id bytes are always output in STR mode. Since tuning
+	 * is based on Read Id command, adjust the Read Id bytes that will
+	 * match the Read Id output in DTR mode.
+	 */
+	id_byte1 = nor->spimem->device_id[1];
+	id_byte2 = nor->spimem->device_id[2];
+	nor->spimem->device_id[1] = nor->spimem->device_id[0];
+	nor->spimem->device_id[2] = id_byte1;
+	nor->spimem->device_id[3] = id_byte1;
+	nor->spimem->device_id[4] = id_byte2;
+	nor->spimem->device_id[5] = id_byte2;
+
+	spi_nor_set_erase_type(&nor->params->erase_map.erase_type[1],
+			       nor->info->sector_size, SPINOR_OP_BE_4K_4B);
+	nor->params->page_programs[SNOR_CMD_PP_8_8_8_DTR].opcode =
+				SPINOR_OP_PP_4B;
+}
+
+static int mx25um51345g_post_sfdp_fixup(struct spi_nor *nor)
+{
+	struct spi_nor_flash_parameter *params = nor->params;
+
+	/* Set the Fast Read settings. */
+	params->hwcaps.mask |= SNOR_HWCAPS_READ_8_8_8_DTR;
+	spi_nor_set_read_settings(&params->reads[SNOR_CMD_READ_8_8_8_DTR],
+				  0, 20, SPINOR_OP_MX_DTR_RD,
+				  SNOR_PROTO_8_8_8_DTR);
+
+	nor->cmd_ext_type = SPI_NOR_EXT_INVERT;
+	params->rdsr_dummy = 8;
+	params->rdsr_addr_nbytes = 0;
+
+	/*
+	 * The BFPT quad enable field is set to a reserved value so the quad
+	 * enable function is ignored by spi_nor_parse_bfpt(). Make sure we
+	 * disable it.
+	 */
+	params->quad_enable = NULL;
+
+	return 0;
+}
+
+static int mx25um51345g_config_dummy(struct spi_nor *nor)
+{
+	struct spi_nor_flash_parameter *params = nor->params;
+	struct spi_mem_op op;
+	int ret;
+	u8 *buf = nor->bouncebuf;
+
+	params->writesize = 1;
+	op = (struct spi_mem_op)
+		SPI_MEM_OP(SPI_MEM_OP_CMD(SPINOR_OP_MX_RD_ANY_REG, 0),
+			   SPI_MEM_OP_ADDR(4, SPINOR_REG_MX_CFR2V, 1),
+			   SPI_MEM_OP_NO_DUMMY,
+			   SPI_MEM_OP_DATA_IN(1, buf, 1));
+
+	ret = spi_nor_read_any_reg(nor, &op, nor->reg_proto);
+	if (ret)
+		return ret;
+
+	*(buf) &= SPINOR_MX_CFR2_DC_VALUE;
+	op = (struct spi_mem_op)
+		SPI_MEM_OP(SPI_MEM_OP_CMD(MXIC_NOR_OP_WR_CR2, 1),
+			   SPI_MEM_OP_ADDR(4, SPINOR_REG_MX_CFR2V, 1),
+			   SPI_MEM_OP_NO_DUMMY,
+			   SPI_MEM_OP_DATA_OUT(1, buf, 1));
+
+	ret = spi_nor_write_any_volatile_reg(nor, &op, nor->reg_proto);
+	if (ret)
+		return ret;
+	op = (struct spi_mem_op)
+		SPI_MEM_OP(SPI_MEM_OP_CMD(SPINOR_OP_MX_RD_ANY_REG, 0),
+			   SPI_MEM_OP_ADDR(4, SPINOR_REG_MX_CFR2V, 1),
+			   SPI_MEM_OP_NO_DUMMY,
+			   SPI_MEM_OP_DATA_IN(1, buf, 1));
+
+	ret = spi_nor_read_any_reg(nor, &op, nor->reg_proto);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static int mx25um51345g_late_init(struct spi_nor *nor)
+{
+	int ret = 0;
+
+	ret = mx25um51345g_config_dummy(nor);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
+static struct spi_nor_fixups mx25uw51345g_fixups = {
+	.default_init = mx25um51345g_default_init_fixups,
+	.post_sfdp = mx25um51345g_post_sfdp_fixup,
+	.late_init = mx25um51345g_late_init,
+};
+
+static struct spi_nor_fixups mx25um51345g_fixups = {
+	.default_init = mx25um51345g_default_init_fixups,
+	.post_sfdp = mx25um51345g_post_sfdp_fixup,
+};
 
 static int
 mx25l25635_post_bfpt_fixups(struct spi_nor *nor,
@@ -243,6 +368,35 @@ static const struct flash_info macronix_nor_parts[] = {
 		      SPI_NOR_4BIT_BP | SPI_NOR_BP3_SR_BIT5,
 		.no_sfdp_flags = SPI_NOR_QUAD_READ,
 	}, {
+		.id = SNOR_ID(0xc2, 0x80, 0x3c),
+		.name = "mx66um2g45g",
+		.size = SZ_256,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_TB_SR_BIT6 |
+			SPI_NOR_4BIT_BP | SPI_NOR_BP3_SR_BIT5 | SPI_NOR_HAS_CR_TB,
+		.no_sfdp_flags = SECT_4K | SPI_NOR_OCTAL_READ |
+			SPI_NOR_OCTAL_DTR_READ | SPI_NOR_OCTAL_DTR_PP,
+		.fixup_flags = SPI_NOR_4B_OPCODES | SPI_NOR_IO_MODE_EN_VOLATILE,
+		.fixups = &mx25um51345g_fixups
+	}, {
+		.id = SNOR_ID(0xc2, 0x94, 0x3c),
+		.name = "mx66uw2g345gxrix0",
+		.size = SZ_256,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_TB_SR_BIT6 |
+			SPI_NOR_4BIT_BP | SPI_NOR_BP3_SR_BIT5 | SPI_NOR_HAS_CR_TB,
+		.no_sfdp_flags = SECT_4K | SPI_NOR_OCTAL_READ |
+			SPI_NOR_OCTAL_DTR_READ | SPI_NOR_OCTAL_DTR_PP,
+		.fixup_flags = SPI_NOR_4B_OPCODES | SPI_NOR_IO_MODE_EN_VOLATILE,
+		.fixups = &mx25uw51345g_fixups
+	}, {
+		.id = SNOR_ID(0xc2, 0x81, 0x3a),
+		.name = "mx25um51345g",
+		.size = SZ_4M,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_TB_SR_BIT6 |
+			SPI_NOR_4BIT_BP | SPI_NOR_BP3_SR_BIT5 | SPI_NOR_HAS_CR_TB,
+		.no_sfdp_flags = SECT_4K | SPI_NOR_OCTAL_READ |
+			SPI_NOR_OCTAL_DTR_READ | SPI_NOR_OCTAL_DTR_PP,
+		.fixups = &mx25um51345g_fixups
+	}, {
 		.id = SNOR_ID(0xc2, 0x28, 0x15),
 		.name = "mx25r1635f",
 		.size = SZ_2M,
@@ -260,15 +414,11 @@ static const struct flash_info macronix_nor_parts[] = {
 	}, {
 		/* MX25L3255E */
 		.id = SNOR_ID(0xc2, 0x9e, 0x16),
+		.name = "mx25l3255e",
+		.size = SZ_4M,
+		.no_sfdp_flags = SECT_4K,
 		.fixups = &mx25l3255e_fixups,
 	},
-	/*
-	 * This spares us of adding new flash entries for flashes that can be
-	 * initialized solely based on the SFDP data, but still need the
-	 * manufacturer hooks to set parameters that can't be discovered at SFDP
-	 * parsing time.
-	 */
-	{ .id = SNOR_ID(0xc2) }
 };
 
 static int macronix_nor_octal_dtr_en(struct spi_nor *nor)
@@ -303,6 +453,9 @@ static int macronix_nor_octal_dtr_en(struct spi_nor *nor)
 	for (i = 0; i < nor->info->id->len; i++)
 		if (buf[i * 2] != buf[(i * 2) + 1] || buf[i * 2] != nor->info->id->bytes[i])
 			return -EINVAL;
+
+	nor->flags &= ~SNOR_F_HAS_16BIT_SR;
+	nor->params->wrsr_dummy = 4;
 
 	return 0;
 }

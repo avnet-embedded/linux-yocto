@@ -925,6 +925,7 @@ int spi_nor_global_block_unlock(struct spi_nor *nor)
  */
 int spi_nor_write_sr(struct spi_nor *nor, const u8 *sr, size_t len)
 {
+	struct spi_nor_flash_parameter *params = nor->params;
 	int ret;
 
 	ret = spi_nor_write_enable(nor);
@@ -933,6 +934,9 @@ int spi_nor_write_sr(struct spi_nor *nor, const u8 *sr, size_t len)
 
 	if (nor->spimem) {
 		struct spi_mem_op op = SPI_NOR_WRSR_OP(sr, len);
+
+		if (nor->reg_proto == SNOR_PROTO_8_8_8_DTR)
+			op.addr.nbytes = params->wrsr_dummy;
 
 		spi_nor_spimem_setup_op(nor, &op, nor->reg_proto);
 
@@ -3314,6 +3318,9 @@ static void spi_nor_init_flags(struct spi_nor *nor)
 		if (flags & SPI_NOR_TB_SR_BIT6)
 			nor->flags |= SNOR_F_HAS_SR_TB_BIT6;
 	}
+
+	if (flags & SPI_NOR_HAS_CR_TB)
+		nor->flags |= SNOR_F_HAS_CR_TB;
 
 	if (flags & SPI_NOR_4BIT_BP) {
 		nor->flags |= SNOR_F_HAS_4BIT_BP;
