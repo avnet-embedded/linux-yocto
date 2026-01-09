@@ -31,6 +31,10 @@
 #define ZYNQMP_AES_WRONG_KEY_SRC_ERR	0x13
 #define ZYNQMP_AES_PUF_NOT_PROGRAMMED	0xE300
 #define XILINX_KEY_MAGIC		0x3EA0
+#define VERSAL_AES_INVALID_PARAM			0x51
+#define VERSAL_AES_GCM_TAG_MISMATCH			0x40
+#define VERSAL_AES_UNALIGNED_SIZE_ERROR		0x5c
+#define VERSAL_AES_ZERO_PUF_KEY_NOT_ALLOWED	0x5B
 
 enum zynqmp_aead_op {
 	ZYNQMP_AES_DECRYPT = 0,
@@ -233,6 +237,26 @@ freemem:
 	return ret;
 }
 
+static int versal_aes_fw_error_decode(struct device *dev, int status)
+{
+	switch (status) {
+	case VERSAL_AES_INVALID_PARAM:
+		dev_err(dev, "ERROR: On invalid parameter\n");
+		return -EINVAL;
+	case VERSAL_AES_GCM_TAG_MISMATCH:
+		return -EBADMSG;
+	case VERSAL_AES_UNALIGNED_SIZE_ERROR:
+		dev_err(dev, "ERROR: AES unaligned size error\n");
+		return -EINVAL;
+	case VERSAL_AES_ZERO_PUF_KEY_NOT_ALLOWED:
+		dev_err(dev, "ERROR: Zero PUF key not allowed\n");
+		return -EINVAL;
+	default:
+		dev_err(dev, "ERROR: Unknown AES FW error code: %u\n", status);
+		return -EINVAL;
+	}
+}
+
 static int versal_aes_aead_cipher(struct aead_request *req)
 {
 	struct crypto_aead *aead = crypto_aead_reqtfm(req);
@@ -243,6 +267,7 @@ static int versal_aes_aead_cipher(struct aead_request *req)
 	struct device *dev = tfm_ctx->dev;
 	struct versal_init_ops *hwreq;
 	struct versal_in_params *in;
+	unsigned int fw_status = 0;
 	u32 gcm_offset, out_len;
 	size_t dmabuf_size;
 	size_t kbuf_size;
@@ -312,36 +337,33 @@ static int versal_aes_aead_cipher(struct aead_request *req)
 	in->is_last = 1;
 	gcm_offset = req->assoclen + in->size;
 	dma_sync_single_for_device(dev, dma_addr_hw_req, dmabuf_size, DMA_BIDIRECTIONAL);
-	ret = versal_pm_aes_op_init(dma_addr_hw_req);
+	ret = versal_pm_aes_op_init(dma_addr_hw_req, &fw_status);
 	if (ret)
 		goto clearkey;
 
 	if (req->assoclen > 0) {
 		/* Currently GMAC is OFF by default */
-		ret = versal_pm_aes_update_aad(dma_addr_data, req->assoclen);
+		ret = versal_pm_aes_update_aad(dma_addr_data, req->assoclen, &fw_status);
 		if (ret)
 			goto clearkey;
 	}
 	if (rq_ctx->op == ZYNQMP_AES_ENCRYPT) {
 		ret = versal_pm_aes_enc_update(dma_addr_in,
-					       dma_addr_data + req->assoclen);
+					       dma_addr_data + req->assoclen, &fw_status);
 		if (ret)
 			goto clearkey;
 
-		ret = versal_pm_aes_enc_final(dma_addr_data + gcm_offset);
+		ret = versal_pm_aes_enc_final(dma_addr_data + gcm_offset, &fw_status);
 		if (ret)
 			goto clearkey;
 	} else {
 		ret = versal_pm_aes_dec_update(dma_addr_in,
-					       dma_addr_data + req->assoclen);
+					       dma_addr_data + req->assoclen, &fw_status);
 		if (ret)
 			goto clearkey;
-
-		ret = versal_pm_aes_dec_final(dma_addr_data + gcm_offset);
-		if (ret) {
-			ret = -EBADMSG;
+		ret = versal_pm_aes_dec_final(dma_addr_data + gcm_offset, &fw_status);
+		if (ret)
 			goto clearkey;
-		}
 	}
 	dma_unmap_single(dev, dma_addr_data, kbuf_size, DMA_BIDIRECTIONAL);
 	dma_unmap_single(dev, dma_addr_hw_req, dmabuf_size, DMA_BIDIRECTIONAL);
@@ -365,6 +387,8 @@ buf1_free:
 	memzero_explicit(kbuf, kbuf_size);
 	kfree(kbuf);
 err:
+	if (ret && fw_status)
+		ret = versal_aes_fw_error_decode(dev, fw_status);
 	return ret;
 }
 
