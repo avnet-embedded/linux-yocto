@@ -54,7 +54,7 @@ int zynqmp_pm_sha_hash(const u64 address, const u32 size, const u32 flags);
 int versal_pm_puf_registration(const u64 in_addr);
 int versal_pm_puf_regeneration(const u64 in_addr);
 int versal_pm_puf_clear_id(void);
-int versal_pm_sha_hash(const u64 src, const u64 dst, const u32 size);
+int versal_pm_sha_hash(const u64 src, const u64 dst, const u32 size, u32 *out_status);
 int versal_pm_rsa_encrypt(const u64 in_params, const u64 in_addr);
 int versal_pm_rsa_decrypt(const u64 in_params, const u64 in_addr);
 int versal_pm_ecdsa_validate_key(const u64 key_addr, const u32 curveid);
@@ -63,12 +63,12 @@ int zynqmp_pm_aes_engine(const u64 address, u32 *out);
 int versal_pm_aes_key_write(const u32 keylen,
 			    const u32 keysrc, const u64 keyaddr);
 int versal_pm_aes_key_zero(const u32 keysrc);
-int versal_pm_aes_op_init(const u64 hw_req);
-int versal_pm_aes_update_aad(const u64 aad_addr, const u32 aad_len);
-int versal_pm_aes_enc_update(const u64 in_params, const u64 in_addr);
-int versal_pm_aes_dec_update(const u64 in_params, const u64 in_addr);
-int versal_pm_aes_dec_final(const u64 gcm_addr);
-int versal_pm_aes_enc_final(const u64 gcm_addr);
+int versal_pm_aes_op_init(const u64 hw_req, u32 *out_status);
+int versal_pm_aes_update_aad(const u64 aad_addr, const u32 aad_len, u32 *out_status);
+int versal_pm_aes_enc_update(const u64 in_params, const u64 in_addr, u32 *out_status);
+int versal_pm_aes_dec_update(const u64 in_params, const u64 in_addr, u32 *out_status);
+int versal_pm_aes_dec_final(const u64 gcm_addr, u32 *out_status);
+int versal_pm_aes_enc_final(const u64 gcm_addr, u32 *out_status);
 int versal_pm_aes_init(void);
 #else
 static inline void *xlnx_get_crypto_dev_data(struct xlnx_feature *feature_map)
@@ -102,7 +102,7 @@ static inline int versal_pm_puf_clear_id(void)
 	return -ENODEV;
 }
 
-static inline int versal_pm_sha_hash(const u64 src, const u64 dst, const u32 size)
+static inline int versal_pm_sha_hash(const u64 src, const u64 dst, const u32 size, u32 *out_status)
 {
 	return -ENODEV;
 }
@@ -146,35 +146,35 @@ static inline int versal_pm_aes_key_zero(const u32 keysrc)
 	return -ENODEV;
 }
 
-static inline int versal_pm_aes_op_init(const u64 hw_req)
+static inline int versal_pm_aes_op_init(const u64 hw_req, u32 *out_status)
 {
 	return -ENODEV;
 }
 
 static inline int versal_pm_aes_update_aad(const u64 aad_addr,
-					   const u32 aad_len)
+					   const u32 aad_len, u32 *out_status)
 {
 	return -ENODEV;
 }
 
 static inline int versal_pm_aes_enc_update(const u64 in_params,
-					   const u64 in_addr)
+					   const u64 in_addr, u32 *out_status)
 {
 	return -ENODEV;
 }
 
 static inline int versal_pm_aes_dec_update(const u64 in_params,
-					   const u64 in_addr)
+					   const u64 in_addr, u32 *out_status)
 {
 	return -ENODEV;
 }
 
-static inline int versal_pm_aes_enc_final(const u64 gcm_addr)
+static inline int versal_pm_aes_enc_final(const u64 gcm_addr, u32 *out_status)
 {
 	return -ENODEV;
 }
 
-static inline int versal_pm_aes_dec_final(const u64 gcm_addr)
+static inline int versal_pm_aes_dec_final(const u64 gcm_addr, u32 *out_status)
 {
 	return -ENODEV;
 }

@@ -79,15 +79,23 @@ EXPORT_SYMBOL_GPL(versal_pm_puf_regeneration);
  * @src:	Address of the data
  * @dst:	Address of the output buffer
  * @size:	Size of the data.
+ * @out_status:	Returned output value
  *
  * Return:	Returns status, either success or error code.
  */
-int versal_pm_sha_hash(const u64 src, const u64 dst, const u32 size)
+int versal_pm_sha_hash(const u64 src, const u64 dst, const u32 size, u32 *out_status)
 {
-	return zynqmp_pm_invoke_fn(XSECURE_API_SHA3_UPDATE, NULL, 5,
-				   lower_32_bits(src), upper_32_bits(src),
-				   size,
-				   lower_32_bits(dst), upper_32_bits(dst));
+	u32 ret_payload[PAYLOAD_ARG_CNT];
+	int ret;
+
+	if (!out_status)
+		return -EINVAL;
+	ret = zynqmp_pm_invoke_fn(XSECURE_API_SHA3_UPDATE, ret_payload, 5,
+							  lower_32_bits(src), upper_32_bits(src),
+							  size,
+							  lower_32_bits(dst), upper_32_bits(dst));
+	*out_status = ret_payload[0];
+	return ret;
 }
 EXPORT_SYMBOL_GPL(versal_pm_sha_hash);
 
@@ -195,16 +203,26 @@ EXPORT_SYMBOL_GPL(versal_pm_aes_key_zero);
 /**
  * versal_pm_aes_op_init - Init AES operation
  * @hw_req:	AES op init structure address
+ * @out_status:	Returned output value
  *
  * This function provides support to init AES operation.
  *
  * Return: Returns status, either success or error+reason
  */
-int versal_pm_aes_op_init(const u64 hw_req)
+int versal_pm_aes_op_init(const u64 hw_req, u32 *out_status)
 {
-	return zynqmp_pm_invoke_fn(XSECURE_API_AES_OP_INIT, NULL, 2,
-				   lower_32_bits(hw_req),
-				   upper_32_bits(hw_req));
+	u32 ret_payload[PAYLOAD_ARG_CNT];
+	int ret;
+
+	if (!out_status)
+		return -EINVAL;
+
+	ret = zynqmp_pm_invoke_fn(XSECURE_API_AES_OP_INIT, ret_payload, 2,
+				  lower_32_bits(hw_req),
+				  upper_32_bits(hw_req));
+	*out_status = ret_payload[0];
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(versal_pm_aes_op_init);
 
@@ -212,17 +230,27 @@ EXPORT_SYMBOL_GPL(versal_pm_aes_op_init);
  * versal_pm_aes_update_aad - AES update aad
  * @aad_addr:	AES aad address
  * @aad_len:	AES aad data length
+ * @out_status:	Returned output value
  *
  * This function provides support to update AAD data.
  *
  * Return: Returns status, either success or error+reason
  */
-int versal_pm_aes_update_aad(const u64 aad_addr, const u32 aad_len)
+int versal_pm_aes_update_aad(const u64 aad_addr, const u32 aad_len, u32 *out_status)
 {
-	return zynqmp_pm_invoke_fn(XSECURE_API_AES_UPDATE_AAD, NULL, 3,
-				   lower_32_bits(aad_addr),
-				   upper_32_bits(aad_addr),
-				   aad_len);
+	u32 ret_payload[PAYLOAD_ARG_CNT];
+	int ret;
+
+	if (!out_status)
+		return -EINVAL;
+
+	ret = zynqmp_pm_invoke_fn(XSECURE_API_AES_UPDATE_AAD, ret_payload, 3,
+				  lower_32_bits(aad_addr),
+				  upper_32_bits(aad_addr),
+				  aad_len);
+	*out_status = ret_payload[0];
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(versal_pm_aes_update_aad);
 
@@ -231,30 +259,50 @@ EXPORT_SYMBOL_GPL(versal_pm_aes_update_aad);
  * AES-GCM core.
  * @in_params:	Address of the AesParams structure
  * @in_addr:	Address of input buffer
+ * @out_status:	Returned output value
  *
  * Return:	Returns status, either success or error code.
  */
-int versal_pm_aes_enc_update(const u64 in_params, const u64 in_addr)
+int versal_pm_aes_enc_update(const u64 in_params, const u64 in_addr, u32 *out_status)
 {
-	return zynqmp_pm_invoke_fn(XSECURE_API_AES_ENCRYPT_UPDATE, NULL, 4,
-				   lower_32_bits(in_params),
-				   upper_32_bits(in_params),
-				   lower_32_bits(in_addr),
-				   upper_32_bits(in_addr));
+	u32 ret_payload[PAYLOAD_ARG_CNT];
+	int ret;
+
+	if (!out_status)
+		return -EINVAL;
+
+	ret = zynqmp_pm_invoke_fn(XSECURE_API_AES_ENCRYPT_UPDATE, ret_payload, 4,
+				  lower_32_bits(in_params),
+				  upper_32_bits(in_params),
+				  lower_32_bits(in_addr),
+				  upper_32_bits(in_addr));
+	*out_status = ret_payload[0];
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(versal_pm_aes_enc_update);
 
 /**
  * versal_pm_aes_enc_final - Access AES hardware to store the GCM tag
  * @gcm_addr:	Address of the gcm tag
+ * @out_status:	Returned output value
  *
  * Return:	Returns status, either success or error code.
  */
-int versal_pm_aes_enc_final(const u64 gcm_addr)
+int versal_pm_aes_enc_final(const u64 gcm_addr, u32 *out_status)
 {
-	return zynqmp_pm_invoke_fn(XSECURE_API_AES_ENCRYPT_FINAL, NULL, 2,
-				   lower_32_bits(gcm_addr),
-				   upper_32_bits(gcm_addr));
+	u32 ret_payload[PAYLOAD_ARG_CNT];
+	int ret;
+
+	if (!out_status)
+		return -EINVAL;
+
+	ret = zynqmp_pm_invoke_fn(XSECURE_API_AES_ENCRYPT_FINAL, ret_payload, 2,
+				  lower_32_bits(gcm_addr),
+				  upper_32_bits(gcm_addr));
+	*out_status = ret_payload[0];
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(versal_pm_aes_enc_final);
 
@@ -263,30 +311,50 @@ EXPORT_SYMBOL_GPL(versal_pm_aes_enc_final);
  * AES-GCM core.
  * @in_params:	Address of the AesParams structure
  * @in_addr:	Address of input buffer
+ * @out_status:	Returned output value
  *
  * Return:	Returns status, either success or error code.
  */
-int versal_pm_aes_dec_update(const u64 in_params, const u64 in_addr)
+int versal_pm_aes_dec_update(const u64 in_params, const u64 in_addr, u32 *out_status)
 {
-	return zynqmp_pm_invoke_fn(XSECURE_API_AES_DECRYPT_UPDATE, NULL, 4,
-				   lower_32_bits(in_params),
-				   upper_32_bits(in_params),
-				   lower_32_bits(in_addr),
-				   upper_32_bits(in_addr));
+	u32 ret_payload[PAYLOAD_ARG_CNT];
+	int ret;
+
+	if (!out_status)
+		return -EINVAL;
+
+	ret = zynqmp_pm_invoke_fn(XSECURE_API_AES_DECRYPT_UPDATE, ret_payload, 4,
+				  lower_32_bits(in_params),
+				  upper_32_bits(in_params),
+				  lower_32_bits(in_addr),
+				  upper_32_bits(in_addr));
+	*out_status = ret_payload[0];
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(versal_pm_aes_dec_update);
 
 /**
  * versal_pm_aes_dec_final - Access AES hardware to get the GCM tag
  * @gcm_addr:	Address of the gcm tag
+ * @out_status:	Returned output value
  *
  * Return:	Returns status, either success or error code.
  */
-int versal_pm_aes_dec_final(const u64 gcm_addr)
+int versal_pm_aes_dec_final(const u64 gcm_addr, u32 *out_status)
 {
-	return zynqmp_pm_invoke_fn(XSECURE_API_AES_DECRYPT_FINAL, NULL, 2,
-				   lower_32_bits(gcm_addr),
-				   upper_32_bits(gcm_addr));
+	u32 ret_payload[PAYLOAD_ARG_CNT];
+	int ret;
+
+	if (!out_status)
+		return -EINVAL;
+
+	ret = zynqmp_pm_invoke_fn(XSECURE_API_AES_DECRYPT_FINAL, ret_payload, 2,
+				  lower_32_bits(gcm_addr),
+				  upper_32_bits(gcm_addr));
+	*out_status = ret_payload[0];
+
+	return ret;
 }
 EXPORT_SYMBOL_GPL(versal_pm_aes_dec_final);
 
