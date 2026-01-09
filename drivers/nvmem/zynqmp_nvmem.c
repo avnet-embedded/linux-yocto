@@ -95,31 +95,32 @@ static int zynqmp_efuse_access(void *context, unsigned int offset,
 		}
 	}
 
-	efuse = dma_alloc_coherent(dev, sizeof(struct xilinx_efuse),
-				   &dma_addr, GFP_KERNEL);
+	efuse = kmalloc(sizeof(*efuse) + bytes, GFP_KERNEL);
 	if (!efuse)
 		return -ENOMEM;
-
-	data = dma_alloc_coherent(dev, bytes,
-				  &dma_buf, GFP_KERNEL);
-	if (!data) {
-		ret = -ENOMEM;
-		goto efuse_data_fail;
+	dma_addr = dma_map_single(dev, efuse, sizeof(*efuse) + bytes,
+				  DMA_BIDIRECTIONAL);
+	if (dma_mapping_error(dev, dma_addr)) {
+		kfree(efuse);
+		return -EIO;
 	}
-
+	data = (char *)efuse + sizeof(*efuse);
 	if (flag == EFUSE_WRITE) {
 		memcpy(data, val, bytes);
 		efuse->flag = EFUSE_WRITE;
 	} else {
 		efuse->flag = EFUSE_READ;
 	}
-
+	dma_buf = dma_addr + sizeof(*efuse);
 	efuse->src = dma_buf;
 	efuse->size = words;
 	efuse->offset = offset;
 	efuse->pufuserfuse = pufflag;
-
+	dma_sync_single_for_device(dev, dma_addr, sizeof(*efuse) + bytes,
+				   DMA_BIDIRECTIONAL);
 	zynqmp_pm_efuse_access(dma_addr, (u32 *)&ret);
+	dma_unmap_single(dev, dma_addr, sizeof(*efuse) + bytes,
+			 DMA_BIDIRECTIONAL);
 	if (ret != 0) {
 		if (ret == EFUSE_NOT_ENABLED) {
 			dev_err(dev, "efuse access is not enabled\n");
@@ -136,10 +137,8 @@ static int zynqmp_efuse_access(void *context, unsigned int offset,
 efuse_access_err:
 	dma_free_coherent(dev, bytes,
 			  data, dma_buf);
-efuse_data_fail:
-	dma_free_coherent(dev, sizeof(struct xilinx_efuse),
-			  efuse, dma_addr);
 
+	kfree(efuse);
 	return ret;
 }
 
