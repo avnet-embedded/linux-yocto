@@ -3615,8 +3615,11 @@ static int spi_nor_set_octal_dtr(struct spi_nor *nor, bool enable)
 		return 0;
 
 	if (!(nor->read_proto == SNOR_PROTO_8_8_8_DTR &&
-	      nor->write_proto == SNOR_PROTO_8_8_8_DTR))
+	      nor->write_proto == SNOR_PROTO_8_8_8_DTR)) {
+		if (nor->params->phy_enable)
+			nor->params->phy_enable(nor);
 		return 0;
+	}
 
 	if (!(nor->flags & SNOR_F_IO_MODE_EN_VOLATILE))
 		return 0;
