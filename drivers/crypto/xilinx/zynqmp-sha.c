@@ -27,6 +27,10 @@
 #define ZYNQMP_DMA_BIT_MASK		32U
 #define VERSAL_DMA_BIT_MASK		64U
 #define ZYNQMP_DMA_ALLOC_FIXED_SIZE	0x1000U
+#define VERSAL_SHA3_INVALID_PARAM			0x08U
+#define VERSAL_SHA3_STATE_MISMATCH_ERROR	0x0AU
+#define VERSAL_SHA3_FINISH_ERROR			0x07U
+#define VERSAL_SHA3_PMC_DMA_UPDATE_ERROR	0x04U
 
 enum zynqmp_sha_op {
 	ZYNQMP_SHA3_INIT = 1,
@@ -220,11 +224,33 @@ static int zynqmp_sha_digest(struct ahash_request *req)
 	return ret;
 }
 
+static int versal_sha_fw_error_decode(int status)
+{
+	switch (status) {
+	case VERSAL_SHA3_INVALID_PARAM:
+		pr_err("ERROR: On invalid parameter\n");
+		return -EINVAL;
+	case VERSAL_SHA3_STATE_MISMATCH_ERROR:
+		pr_err("ERROR: SHA3 state mismatch error\n");
+		return -EINVAL;
+	case VERSAL_SHA3_FINISH_ERROR:
+		pr_err("ERROR: SHA3 finish error\n");
+		return -EIO;
+	case VERSAL_SHA3_PMC_DMA_UPDATE_ERROR:
+		pr_err("ERROR: SHA3 PMC DMA update error\n");
+		return -EIO;
+	default:
+		pr_err("ERROR: Unknown SHA3 FW error code: %u\n", status);
+		return -EIO;
+	}
+}
+
 static int versal_sha_digest(struct ahash_request *req)
 {
 	int update_size, ret, flag = FIRST_PACKET;
 	unsigned int processed = 0;
 	unsigned int remaining_len;
+	unsigned int fw_status = 0;
 
 	remaining_len = req->nbytes;
 	while (remaining_len) {
@@ -239,9 +265,9 @@ static int versal_sha_digest(struct ahash_request *req)
 
 		flag |= CONTINUE_PACKET;
 		ret = versal_pm_sha_hash(update_dma_addr, 0,
-					 update_size | flag);
+					 update_size | flag, &fw_status);
 		if (ret)
-			return ret;
+			return versal_sha_fw_error_decode(fw_status);
 
 		remaining_len -= update_size;
 		processed += update_size;
@@ -249,9 +275,9 @@ static int versal_sha_digest(struct ahash_request *req)
 	}
 
 	flag |= FINAL_PACKET;
-	ret = versal_pm_sha_hash(0, final_dma_addr, flag);
+	ret = versal_pm_sha_hash(0, final_dma_addr, flag, &fw_status);
 	if (ret)
-		return ret;
+		return versal_sha_fw_error_decode(fw_status);
 
 	memcpy(req->result, fbuf, SHA3_384_DIGEST_SIZE);
 	memzero_explicit(fbuf, SHA3_384_DIGEST_SIZE);
