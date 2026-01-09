@@ -84,7 +84,7 @@ static int zynqmp_efuse_access(void *context, unsigned int offset,
 		if ((offset == EFUSE_PUF_START_OFFSET ||
 		     offset == EFUSE_PUF_MID_OFFSET) &&
 		    value & P_USER_0_64_UPPER_MASK) {
-			dev_err(dev, "Only lower 4 bytes are allowed to be programmed in P_USER_0 & P_USER_64\n");
+			dev_err(dev, "Only lower 2 bytes are allowed to be programmed in P_USER_0 & P_USER_64\n");
 			return -EOPNOTSUPP;
 		}
 
