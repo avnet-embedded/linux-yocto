@@ -2352,7 +2352,7 @@ static int spi_nor_read(struct mtd_info *mtd, loff_t from, size_t len,
 		if (nor->read_proto == SNOR_PROTO_8_8_8_DTR)
 			ret = spi_nor_octal_dtr_read(nor, addr, len, buf);
 		else
-			ret = spi_nor_read_data(nor, addr, len, buf);
+			ret = spi_nor_read_data(nor, addr, len, readbuf);
 
 		if (ret == 0) {
 			/* We shouldn't see 0-length reads */
