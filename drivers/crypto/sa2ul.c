@@ -3393,9 +3393,11 @@ static int sa_dma_init(struct sa_crypto_data *dev_data)
 		goto err_dma_coerce;
 
 	dev_data->dma_rx1 = dma_request_chan(dev_data->dev, "rx1");
-	if (IS_ERR(dev_data->dma_rx1))
-		return dev_err_probe(dev_data->dev, PTR_ERR(dev_data->dma_rx1),
-				     "Unable to request rx1 DMA channel\n");
+	if (IS_ERR(dev_data->dma_rx1)) {
+		ret = dev_err_probe(dev_data->dev, PTR_ERR(dev_data->dma_rx1),
+				    "Unable to request rx1 DMA channel\n");
+		goto err_dma_coerce;
+	}
 
 	dev_data->dma_rx2 = dma_request_chan(dev_data->dev, "rx2");
 	if (IS_ERR(dev_data->dma_rx2)) {
