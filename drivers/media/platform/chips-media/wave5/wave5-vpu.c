@@ -394,7 +394,7 @@ static int wave5_vpu_probe(struct platform_device *pdev)
 		kthread_init_work(&dev->work, wave5_vpu_irq_work_fn);
 	} else {
 		ret = devm_request_threaded_irq(&pdev->dev, dev->irq, wave5_vpu_irq,
-						wave5_vpu_irq_thread, IRQF_ONESHOT, "vpu_irq", dev);
+						wave5_vpu_irq_thread, 0, "vpu_irq", dev);
 		if (ret) {
 			dev_err(&pdev->dev, "Register interrupt handler, fail: %d\n", ret);
 			goto err_enc_unreg;
