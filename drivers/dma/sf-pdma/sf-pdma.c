@@ -118,38 +118,15 @@ static int sf_pdma_slave_config(struct dma_chan *dchan,
 	return 0;
 }
 
-static int sf_pdma_alloc_chan_resources(struct dma_chan *dchan)
-{
-	struct sf_pdma_chan *chan = to_sf_pdma_chan(dchan);
-	struct pdma_regs *regs = &chan->regs;
-
-	dma_cookie_init(dchan);
-	writel(PDMA_CLAIM_MASK, regs->ctrl);
-
-	return 0;
-}
-
 static void sf_pdma_disable_request(struct sf_pdma_chan *chan)
 {
 	struct pdma_regs *regs = &chan->regs;
 
-	writel(readl(regs->ctrl) & ~PDMA_RUN_MASK, regs->ctrl);
-}
+	writel(readl(regs->ctrl) & ~(PDMA_RUN_MASK |
+				     PDMA_ENABLE_DONE_INT_MASK |
+				     PDMA_ENABLE_ERR_INT_MASK),
+	       regs->ctrl);
 
-static void sf_pdma_free_chan_resources(struct dma_chan *dchan)
-{
-	struct sf_pdma_chan *chan = to_sf_pdma_chan(dchan);
-	unsigned long flags;
-	LIST_HEAD(head);
-
-	spin_lock_irqsave(&chan->vchan.lock, flags);
-	sf_pdma_disable_request(chan);
-	kfree(chan->desc);
-	chan->desc = NULL;
-	vchan_get_all_descriptors(&chan->vchan, &head);
-	sf_pdma_disclaim_chan(chan);
-	spin_unlock_irqrestore(&chan->vchan.lock, flags);
-	vchan_dma_desc_free_list(&chan->vchan, &head);
 }
 
 static size_t sf_pdma_desc_residue(struct sf_pdma_chan *chan,
@@ -486,10 +463,39 @@ static void sf_pdma_setup_chans(struct sf_pdma *pdma)
 		vchan_init(&chan->vchan, &pdma->dma_dev);
 
 		writel(PDMA_CLEAR_CTRL, chan->regs.ctrl);
-
-		tasklet_setup(&chan->done_tasklet, sf_pdma_donebh_tasklet);
-		tasklet_setup(&chan->err_tasklet, sf_pdma_errbh_tasklet);
 	}
+}
+
+static int sf_pdma_alloc_chan_resources(struct dma_chan *dchan)
+{
+	struct sf_pdma_chan *chan = to_sf_pdma_chan(dchan);
+	struct pdma_regs *regs = &chan->regs;
+
+	dma_cookie_init(dchan);
+	writel(PDMA_CLAIM_MASK, regs->ctrl);
+
+	tasklet_setup(&chan->done_tasklet, sf_pdma_donebh_tasklet);
+	tasklet_setup(&chan->err_tasklet, sf_pdma_errbh_tasklet);
+
+	return 0;
+}
+
+static void sf_pdma_free_chan_resources(struct dma_chan *dchan)
+{
+	struct sf_pdma_chan *chan = to_sf_pdma_chan(dchan);
+	unsigned long flags;
+	LIST_HEAD(head);
+
+	spin_lock_irqsave(&chan->vchan.lock, flags);
+	sf_pdma_disable_request(chan);
+	tasklet_kill(&chan->done_tasklet);
+	tasklet_kill(&chan->err_tasklet);
+	kfree(chan->desc);
+	chan->desc = NULL;
+	vchan_get_all_descriptors(&chan->vchan, &head);
+	sf_pdma_disclaim_chan(chan);
+	spin_unlock_irqrestore(&chan->vchan.lock, flags);
+	vchan_dma_desc_free_list(&chan->vchan, &head);
 }
 
 static struct dma_chan *sf_pdma_of_xlate(struct of_phandle_args *dma_spec,
@@ -630,8 +636,6 @@ static int sf_pdma_remove(struct platform_device *pdev)
 		devm_free_irq(&pdev->dev, ch->errirq, ch);
 		list_del(&ch->vchan.chan.device_node);
 		tasklet_kill(&ch->vchan.task);
-		tasklet_kill(&ch->done_tasklet);
-		tasklet_kill(&ch->err_tasklet);
 	}
 
 	dma_async_device_unregister(&pdma->dma_dev);
