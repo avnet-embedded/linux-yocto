@@ -263,6 +263,17 @@ static int ddr_perf_event_init(struct perf_event *event)
 		return -EOPNOTSUPP;
 	}
 
+	event->cpu = pmu->cpu;
+	hwc->idx = -1;
+
+	/*
+	 * Skip group validation for group leader since it doesn't have
+	 * the ctx yet during event_init(), which would trigger lockdep
+	 * warning in for_each_sibling_event().
+	 */
+	if (event->group_leader == event)
+		return 0;
+
 	/*
 	 * We must NOT create groups containing mixed PMUs, although software
 	 * events are acceptable (for example to create a CCN group
@@ -276,9 +287,6 @@ static int ddr_perf_event_init(struct perf_event *event)
 		if (sibling->pmu != event->pmu && !is_software_event(sibling))
 			return -EINVAL;
 	}
-
-	event->cpu = pmu->cpu;
-	hwc->idx = -1;
 
 	return 0;
 }
