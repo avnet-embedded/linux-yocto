@@ -4,6 +4,8 @@
  *	Dong Aisheng <aisheng.dong@nxp.com>
  */
 
+#include <dt-bindings/dma/fsl-edma.h>
+
 &dma_subsys {
 	lpuart4: serial@5a0a0000 {
 		compatible = "fsl,imx8qm-lpuart", "fsl,imx8qxp-lpuart";
