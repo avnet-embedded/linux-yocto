@@ -103,42 +103,6 @@ int zynqmp_pm_get_chipid(u32 *idcode, u32 *version)
 EXPORT_SYMBOL_GPL(zynqmp_pm_get_chipid);
 
 /**
- * zynqmp_pm_get_family_info() - Get family info of platform
- * @family:	Returned family code value
- * @subfamily:	Returned sub-family code value
- *
- * Return: Returns status, either success or error+reason
- */
-int zynqmp_pm_get_family_info(u32 *family, u32 *subfamily)
-{
-	u32 ret_payload[PAYLOAD_ARG_CNT];
-	u32 idcode;
-	static u32 pm_family_code;
-	static u32 pm_sub_family_code;
-	int ret;
-
-	/* Check is family or sub-family code already received */
-	if (pm_family_code && pm_sub_family_code) {
-		*family = pm_family_code;
-		*subfamily = pm_sub_family_code;
-		return 0;
-	}
-
-	ret = zynqmp_pm_invoke_fn(PM_GET_CHIPID, ret_payload, 0);
-	if (ret < 0)
-		return ret;
-
-	idcode = ret_payload[1];
-	pm_family_code = FIELD_GET(FAMILY_CODE_MASK, idcode);
-	pm_sub_family_code = FIELD_GET(SUB_FAMILY_CODE_MASK, idcode);
-	*family = pm_family_code;
-	*subfamily = pm_sub_family_code;
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(zynqmp_pm_get_family_info);
-
-/**
  * zynqmp_pm_get_trustzone_version() - Get secure trustzone firmware version
  * @version:	Returned version value
  *
@@ -739,15 +703,14 @@ int zynqmp_pm_pinctrl_set_config(const u32 pin, const u32 param,
 				 u32 value)
 {
 	u32 pm_family_code;
-	u32 pm_sub_family_code;
 	int ret;
 
-	/* Get the Family code and sub family code of platform */
-	ret = zynqmp_pm_get_family_info(&pm_family_code, &pm_sub_family_code);
+	/* Get the Family code of platform */
+	ret = zynqmp_pm_get_family_info(&pm_family_code);
 	if (ret < 0)
 		return ret;
 
-	if (pm_family_code == ZYNQMP_FAMILY_CODE &&
+	if (pm_family_code == PM_ZYNQMP_FAMILY_CODE &&
 	    param == PM_PINCTRL_CONFIG_TRI_STATE) {
 		ret = zynqmp_pm_feature(PM_PINCTRL_CONFIG_PARAM_SET);
 		if (ret < PM_PINCTRL_PARAM_SET_VERSION) {
@@ -798,6 +761,18 @@ int zynqmp_pm_bootmode_write(u32 ps_mode)
 				   CRL_APB_BOOTPIN_CTRL_MASK, ps_mode);
 }
 EXPORT_SYMBOL_GPL(zynqmp_pm_bootmode_write);
+
+/**
+ * zynqmp_pm_clear_tfa_state() - PM call to clear trusted-firmware-a state when
+ * new kernel is being loaded, such as during kexec.
+ *
+ * Return: Returns status, either success or error+reason
+ */
+int zynqmp_pm_clear_tfa_state(void)
+{
+	return zynqmp_pm_invoke_fn(TF_A_CLEAR_PM_STATE, NULL, 0);
+}
+EXPORT_SYMBOL_GPL(zynqmp_pm_clear_tfa_state);
 
 /**
  * zynqmp_pm_init_finalize() - PM call to inform firmware that the caller

@@ -12,16 +12,21 @@
 #include <drm/drm_atomic.h>
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_atomic_uapi.h>
+#include <drm/drm_bridge.h>
+#include <drm/drm_bridge_connector.h>
 #include <drm/drm_crtc.h>
 #include <drm/drm_fb_dma_helper.h>
 #include <drm/drm_fourcc.h>
 #include <drm/drm_gem_dma_helper.h>
 #include <drm/drm_framebuffer.h>
 #include <drm/drm_modeset_helper_vtables.h>
+#include <drm/drm_simple_kms_helper.h>
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/component.h>
 #include <linux/dma/xilinx_frmbuf.h>
+#include <linux/media-bus-format.h>
+#include <linux/moduleparam.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/gpio/consumer.h>
 #include <linux/of.h>
@@ -253,6 +258,11 @@ static bool xlnx_mixer_primary_enable = true;
 module_param_named(mixer_primary_enable, xlnx_mixer_primary_enable, bool, 0600);
 MODULE_PARM_DESC(mixer_primary_enable, "Enable mixer primary plane (default: 1)");
 
+/* TODO: remove this when all PL encoder drivers converted to DRM bridges */
+static bool connect_drm_bridge;
+module_param(connect_drm_bridge, bool, 0600);
+MODULE_PARM_DESC(connect_drm_bridge, "Use DRM bridge interface");
+
 /*********************** Inline Functions/Macros *****************************/
 #define to_mixer_hw(p) (&((p)->mixer->mixer_hw))
 #define to_xlnx_crtc(x)	container_of(x, struct xlnx_crtc, crtc)
@@ -383,6 +393,7 @@ struct xlnx_mix_layer_data {
  * @bg_layer_bpc: Bits per component for the background streaming layer
  * @dma_addr_size: dma address size in bits
  * @ppc: Pixels per component
+ * @out_bus_format: Output video media bus format
  * @irq: Interrupt request number assigned
  * @bg_color: Current RGB color value for internal background color generator
  * @three_planes_prop : three planes video formats enabled
@@ -416,6 +427,7 @@ struct xlnx_mix_hw {
 	u32                 bg_layer_bpc;
 	u32		    dma_addr_size;
 	u32                 ppc;
+	u32		    out_bus_format;
 	int		    irq;
 	u64		    bg_color;
 	struct xlnx_mix_layer_data *layer_data;
@@ -453,6 +465,7 @@ struct xlnx_mix_hw {
  * @event: vblank pending event
  * @vtc_bridge: vtc_bridge structure
  * @disp_bridge: disp_bridge structure
+ * @drm_bridge: external encoder bridge
  *
  * Contains pointers to logical constructions such as the DRM plane manager as
  * well as pointers to distinquish the mixer layer serving as the DRM "primary"
@@ -483,6 +496,7 @@ struct xlnx_mix {
 	struct drm_pending_vblank_event *event;
 	struct xlnx_bridge *vtc_bridge;
 	struct xlnx_bridge *disp_bridge;
+	struct drm_bridge *drm_bridge;
 };
 
 /**
@@ -2362,6 +2376,20 @@ static int xlnx_mix_parse_dt_logo_data(struct device_node *node,
 static int xlnx_mix_dt_dp_bridge(struct device *dev, struct xlnx_mix *mixer)
 {
 	struct device_node *node, *disp_node;
+	struct drm_bridge *bridge;
+
+	/* First check if we have drm bridge connected */
+	if (connect_drm_bridge) {
+		bridge = devm_drm_of_get_bridge(dev, dev->of_node, 0, 0);
+		if (IS_ERR(bridge)) {
+			if (PTR_ERR(bridge) == -EPROBE_DEFER)
+				return PTR_ERR(bridge);
+			/* Ignore other errors and fall back to xlnx bridge */
+		} else {
+			mixer->drm_bridge = bridge;
+			return 0;
+		}
+	}
 
 	node = dev->of_node;
 	/* Disp Bridge support */
@@ -2379,6 +2407,30 @@ static int xlnx_mix_dt_dp_bridge(struct device *dev, struct xlnx_mix *mixer)
 	return 0;
 }
 
+enum xlnx_mix_video_fmt {
+	VIDEO_FMT_RGB,
+	VIDEO_FMT_YUV444,
+	VIDEO_FMT_YUV422,
+	VIDEO_FMT_YONLY,
+};
+
+static int xlnx_mix_video_to_media_bus_format(u32 xv_fmt, u32 *mb_fmt)
+{
+	/* TODO: Add Y-only and non 8-bpc formats */
+	static const u32 video_fmt_map[] = {
+		[VIDEO_FMT_RGB]		= MEDIA_BUS_FMT_RGB888_1X24,
+		[VIDEO_FMT_YUV444]	= MEDIA_BUS_FMT_VUY8_1X24,
+		[VIDEO_FMT_YUV422]	= MEDIA_BUS_FMT_UYVY8_1X16,
+	};
+
+	if (xv_fmt >= ARRAY_SIZE(video_fmt_map))
+		return -EINVAL;
+
+	*mb_fmt = video_fmt_map[xv_fmt];
+
+	return 0;
+}
+
 static int xlnx_mix_dt_parse(struct device *dev, struct xlnx_mix *mixer)
 {
 	struct xlnx_mix_plane *planes;
@@ -2387,6 +2439,7 @@ static int xlnx_mix_dt_parse(struct device *dev, struct xlnx_mix *mixer)
 	struct xlnx_mix_layer_data *l_data;
 	struct resource	res;
 	int ret, l_cnt, i;
+	u32 out_format;
 
 	node = dev->of_node;
 	mixer_hw = &mixer->mixer_hw;
@@ -2501,6 +2554,18 @@ static int xlnx_mix_dt_parse(struct device *dev, struct xlnx_mix *mixer)
 	if (mixer_hw->logo_layer_en) {
 		/* read logo data from dts */
 		ret = xlnx_mix_parse_dt_logo_data(node, mixer_hw);
+		return ret;
+	}
+
+	ret = of_property_read_u32(node, "xlnx,video-format", &out_format);
+	if (ret < 0) {
+		dev_err(dev, "'xlnx,video-format' property missing\n");
+		return ret;
+	}
+	ret = xlnx_mix_video_to_media_bus_format(out_format,
+						 &mixer_hw->out_bus_format);
+	if (ret < 0) {
+		dev_err(dev, "invalid output video format\n");
 		return ret;
 	}
 
@@ -2815,6 +2880,12 @@ static void xlnx_mix_crtc_dpms(struct drm_crtc *base_crtc, int dpms)
 		}
 		mixer->pixel_clock_enabled = true;
 
+		ret = xlnx_mix_set_active_area(&mixer->mixer_hw,
+					       adjusted_mode->hdisplay,
+					       adjusted_mode->vdisplay);
+		if (ret < 0)
+			DRM_ERROR("failed to set output dimensions\n");
+
 		if (mixer->vtc_bridge) {
 			drm_display_mode_to_videomode(mode, &vm);
 			xlnx_bridge_set_timing(mixer->vtc_bridge, &vm);
@@ -3008,12 +3079,30 @@ xlnx_mix_crtc_atomic_begin(struct drm_crtc *crtc,
 	}
 }
 
+static u32
+xlnx_mix_crtc_select_output_bus_format(struct drm_crtc *crtc,
+				       struct drm_crtc_state *crtc_state,
+				       const u32 *in_bus_fmts,
+				       unsigned int num_in_bus_fmts)
+{
+	struct xlnx_crtc *xcrtc = to_xlnx_crtc(crtc);
+	struct xlnx_mix *mixer = to_xlnx_mixer(xcrtc);
+	unsigned int i;
+
+	for (i = 0; i < num_in_bus_fmts; ++i)
+		if (in_bus_fmts[i] == mixer->mixer_hw.out_bus_format)
+			return mixer->mixer_hw.out_bus_format;
+
+	return 0;
+}
+
 static struct drm_crtc_helper_funcs xlnx_mix_crtc_helper_funcs = {
 	.atomic_enable	= xlnx_mix_crtc_atomic_enable,
 	.atomic_disable	= xlnx_mix_crtc_atomic_disable,
 	.mode_set_nofb	= xlnx_mix_crtc_mode_set_nofb,
 	.atomic_check	= xlnx_mix_crtc_atomic_check,
 	.atomic_begin	= xlnx_mix_crtc_atomic_begin,
+	.select_output_bus_format = xlnx_mix_crtc_select_output_bus_format,
 };
 
 /**
@@ -3119,6 +3208,46 @@ static void xlnx_mix_init(struct xlnx_mix_hw *mixer)
 	xlnx_mix_intrpt_enable_done(mixer);
 }
 
+static int xlnx_mix_connector_init(struct xlnx_mix *mixer)
+{
+	struct drm_encoder *encoder;
+	struct drm_connector *connector;
+	struct device *master_dev = &mixer->master->dev;
+	int ret;
+
+	encoder = devm_kzalloc(master_dev, sizeof(*encoder), GFP_KERNEL);
+	if (IS_ERR(encoder))
+		return PTR_ERR(encoder);
+
+	encoder->possible_crtcs |= drm_crtc_mask(&mixer->crtc.crtc);
+	ret = drm_simple_encoder_init(mixer->drm, encoder,
+				      DRM_MODE_ENCODER_NONE);
+	if (ret < 0)
+		return ret;
+
+	ret = drm_bridge_attach(encoder, mixer->drm_bridge, NULL,
+				DRM_BRIDGE_ATTACH_NO_CONNECTOR);
+	if (ret < 0)
+		goto err_enc_cleanup;
+
+	connector = drm_bridge_connector_init(mixer->drm, encoder);
+	if (IS_ERR(connector)) {
+		ret = PTR_ERR(connector);
+		goto err_enc_cleanup;
+	}
+
+	ret = drm_connector_attach_encoder(connector, encoder);
+	if (ret < 0)
+		goto err_enc_cleanup;
+
+	return 0;
+
+err_enc_cleanup:
+	drm_encoder_cleanup(encoder);
+
+	return ret;
+}
+
 static int xlnx_mix_bind(struct device *dev, struct device *master,
 			 void *data)
 {
@@ -3126,7 +3255,9 @@ static int xlnx_mix_bind(struct device *dev, struct device *master,
 	struct drm_device *drm = data;
 	u32 ret;
 
-	xlnx_mix_dt_dp_bridge(dev, mixer);
+	ret = xlnx_mix_dt_dp_bridge(dev, mixer);
+	if (ret == -EPROBE_DEFER)
+		return ret;
 
 	mixer->drm = drm;
 	ret = xlnx_mix_plane_create(dev, mixer);
@@ -3135,6 +3266,13 @@ static int xlnx_mix_bind(struct device *dev, struct device *master,
 	ret = xlnx_mix_crtc_create(mixer);
 	if (ret)
 		return ret;
+
+	if (mixer->drm_bridge) {
+		ret = xlnx_mix_connector_init(mixer);
+		if (ret < 0)
+			return ret;
+	}
+
 	xlnx_mix_init(&mixer->mixer_hw);
 
 	return ret;

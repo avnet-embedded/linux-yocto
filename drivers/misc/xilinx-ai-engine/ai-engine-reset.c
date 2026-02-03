@@ -14,6 +14,9 @@
 
 #include "ai-engine-trace.h"
 
+static int aie_part_maskpoll_noc_outstanding_aximm_txn(struct aie_partition *apart);
+static int aie_part_maskpoll_uc_outstanding_aximm_txn(struct aie_partition *apart);
+
 static void aie_part_core_regs_clr_iowrite(struct aie_partition *apart,
 					   u32 addr, u32 width)
 {
@@ -305,6 +308,7 @@ int aie2ps_part_clean(struct aie_partition *apart)
 	if (apart->cntrflag & XAIE_PART_NOT_RST_ON_RELEASE)
 		return 0;
 
+	trace_aie_part_clean(apart);
 	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_DIS_COLCLK_BUFF, apart->range, 1);
 	if (ret)
 		goto out;
@@ -328,6 +332,7 @@ int aie2ps_part_clean(struct aie_partition *apart)
 	aie_resource_clear_all(&apart->cores_clk_state);
 
 out:
+	trace_aie_part_clean_done(apart);
 	return ret;
 }
 
@@ -356,6 +361,7 @@ int aie_part_clean(struct aie_partition *apart)
 	if (apart->cntrflag & XAIE_PART_NOT_RST_ON_RELEASE)
 		return 0;
 
+	trace_aie_part_clean(apart);
 	ret = zynqmp_pm_aie_operation(node_id, apart->range.start.col,
 				      apart->range.size.col,
 				      XILINX_AIE_OPS_DIS_COL_CLK_BUFF);
@@ -408,8 +414,11 @@ int aie2ps_part_reset(struct aie_partition *apart)
 	int ret;
 
 	ret = mutex_lock_interruptible(&apart->mlock);
-	if (ret)
+	if (ret) {
+		dev_err_ratelimited(&apart->dev, "failed to acquire apart lock, ret: %d\n",
+				    ret);
 		return ret;
+	}
 
 	/*
 	 * Check if any AI engine memories or registers in the
@@ -477,8 +486,11 @@ int aie_part_reset(struct aie_partition *apart)
 	int ret;
 
 	ret = mutex_lock_interruptible(&apart->mlock);
-	if (ret)
+	if (ret) {
+		dev_err_ratelimited(&apart->dev, "failed to acquire apart lock, ret: %d\n",
+				    ret);
 		return ret;
+	}
 
 	/*
 	 * Check if any AI engine memories or registers in the
@@ -700,6 +712,115 @@ static int aie2ps_part_set_l2_irq(struct aie_partition *apart)
 	return ret;
 }
 
+int aie2ps_part_write_handshake(struct aie_partition *apart,
+				struct aie_op_handshake_data *data,
+				uint32_t handshake_cols)
+
+{
+	int ret = 0, uc_priv = AIE_MEM_MAX + AIE_UC_PRIVATE_DATA_MEM;
+	struct aie_op_handshake_addr *hs_addr;
+	struct aie_part_mem *pmem = apart->pmems;
+	struct aie_op_handshake_data *hs_data;
+	struct aie_range range = {0};
+	size_t hs_addr_end;
+	bool flush = false;
+
+	hs_addr = kmalloc_array(handshake_cols,
+				sizeof(struct aie_op_handshake_addr),
+				GFP_KERNEL);
+	if (!hs_addr)
+		return -ENOMEM;
+
+	for (u32 i = 0; i < handshake_cols; i++) {
+		hs_data = &data[i];
+		hs_addr[i].size = hs_data->size;
+		hs_addr[i].offset = hs_data->offset;
+
+		if (check_add_overflow(hs_addr[i].offset, hs_addr[i].size, &hs_addr_end) ||
+		    hs_addr_end >= pmem[uc_priv].mem.size) {
+			dev_err(&apart->dev,
+				"offset 0x%zx, 0x%zx out of bound\n",
+				hs_addr[i].offset, hs_addr[i].size);
+			ret = -EINVAL;
+			goto out;
+		}
+
+		if (aie_validate_location(apart, hs_data->loc)) {
+			dev_err(&apart->dev,
+				"Invalid (%d,%d) out of part(%d,%d)\n",
+				hs_data->loc.col, hs_data->loc.row,
+				apart->range.size.col, apart->range.size.row);
+			ret = -EINVAL;
+			goto out;
+		}
+
+		range.start.col = hs_data->loc.col + apart->range.start.col;
+		range.size.col = 1U;
+
+		if (virt_addr_valid(hs_data->addr)) {
+			hs_addr[i].hs_va = dmam_alloc_coherent(&apart->dev,
+							       hs_data->size,
+							       &hs_addr[i].hs_dma,
+							       GFP_KERNEL);
+			if (!hs_addr[i].hs_va) {
+				ret = -ENOMEM;
+				goto clear;
+			}
+			memcpy(hs_addr[i].hs_va, hs_data->addr, hs_data->size);
+		} else {
+			hs_addr[i].hs_va = hs_data->addr;
+			hs_addr[i].hs_dma = dma_map_single(&apart->dev,
+							   hs_addr[i].hs_va,
+							   hs_data->size,
+							   DMA_TO_DEVICE);
+			if (dma_mapping_error(&apart->dev, hs_addr[i].hs_dma)) {
+				ret = -ENOMEM;
+				goto clear;
+			}
+
+			dma_sync_single_for_device(&apart->dev,
+						   hs_addr[i].hs_dma,
+						   hs_data->size,
+						   DMA_TO_DEVICE);
+		}
+
+		flush = ((i + 1) == handshake_cols) ? true : false;
+		ret = aie_part_pm_ops(apart, &hs_addr[i],
+				      AIE_PART_INIT_OPT_HANDSHAKE, range,
+				      flush);
+		if (ret) {
+			dev_err(&apart->dev,
+				"handshake region write failed in col %d",
+				hs_data->loc.col);
+			ret = -EFAULT;
+			goto clear;
+		}
+	}
+
+clear:
+	/*
+	 * The dma buffer is either unmapped/freed depending on the input
+	 * address after the handshake data is copied using DMA
+	 * to the handshake region.
+	 */
+	for (u32 i = 0; i < handshake_cols; i++) {
+		hs_data = &data[i];
+
+		if (hs_addr[i].hs_va)	{
+			if (virt_addr_valid(hs_data->addr))
+				dmam_free_coherent(&apart->dev, hs_data->size,
+						   hs_addr[i].hs_va, hs_addr[i].hs_dma);
+			else
+				dma_unmap_single(&apart->dev, hs_addr[i].hs_dma,
+						 hs_data->size, DMA_TO_DEVICE);
+		}
+	}
+
+out:
+	kfree(hs_addr);
+	return ret;
+}
+
 int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_init_args *args)
 {
 	u32 opts;
@@ -707,9 +828,24 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
 	int i;
 
 	ret = mutex_lock_interruptible(&apart->mlock);
-	if (ret)
+	if (ret) {
+		dev_err(&apart->dev, "failed to get partition lock: %d\n", ret);
 		return ret;
+	}
 	trace_aie_part_initialize(apart, args->init_opts, args->num_tiles);
+
+	opts = AIE_PART_INIT_OPT_ENB_UC_DMA_PAUSE | AIE_PART_INIT_OPT_ENB_NOC_DMA_PAUSE;
+	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1);
+	if (ret)
+		goto out;
+
+	ret = aie_part_maskpoll_noc_outstanding_aximm_txn(apart);
+	if (ret)
+		goto out;
+
+	ret = aie_part_maskpoll_uc_outstanding_aximm_txn(apart);
+	if (ret)
+		goto out;
 
 	/* Clear resources */
 	aie_part_clear_cached_events(apart);
@@ -766,7 +902,7 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
 	if (args->init_opts & AIE_PART_INIT_OPT_NMU_CONFIG) {
 		struct aie_range range = {0};
 
-		opts |= ~AIE_PART_INIT_OPT_NMU_CONFIG;
+		opts |= AIE_PART_INIT_OPT_NMU_CONFIG;
 		if (apart->range.start.col == 0) {
 			range.size.col = 2;
 			ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_NMU_CONFIG, range, 0);
@@ -822,13 +958,15 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
 		goto out;
 
 	if (args->init_opts & AIE_PART_INIT_OPT_HANDSHAKE) {
-		struct aie_op_handshake_data data = {
-			.addr = args->handshake,
-			.size = args->handshake_size
-		};
+		if (!args->handshake || args->handshake_cols < 1U) {
+			dev_err(&apart->dev, "failed to write handshake region!\n");
+			goto out;
+		}
 
 		opts |= AIE_PART_INIT_OPT_HANDSHAKE;
-		ret = aie_part_pm_ops(apart, &data, AIE_PART_INIT_OPT_HANDSHAKE, apart->range, 1);
+		ret = aie2ps_part_write_handshake(apart, args->handshake,
+						  args->handshake_cols);
+
 		if (ret)
 			goto out;
 	}
@@ -851,8 +989,8 @@ int aie2ps_part_initialize(struct aie_partition *apart, struct aie_partition_ini
 			goto out;
 	}
 
-	if (opts)
-		dev_warn(&apart->dev, "Invalid init_opts: 0x%x", opts);
+	if (opts != args->init_opts)
+		dev_warn(&apart->dev, "Invalid init_opts: 0x%x", opts ^ args->init_opts);
 
 out:
 	mutex_unlock(&apart->mlock);
@@ -968,7 +1106,8 @@ static int aie_part_maskpoll_uc_outstanding_aximm_txn(struct aie_partition *apar
 		regoff = aie_aperture_cal_regoff(apart->aperture, loc,
 						 adev->uc_outstanding_aximm->regoff);
 		ret = aie_part_maskpoll_register(apart, regoff, 0x0,
-						 adev->uc_outstanding_aximm->mask, 10000);
+						 adev->uc_outstanding_aximm->mask,
+						 2000000 /* 2 seconds */);
 		if (ret < 0) {
 			dev_err(&apart->dev, "failed due to outstanding UC AXIMM transactions!\n");
 			return -EINVAL;
@@ -992,7 +1131,8 @@ static int aie_part_maskpoll_noc_outstanding_aximm_txn(struct aie_partition *apa
 		regoff = aie_aperture_cal_regoff(apart->aperture, loc,
 						 adev->noc_outstanding_aximm->regoff);
 		ret = aie_part_maskpoll_register(apart, regoff, 0x0,
-						 adev->noc_outstanding_aximm->mask, 10000);
+						 adev->noc_outstanding_aximm->mask,
+						 2000000 /* 2 seconds */);
 		if (ret < 0) {
 			dev_err(&apart->dev, "failed due to outstanding NoC AXIMM transactions!\n");
 			return -EINVAL;
@@ -1022,14 +1162,11 @@ int aie2ps_part_teardown(struct aie_partition *apart)
 	u16 data;
 	int ret;
 
-	ret = mutex_lock_interruptible(&apart->mlock);
-	if (ret)
-		return ret;
+	trace_aie_part_teardown(apart);
+	mutex_lock(&apart->mlock);
 
-	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_ENB_NOC_DMA_PAUSE, apart->range, 0);
-	if (ret)
-		goto out;
-	ret = aie_part_pm_ops(apart, NULL, AIE_PART_INIT_OPT_ENB_UC_DMA_PAUSE, apart->range, 1);
+	opts = AIE_PART_INIT_OPT_ENB_UC_DMA_PAUSE | AIE_PART_INIT_OPT_ENB_NOC_DMA_PAUSE;
+	ret = aie_part_pm_ops(apart, NULL, opts, apart->range, 1);
 	if (ret)
 		goto out;
 
@@ -1091,9 +1228,8 @@ int aie_part_teardown(struct aie_partition *apart)
 	u32 node_id = apart->aperture->node_id;
 	int ret;
 
-	ret = mutex_lock_interruptible(&apart->mlock);
-	if (ret)
-		return ret;
+	trace_aie_part_teardown(apart);
+	mutex_lock(&apart->mlock);
 
 	/* This operation will do first 4 steps of sequence */
 	ret = zynqmp_pm_aie_operation(node_id, apart->range.start.col,

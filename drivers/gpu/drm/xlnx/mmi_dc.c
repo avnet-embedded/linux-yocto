@@ -5,6 +5,7 @@
  * Copyright (C) 2025, Advanced Micro Devices, Inc. All rights reserved.
  */
 
+#include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
@@ -12,6 +13,8 @@
 #include <linux/reset.h>
 
 #include "mmi_dc.h"
+#include "mmi_dc_plane.h"
+#include "mmi_dc_audio.h"
 
 /* DC DP Stream Registers */
 #define MMI_DC_DP_MAIN_STREAM_HTOTAL	(0x0000)
@@ -48,6 +51,9 @@
 #define MMI_DC_AV_BUF_RESET_SHIFT		(1)
 #define MMI_DC_AV_BUF_AUD_VID_CLK_SOURCE	(0x0120)
 #define MMI_DC_AV_BUF_AUD_VID_TIMING_SRC_INT	BIT(2)
+
+#define MMI_DC_AV_BUF_8BIT_SF			(0x00010101)
+#define MMI_DC_AV_BUF_12BIT_SF			(0x00010000)
 
 /* Misc Registers */
 #define MMI_DC_MISC_VID_CLK			(0x0c5c)
@@ -117,6 +123,19 @@ const u32 csc_rgb_to_sdtv_offsets[MMI_DC_CSC_NUM_OFFSETS] = {
 
 const u32 csc_sdtv_to_rgb_offsets[MMI_DC_CSC_NUM_OFFSETS] = {
 	0x00000000, 0x00001800, 0x00001800,
+};
+
+/* TODO: more scaling factors */
+const u32 csc_scaling_factors_888[] = {
+	MMI_DC_AV_BUF_8BIT_SF,
+	MMI_DC_AV_BUF_8BIT_SF,
+	MMI_DC_AV_BUF_8BIT_SF,
+};
+
+const u32 csc_scaling_factors_121212[] = {
+	MMI_DC_AV_BUF_12BIT_SF,
+	MMI_DC_AV_BUF_12BIT_SF,
+	MMI_DC_AV_BUF_12BIT_SF,
 };
 
 /**
@@ -249,6 +268,22 @@ void mmi_dc_reset_hw(struct mmi_dc *dc)
 	mmi_dc_reset_planes(dc);
 }
 
+void mmi_dc_set_video_timing_source(struct mmi_dc *dc,
+				    enum mmi_dc_video_timing vt_source)
+{
+	enum mmi_dc_video_timing old_vt_source;
+
+	old_vt_source = dc_read_avbuf(dc, MMI_DC_AV_BUF_AUD_VID_CLK_SOURCE) &
+			MMI_DC_AV_BUF_AUD_VID_TIMING_SRC_INT ?
+			MMI_DC_VT_INTERNAL : MMI_DC_VT_EXTERNAL;
+
+	if (old_vt_source != vt_source) {
+		u32 vt_reg = vt_source == MMI_DC_VT_INTERNAL ?
+				MMI_DC_AV_BUF_AUD_VID_TIMING_SRC_INT : 0;
+		dc_write_avbuf(dc, MMI_DC_AV_BUF_AUD_VID_CLK_SOURCE, vt_reg);
+	}
+}
+
 /**
  * mmi_dc_avbuf_enable - Enable AV buffer manager
  * @dc: MMI DC device
@@ -353,6 +388,48 @@ static irqreturn_t mmi_dc_irq_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+int mmi_dc_set_vid_clk_src(struct mmi_dc *dc, enum mmi_dc_vid_clk_src vidclksrc)
+{
+	u32 val = 0;
+
+	if (vidclksrc == MMIDC_AUX0_REF_CLK)
+		val = MMI_DC_MISC_VID_CLK_PS;
+	else if (vidclksrc == MMIDC_PL_CLK)
+		val = MMI_DC_MISC_VID_CLK_PL;
+
+	dc_write_misc(dc, MMI_DC_MISC_VID_CLK, val);
+
+	return 0;
+}
+
+enum mmi_dc_vid_clk_src mmi_dc_get_vid_clk_src(struct mmi_dc *dc)
+{
+	u32 val;
+	enum mmi_dc_vid_clk_src ret = MMIDC_AUX0_REF_CLK;
+
+	val = dc_read_misc(dc, MMI_DC_MISC_VID_CLK);
+
+	if (val == MMI_DC_MISC_VID_CLK_PL)
+		ret = MMIDC_PL_CLK;
+	if (val == MMI_DC_MISC_VID_CLK_PS)
+		ret = MMIDC_AUX0_REF_CLK;
+
+	return ret;
+}
+
+static struct clk *mmi_dc_init_clk(struct mmi_dc *dc, const char *clk_name)
+{
+	struct clk *dc_clk = devm_clk_get(dc->dev, clk_name);
+
+	if (IS_ERR(dc_clk)) {
+		dev_dbg(dc->dev, "failed to get %s %ld\n",
+			clk_name, PTR_ERR(dc_clk));
+		dc_clk = NULL;
+	}
+
+	return dc_clk;
+}
+
 /**
  * mmi_dc_init - Initialize MMI DC hardware
  * @dc: MMI DC device
@@ -390,6 +467,18 @@ int mmi_dc_init(struct mmi_dc *dc, struct drm_device *drm)
 		return dev_err_probe(dc->dev, PTR_ERR(dc->rst),
 				     "failed to get reset control\n");
 
+	/* Get all the video clocks */
+	dc->pl_pixel_clk = mmi_dc_init_clk(dc, "pl_vid_func_clk");
+	dc->ps_pixel_clk = mmi_dc_init_clk(dc, "ps_vid_clk");
+
+	if (!dc->ps_pixel_clk && !dc->pl_pixel_clk) {
+		dev_err(dc->dev, "at least one pixel clock is needed!\n");
+		return -EINVAL;
+	}
+
+	dc->mmi_pll_clk = mmi_dc_init_clk(dc, "mmi_pll");
+	dc->stc_ref_clk = mmi_dc_init_clk(dc, "stc_ref_clk");
+
 	mmi_dc_reset_hw(dc);
 
 	dc_write_misc(dc, MMI_DC_MISC_WPROTS, 0);
@@ -409,25 +498,41 @@ int mmi_dc_init(struct mmi_dc *dc, struct drm_device *drm)
 	mmi_dc_set_dma_align(dc);
 
 	/* Set video clock source */
-	if (dc->is_ps_clk)
-		dc_write_misc(dc, MMI_DC_MISC_VID_CLK, MMI_DC_MISC_VID_CLK_PS);
-	else
+	if (dc->pl_pixel_clk)
 		dc_write_misc(dc, MMI_DC_MISC_VID_CLK, MMI_DC_MISC_VID_CLK_PL);
+	else
+		dc_write_misc(dc, MMI_DC_MISC_VID_CLK, MMI_DC_MISC_VID_CLK_PS);
+
+	mmi_dc_set_video_timing_source(dc, MMI_DC_VT_INTERNAL);
 
 	mmi_dc_reset(dc, true);
 	msleep(MMI_DC_MSLEEP_50MS);
 	mmi_dc_reset(dc, false);
 
-	/* Set another video clock source */
-	dc_write_avbuf(dc, MMI_DC_AV_BUF_AUD_VID_CLK_SOURCE, MMI_DC_AV_BUF_AUD_VID_TIMING_SRC_INT);
-
 	/* Set non live video latency */
-	dc_write_avbuf(dc, MMI_DC_AV_BUF_NON_LIVE_LATENCY, MMI_DC_AV_BUF_NON_LIVE_LATENCY_VAL);
+	dc_write_avbuf(dc, MMI_DC_AV_BUF_NON_LIVE_LATENCY,
+		       MMI_DC_AV_BUF_NON_LIVE_LATENCY_VAL);
 
 	/* Set blender background and alpha */
 	mmi_dc_set_global_alpha(dc, 0, true);
 	mmi_dc_blend_set_bg_color(dc, MMI_BG_CLR_MIN, MMI_BG_CLR_MIN,
 				  MMI_BG_CLR_MAX);
+	/*
+	 * TODO: Audio driver initialization and audio clock to be handled separately
+	 * ensuring that if audio driver fails, video pipeline shouldn't be affected.
+	 */
+
+	/* Set the aud_clk and initialize the audio driver */
+	dc->aud_clk = devm_clk_get(dc->dev, "pl_aud_clk");
+	if (IS_ERR(dc->aud_clk)) {
+		dev_warn(dc->dev, "PL audio clock is unavailable\n");
+	} else {
+		ret = mmi_dc_audio_init(dc);
+		if (ret < 0) {
+			dev_err(dc->dev, "failed to initialize Audio Driver: %d\n", ret);
+			return ret;
+		}
+	}
 
 	ret = devm_request_threaded_irq(dc->dev, dc->irq_num, NULL,
 					mmi_dc_irq_handler,
@@ -448,6 +553,7 @@ int mmi_dc_init(struct mmi_dc *dc, struct drm_device *drm)
 void mmi_dc_fini(struct mmi_dc *dc)
 {
 	mmi_dc_destroy_planes(dc);
+	mmi_dc_audio_uninit(dc);
 	mmi_dc_reset(dc, true);
 	dc_write_misc(dc, MMI_DC_MISC_WPROTS, 1);
 }

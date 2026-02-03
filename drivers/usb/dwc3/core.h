@@ -182,6 +182,8 @@
 
 #define DWC3_LLUCTL		0xd024
 
+#define DWC3_LCSR_TX_DEEMPH	0xd060
+#define DWC3_GBMUCTL		0xc164
 /* Bit fields */
 
 /* Global Status Register */
@@ -201,6 +203,13 @@
 /* Global SoC Bus Configuration Register: AHB-prot/AXI-cache/OCP-ReqInfo */
 #define DWC3_GSBUSCFG0_REQINFO(n)	(((n) & 0xffff) << 16)
 #define DWC3_GSBUSCFG0_REQINFO_UNSPECIFIED	0xffffffff
+
+/* LCSR_TX_DEEMPH Register:  setting TX deemphasis used in normal operation in gen2 */
+#define DWC3_LCSR_TX_DEEMPH_MASK(n)		((n) & 0x3ffff)
+#define DWC3_LCSR_TX_DEEMPH_UNSPECIFIED		0xffffffff
+
+/* GBMUCTL Register: disable DWC_USB31_AXI_STRICT_ORDER_EN */
+#define DWC3_GBMUCTL_DIS_AXI_STORDER_EN_MASK	BIT(2)
 
 /* Global Debug LSP MUX Select */
 #define DWC3_GDBGLSPMUX_ENDBC		BIT(15)	/* Host only */
@@ -1063,6 +1072,7 @@ struct dwc3_scratchpad_array {
  * @hsphy_mode: UTMI phy mode, one of following:
  *		- USBPHY_INTERFACE_MODE_UTMI
  *		- USBPHY_INTERFACE_MODE_UTMIW
+ * @dwc3_pmu: acquire and control power management unit(PMU) regulator
  * @role_sw: usb_role_switch handle
  * @role_switch_default_mode: default operation mode of controller while
  *			usb role is USB_ROLE_NONE.
@@ -1189,12 +1199,14 @@ struct dwc3_scratchpad_array {
  * @wakeup_pending_funcs: Indicates whether any interface has requested for
  *			 function wakeup in bitmap format where bit position
  *			 represents interface_id.
+ * @csr_tx_deemph_field_1: stores TX deemphasis used in Gen2 operation.
+ * @dis_axi_storder_en: disables AXI strict order enable bit.
  * @is_d3: set if the controller is in d3 state
  * @saved_regs: registers to be saved/restored during hibernation/wakeup events
  * @irq_wakeup: wakeup IRQ number, triggered when host asks to wakeup from
  *              hibernation
  * @force_hiber_wake: flag set when the gadget driver is forcefully triggering
-		a hibernation wakeup event
+ *		a hibernation wakeup event
  */
 struct dwc3 {
 	struct work_struct	drd_work;
@@ -1419,7 +1431,6 @@ struct dwc3 {
 	unsigned		is_hibernated:1;
 
 	unsigned		dis_metastability_quirk:1;
-	unsigned		mask_phy_rst:1;
 
 	unsigned		dis_split_quirk:1;
 	unsigned		async_callbacks:1;
@@ -1436,6 +1447,8 @@ struct dwc3 {
 	struct dentry		*debug_root;
 	u32			gsbuscfg0_reqinfo;
 	u32			wakeup_pending_funcs;
+	u32			csr_tx_deemph_field_1;
+	bool			dis_axi_storder_en;
 	bool			is_d3;
 	u32			*saved_regs;
 	u32			irq_wakeup;

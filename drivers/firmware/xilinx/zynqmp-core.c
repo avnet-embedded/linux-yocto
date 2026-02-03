@@ -6,6 +6,7 @@
  */
 
 #include <linux/arm-smccc.h>
+#include <linux/crash_dump.h>
 #include <linux/dma-mapping.h>
 #include <linux/hashtable.h>
 #include <linux/mfd/core.h>
@@ -64,17 +65,9 @@ struct platform_fw_data {
 				 u32 num_args, va_list *arg_list);
 
 	/*
-	 * Prepares the PLM command header for the platform.
-	 * The header will either use the PM_API_FEATURES or PM_FEATURE_CHECK,
-	 * depending on the platform.
+	 * Family code for platform.
 	 */
-	uint64_t (*prep_pm_cmd_header)(u32 module_id);
-
-	/*
-	 * Indicates whether the word swap required for the memory address
-	 * while loading PDI image based on the platform
-	 */
-	bool load_pdi_word_swap;
+	u32 family_code;
 };
 
 static struct platform_fw_data *active_platform_fw_data;
@@ -226,7 +219,6 @@ static uint64_t prep_pm_hdr_api_features(u32 module_id)
  * Return:
  * - 0 on success
  * - -EOPNOTSUPP if the firmware call fails.
- * - -ENODEV if the active_platform_fw_data is NULL.
  */
 static int do_feature_check_for_tfa_apis(const u32 api_id, u32 *ret_payload)
 {
@@ -234,18 +226,19 @@ static int do_feature_check_for_tfa_apis(const u32 api_id, u32 *ret_payload)
 	u64 smc_arg[2];
 	int ret;
 
-	if (!active_platform_fw_data)
-		return -ENODEV;
-
 	module_id = FIELD_GET(MODULE_ID_MASK, api_id);
 
-	smc_arg[0] = active_platform_fw_data->prep_pm_cmd_header(module_id);
+	smc_arg[0] = prep_pm_hdr_api_features(module_id);
 	smc_arg[1] = api_id;
 
 	ret = do_fw_call(ret_payload, 2, smc_arg[0], smc_arg[1]);
 
-	if (ret)
-		return -EOPNOTSUPP;
+	if (ret) {
+		smc_arg[0] = prep_pm_hdr_feature_check(module_id);
+		ret = do_fw_call(ret_payload, 2, smc_arg[0], smc_arg[1]);
+		if (ret)
+			return -EOPNOTSUPP;
+	}
 
 	return ret_payload[1];
 }
@@ -679,33 +672,6 @@ int zynqmp_pm_invoke_fn(u32 pm_api_id, u32 *ret_payload, u32 num_args, ...)
 }
 
 /**
- * zynqmp_pm_load_pdi_word_swap - Perform word swapping on a memory address.
- * @address: Memory address to be word-swapped.
- * @swapped_address: Pointer to store the resulting swapped address.
- *
- * This function checks if the active platform's firmware data specifies that
- * word swapping is required when loading a Programmable Device Image (PDI).
- * If so, it performs the necessary word swapping on the provided memory
- * address. The swapped address is stored in the provided pointer.
- *
- * Return:
- * - 0 on success.
- * - -ENODEV if the active_platform_fw_data is NULL.
- */
-int zynqmp_pm_load_pdi_word_swap(const u64 address, u64 *swapped_address)
-{
-	if (!active_platform_fw_data)
-		return -ENODEV;
-
-	if (active_platform_fw_data->load_pdi_word_swap)
-		*swapped_address = (address << 32) | (address >> 32);
-	else
-		*swapped_address = address;
-
-	return 0;
-}
-
-/**
  * zynqmp_pm_get_sip_svc_version() - Get SiP service call version
  * @version:	Returned version value
  *
@@ -765,6 +731,89 @@ static int get_set_conduit_method(struct device_node *np)
 	return 0;
 }
 
+/**
+ * zynqmp_pm_get_family_info() - Get family info of platform
+ * @family:	Returned family code value
+ *
+ * Return: Returns status, either success or error+reason
+ */
+int zynqmp_pm_get_family_info(u32 *family)
+{
+	if (!active_platform_fw_data)
+		return -ENODEV;
+
+	if (!family)
+		return -EINVAL;
+
+	*family = active_platform_fw_data->family_code;
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(zynqmp_pm_get_family_info);
+
+/**
+ * zynqmp_clear_pm_state() - Clear subsystem state.
+ * @dev: struct device
+ *
+ * Clears PM specific data in TF-A and firmware.
+ *
+ * Return: Returns status, either success or error+reason
+ */
+static int zynqmp_clear_pm_state(struct device *dev)
+{
+	u32 pm_family_code;
+	int ret;
+
+	/* Get the Family code of platform */
+	ret = zynqmp_pm_get_family_info(&pm_family_code);
+	if (ret < 0)
+		return ret;
+
+	/* Supporting on Versal and Versal Net platforms only */
+	if (pm_family_code == PM_VERSAL_FAMILY_CODE ||
+	    pm_family_code == PM_VERSAL_NET_FAMILY_CODE) {
+		/* Check if the TF-A supports the TF_A_CLEAR_PM_STATE */
+		ret = do_feature_check_call(TF_A_CLEAR_PM_STATE);
+		if ((ret & FIRMWARE_VERSION_MASK) >= PM_API_VERSION_1) {
+			/* Clear PM specific data in TF-A */
+			ret = zynqmp_pm_clear_tfa_state();
+			if (ret)
+				dev_err(dev,
+					"Failed to clear TF-A specific subsystem state: %d\n", ret);
+		} else {
+			dev_warn(dev, "TF_A_CLEAR_PM_STATE is not supported in TF-A: %d\n", ret);
+		}
+
+		/* Check if the firmware supports the PM_DEV_ALL_PERIPH node ID */
+		ret = do_feature_check_call(PM_RELEASE_NODE);
+		if ((ret & FIRMWARE_VERSION_MASK) >= PM_API_VERSION_3) {
+			/* Attempt to release all peripheral devices via firmware */
+			ret = zynqmp_pm_release_node(PM_DEV_ALL_PERIPH);
+			if (ret)
+				dev_err(dev, "Failed to release all peripheral devices: %d\n", ret);
+		} else {
+			dev_warn(dev,
+				 "Bulk device release is not supported by firmware: %d\n", ret);
+		}
+
+		/* Check if the firmware supports the PM_ALL_NOTIFIERS node ID */
+		ret = do_feature_check_call(PM_REGISTER_NOTIFIER);
+		if ((ret & FIRMWARE_VERSION_MASK) >= PM_API_VERSION_3) {
+			/* Attempt to unregister all notifier callbacks via firmware */
+			ret = zynqmp_pm_register_notifier(PM_ALL_NOTIFIERS, 0, 0, 0);
+			if (ret)
+				dev_err(dev, "Failed to unregister all notifiers: %d\n", ret);
+		} else {
+			dev_warn(dev,
+				 "Firmware doesn't support unregister all notifiers at once: %d\n",
+				 ret);
+			ret = 0;
+		}
+	}
+
+	return ret;
+}
+
 static int zynqmp_firmware_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -772,7 +821,6 @@ static int zynqmp_firmware_probe(struct platform_device *pdev)
 	u32 pm_api_version;
 	u32 pm_tz_version;
 	u32 pm_family_code;
-	u32 pm_sub_family_code;
 	int ret;
 
 	ret = get_set_conduit_method(dev->of_node);
@@ -815,10 +863,16 @@ static int zynqmp_firmware_probe(struct platform_device *pdev)
 	pr_info("%s Platform Management API v%d.%d\n", __func__,
 		pm_api_version >> 16, pm_api_version & 0xFFFF);
 
-	/* Get the Family code and sub family code of platform */
-	ret = zynqmp_pm_get_family_info(&pm_family_code, &pm_sub_family_code);
+	/* Get the Family code of platform */
+	ret = zynqmp_pm_get_family_info(&pm_family_code);
 	if (ret < 0)
 		return ret;
+
+	if (is_kdump_kernel()) {
+		ret = zynqmp_clear_pm_state(dev);
+		if (ret)
+			return ret;
+	}
 
 	/* Check trustzone version number */
 	ret = zynqmp_pm_get_trustzone_version(&pm_tz_version);
@@ -863,7 +917,7 @@ static int zynqmp_firmware_probe(struct platform_device *pdev)
 
 	zynqmp_pm_api_debugfs_init();
 
-	if (pm_family_code == VERSAL_FAMILY_CODE) {
+	if (pm_family_code != PM_ZYNQMP_FAMILY_CODE) {
 		em_dev = platform_device_register_data(&pdev->dev, "xlnx_event_manager",
 						       -1, NULL, 0);
 		if (IS_ERR(em_dev))
@@ -871,6 +925,11 @@ static int zynqmp_firmware_probe(struct platform_device *pdev)
 	}
 
 	return of_platform_populate(dev->of_node, NULL, NULL, dev);
+}
+
+static void zynqmp_firmware_shutdown(struct platform_device *pdev)
+{
+	zynqmp_clear_pm_state(&pdev->dev);
 }
 
 static void zynqmp_firmware_remove(struct platform_device *pdev)
@@ -893,27 +952,39 @@ static void zynqmp_firmware_remove(struct platform_device *pdev)
 static const struct platform_fw_data platform_fw_data_versal2 = {
 	.do_feature_check = do_feature_check_extended,
 	.zynqmp_pm_fw_call = __zynqmp_pm_fw_call_extended,
-	.prep_pm_cmd_header = prep_pm_hdr_api_features,
-	/* TF-A does only transparent forwarding do word swapping here */
-	.load_pdi_word_swap = true,
+	.family_code = PM_VERSAL2_FAMILY_CODE,
 };
 
-static const struct platform_fw_data platform_fw_data_zynqmp_and_versal = {
+static const struct platform_fw_data platform_fw_data_versal = {
 	.do_feature_check = do_feature_check_basic,
 	.zynqmp_pm_fw_call = __zynqmp_pm_fw_call_basic,
-	.prep_pm_cmd_header = prep_pm_hdr_feature_check,
-	/* the word swapping is done in TF-A */
-	.load_pdi_word_swap = false,
+	.family_code = PM_VERSAL_FAMILY_CODE,
+};
+
+static const struct platform_fw_data platform_fw_data_versal_net = {
+	.do_feature_check = do_feature_check_basic,
+	.zynqmp_pm_fw_call = __zynqmp_pm_fw_call_basic,
+	.family_code = PM_VERSAL_NET_FAMILY_CODE,
+};
+
+static const struct platform_fw_data platform_fw_data_zynqmp = {
+	.do_feature_check = do_feature_check_basic,
+	.zynqmp_pm_fw_call = __zynqmp_pm_fw_call_basic,
+	.family_code = PM_ZYNQMP_FAMILY_CODE,
 };
 
 static const struct of_device_id zynqmp_firmware_of_match[] = {
 	{
 		.compatible = "xlnx,zynqmp-firmware",
-		.data = &platform_fw_data_zynqmp_and_versal,
+		.data = &platform_fw_data_zynqmp,
 	},
 	{
 		.compatible = "xlnx,versal-firmware",
-		.data = &platform_fw_data_zynqmp_and_versal,
+		.data = &platform_fw_data_versal,
+	},
+	{
+		.compatible = "xlnx,versal-net-firmware",
+		.data = &platform_fw_data_versal_net,
 	},
 	{
 		.compatible = "xlnx,versal2-firmware",
@@ -930,5 +1001,6 @@ static struct platform_driver zynqmp_firmware_driver = {
 	},
 	.probe = zynqmp_firmware_probe,
 	.remove_new = zynqmp_firmware_remove,
+	.shutdown = zynqmp_firmware_shutdown,
 };
 module_platform_driver(zynqmp_firmware_driver);

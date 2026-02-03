@@ -215,6 +215,7 @@ aie_aperture_request_part_from_id(struct aie_aperture *aperture,
 	if (IS_ERR(apart)) {
 		dev_err(&aperture->dev, "failed to create partition %u.\n",
 			partition_id);
+		aie_resource_put_region(&aperture->cols_res, start_col, num_cols);
 		mutex_unlock(&aperture->mlock);
 		return apart;
 	}
@@ -281,7 +282,6 @@ static void aie_aperture_release_device(struct device *dev)
 	flush_work(&aperture->backtrack);
 	aie_resource_uninitialize(&aperture->cols_res);
 	kfree(aperture->l2_mask.val);
-	zynqmp_pm_release_node(aperture->node_id);
 	kfree(aperture);
 }
 
@@ -295,14 +295,10 @@ static void aie_aperture_release_device(struct device *dev)
 int aie_aperture_remove(struct aie_aperture *aperture)
 {
 	struct list_head *node, *pos, tmp;
-	int ret;
 
 	INIT_LIST_HEAD(&tmp);
 
-	ret = mutex_lock_interruptible(&aperture->mlock);
-	if (ret)
-		return ret;
-
+	mutex_lock(&aperture->mlock);
 	list_for_each_safe(pos, node, &aperture->partitions) {
 		struct aie_partition *apart;
 
@@ -319,10 +315,7 @@ int aie_aperture_remove(struct aie_aperture *aperture)
 		aie_part_remove(apart);
 	}
 
-	ret = mutex_lock_interruptible(&aperture->mlock);
-	if (ret)
-		return ret;
-
+	mutex_lock(&aperture->mlock);
 	if (aperture->adev->device_name == AIE_DEV_GEN_S100 ||
 	    aperture->adev->device_name == AIE_DEV_GEN_S200) {
 		xlnx_unregister_event(PM_NOTIFY_CB, VERSAL_EVENT_ERROR_PMC_ERR1,
@@ -331,8 +324,7 @@ int aie_aperture_remove(struct aie_aperture *aperture)
 	}
 	mutex_unlock(&aperture->mlock);
 
-	if (aperture->adev->dev_gen != AIE_DEVICE_GEN_AIE2PS)
-		aie_aperture_sysfs_remove_entries(aperture);
+	aie_aperture_sysfs_remove_entries(aperture);
 
 	of_node_clear_flag(aperture->dev.of_node, OF_POPULATED);
 	device_del(&aperture->dev);
@@ -568,20 +560,10 @@ of_aie_aperture_probe(struct aie_device *adev, struct device_node *nc)
 		}
 	}
 
-	ret = zynqmp_pm_request_node(aperture->node_id,
-				     ZYNQMP_PM_CAPABILITY_ACCESS, 0,
-				     ZYNQMP_PM_REQUEST_ACK_BLOCKING);
-	if (ret < 0) {
-		dev_err(dev, "Unable to request node %d\n", aperture->node_id);
+	ret = aie_aperture_sysfs_create_entries(aperture);
+	if (ret) {
+		dev_err(dev, "Failed to create aperture sysfs: %d\n", ret);
 		goto put_aperture_dev;
-	}
-
-	if (aperture->adev->dev_gen != AIE_DEVICE_GEN_AIE2PS) {
-		ret = aie_aperture_sysfs_create_entries(aperture);
-		if (ret) {
-			dev_err(dev, "Failed to create aperture sysfs: %d\n", ret);
-			goto put_aperture_dev;
-		}
 	}
 
 	INIT_WORK(&aperture->backtrack, aie_aperture_backtrack);

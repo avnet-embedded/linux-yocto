@@ -481,6 +481,8 @@ void of_xilinx_ai_engine_aperture_probe(struct aie_device *adev)
 		}
 		list_add_tail(&aperture->node, &adev->apertures);
 
+		aie_init_freq(aperture);
+
 		mutex_unlock(&adev->mlock);
 	}
 }
@@ -722,6 +724,7 @@ bool aie_partition_is_available(struct aie_partition_req *req)
 	if (!req)
 		return false;
 
+	trace_aie_partition_is_available(req);
 	class_dev_iter_init(&iter, aie_class, NULL, NULL);
 	while ((dev = class_dev_iter_next(&iter))) {
 		struct aie_aperture *aperture;
@@ -770,6 +773,7 @@ struct device *aie_partition_request(struct aie_partition_req *req)
 	if (!req)
 		return ERR_PTR(-EINVAL);
 
+	trace_aie_partition_request(req);
 	class_dev_iter_init(&iter, aie_class, NULL, NULL);
 	while ((dev = class_dev_iter_next(&iter))) {
 		struct aie_aperture *aperture;
@@ -807,19 +811,58 @@ struct device *aie_partition_request(struct aie_partition_req *req)
 
 	ret = aie_partition_get(apart, req);
 	if (ret) {
-		if (mutex_lock_interruptible(&apart->aperture->mlock))
-			return ERR_PTR(ret);
-
+		mutex_lock(&apart->aperture->mlock);
 		list_del(&apart->node);
 		aie_part_remove(apart);
 		mutex_unlock(&apart->aperture->mlock);
 	}
 	apart->user_event1_complete = req->user_event1_complete;
 	apart->user_event1_priv = req->user_event1_priv;
+	trace_aie_partition_request_done(req);
 
 	return &apart->dev;
 }
 EXPORT_SYMBOL_GPL(aie_partition_request);
+
+/**
+ * aie_get_device_info() - exports AI engine device information
+ * @device_info: Pointer to Structure which stores Device information
+ * @return: 0 for success, negative value for failure
+ */
+int aie_get_device_info(struct aie_device_info *device_info)
+{
+	struct device *dev;
+	struct class_dev_iter iter;
+
+	if (!device_info)
+		return -ENOMEM;
+
+	class_dev_iter_init(&iter, aie_class, NULL, NULL);
+	while ((dev = class_dev_iter_next(&iter))) {
+		struct aie_aperture *aperture;
+
+		if (strncmp(dev_name(dev), "aieaperture",
+			    strlen("aieaperture")))
+			continue;
+
+		aperture = dev_get_drvdata(dev);
+		if (!aperture)
+			continue;
+
+		device_info->cols = aperture->range.size.col;
+		device_info->rows = aperture->range.size.row;
+		device_info->core_rows = aperture->adev->ttype_attr[AIE_TILE_TYPE_TILE].num_rows;
+		device_info->mem_rows = aperture->adev->ttype_attr[AIE_TILE_TYPE_MEMORY].num_rows;
+		device_info->shim_rows = aperture->adev->ttype_attr[AIE_TILE_TYPE_SHIMPL].num_rows;
+
+		class_dev_iter_exit(&iter);
+		return 0;
+	}
+	class_dev_iter_exit(&iter);
+
+	return -ENODEV;
+}
+EXPORT_SYMBOL_GPL(aie_get_device_info);
 
 /**
  * aie_partition_get_fd() - get AI engine partition file descriptor
@@ -839,7 +882,7 @@ int aie_partition_get_fd(struct device *dev)
 		return -EINVAL;
 
 	apart = dev_to_aiepart(dev);
-
+	trace_aie_partition_get_fd(apart);
 	ret = aie_partition_fd(apart);
 	if (ret < 0)
 		return ret;
@@ -865,8 +908,9 @@ void aie_partition_release(struct device *dev)
 		return;
 
 	apart = dev_to_aiepart(dev);
-	fput(apart->filep);
-	flush_delayed_fput();
+	trace_aie_partition_release(apart);
+	__fput_sync(apart->filep);
+	trace_aie_partition_release_done(apart);
 }
 EXPORT_SYMBOL_GPL(aie_partition_release);
 
@@ -883,6 +927,7 @@ int aie_partition_reset(struct device *dev)
 		return -EINVAL;
 
 	apart = dev_to_aiepart(dev);
+	trace_aie_partition_reset(apart);
 	if (apart->adev->ops->part_reset)
 		return apart->adev->ops->part_reset(apart);
 
@@ -907,6 +952,7 @@ int aie_partition_post_reinit(struct device *dev)
 		return -EINVAL;
 
 	apart = dev_to_aiepart(dev);
+	trace_aie_partition_post_reinit(apart);
 	return aie_part_post_reinit(apart);
 }
 EXPORT_SYMBOL_GPL(aie_partition_post_reinit);

@@ -57,17 +57,11 @@
 
 #define PM_PINCTRL_PARAM_SET_VERSION	2
 
-#define ZYNQMP_FAMILY_CODE 0x23
-#define VERSAL_FAMILY_CODE 0x26
-
-/* When all subfamily of platform need to support */
-#define ALL_SUB_FAMILY_CODE		0x00
-#define VERSAL_SUB_FAMILY_CODE		0x01
-#define VERSAL_SUB_FAMILY_CODE_MAX	0x04
-#define VERSALNET_OR_VERSAL2_SUB_FAMILY_CODE	0x06
-
-#define FAMILY_CODE_MASK	GENMASK(27, 21)
-#define SUB_FAMILY_CODE_MASK	GENMASK(20, 18)
+/* Family codes */
+#define PM_ZYNQMP_FAMILY_CODE 0x1 /* ZynqMP family code */
+#define PM_VERSAL_FAMILY_CODE 0x2 /* Versal family code */
+#define PM_VERSAL_NET_FAMILY_CODE 0x3 /* Versal NET family code */
+#define PM_VERSAL2_FAMILY_CODE 0x4 /* Versal Gen 2 family code */
 
 #define API_ID_MASK		GENMASK(7, 0)
 #define MODULE_ID_MASK		GENMASK(11, 8)
@@ -77,6 +71,7 @@
 #define FIRMWARE_VERSION_MASK		0xFFFFU
 
 /* ATF only commands */
+#define TF_A_CLEAR_PM_STATE		0xa05
 #define TF_A_PM_REGISTER_SGI		0xa04
 #define PM_GET_TRUSTZONE_VERSION	0xa03
 #define PM_SET_SUSPEND_MODE		0xa02
@@ -113,6 +108,12 @@
 /* ZynqMP SD tap delay tuning */
 #define SD_ITAPDLY	0xFF180314
 #define SD_OTAPDLYSEL	0xFF180318
+
+/* Node ID for all peripheral devices */
+#define PM_DEV_ALL_PERIPH	0x18224FFFU
+
+/* Node ID for all notifier callbacks */
+#define PM_ALL_NOTIFIERS	0xFFFFFFFFU
 
 enum pm_module_id {
 	PM_MODULE_ID = 0x0,
@@ -607,10 +608,9 @@ int zynqmp_firmware_pm_sysfs_entry(struct platform_device *pdev);
 #if IS_REACHABLE(CONFIG_ZYNQMP_FIRMWARE)
 int zynqmp_pm_get_api_version(u32 *version);
 int zynqmp_pm_get_chipid(u32 *idcode, u32 *version);
-int zynqmp_pm_get_family_info(u32 *family, u32 *subfamily);
+int zynqmp_pm_get_family_info(u32 *family);
 int zynqmp_pm_get_trustzone_version(u32 *version);
 int zynqmp_pm_get_sip_svc_version(u32 *version);
-int zynqmp_pm_load_pdi_word_swap(const u64 address, u64 *swapped_address);
 int zynqmp_pm_query_data(struct zynqmp_pm_query_data qdata, u32 *out);
 int zynqmp_pm_clock_enable(u32 clock_id);
 int zynqmp_pm_clock_disable(u32 clock_id);
@@ -685,6 +685,7 @@ int zynqmp_pm_get_last_reset_reason(u32 *reset_reason);
 int zynqmp_pm_aie_operation(u32 node, u16 start_col, u16 num_col, u32 operation);
 int zynqmp_pm_get_qos(u32 node, u32 *const def_qos, u32 *const qos);
 int versal2_pm_aie2ps_operation(u32 node, u32 size, u32 addr_high, u32 addr_low);
+int zynqmp_pm_clear_tfa_state(void);
 #else
 static inline int zynqmp_pm_get_api_version(u32 *version)
 {
@@ -696,7 +697,7 @@ static inline int zynqmp_pm_get_chipid(u32 *idcode, u32 *version)
 	return -ENODEV;
 }
 
-static inline int zynqmp_pm_get_family_info(u32 *family, u32 *subfamily)
+static inline int zynqmp_pm_get_family_info(u32 *family)
 {
 	return -ENODEV;
 }
@@ -1032,6 +1033,12 @@ static inline int versal2_pm_aie2ps_operation(u32 node, u32 size, u32 addr_high,
 {
 	return -ENODEV;
 }
+
+static inline int zynqmp_pm_clear_tfa_state(void)
+{
+	return -ENODEV;
+}
+
 #endif
 
 #endif /* __FIRMWARE_ZYNQMP_H__ */

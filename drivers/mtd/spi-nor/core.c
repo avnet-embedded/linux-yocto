@@ -3713,8 +3713,11 @@ static int spi_nor_set_octal_dtr(struct spi_nor *nor, bool enable)
 		return 0;
 
 	if (!(nor->read_proto == SNOR_PROTO_8_8_8_DTR &&
-	      nor->write_proto == SNOR_PROTO_8_8_8_DTR))
+	      nor->write_proto == SNOR_PROTO_8_8_8_DTR)) {
+		if (params->phy_enable)
+			params->phy_enable(nor);
 		return 0;
+	}
 
 	if (!(nor->flags & SNOR_F_IO_MODE_EN_VOLATILE))
 		return 0;
@@ -3968,12 +3971,19 @@ static int spi_nor_suspend(struct mtd_info *mtd)
 static void spi_nor_resume(struct mtd_info *mtd)
 {
 	struct spi_nor *nor = mtd_to_spi_nor(mtd);
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 	struct device *dev = nor->dev;
 	int ret;
 
 	ret = spi_nor_hw_reset(nor);
 	if (ret)
 		dev_err(dev, "device reset failed during resume()\n");
+
+	if (params->addr_mode_nbytes == 4) {
+		ret = spi_nor_set_4byte_addr_mode(nor, true);
+		if (ret)
+			dev_err(nor->dev, "Failed to enter 4-byte address mode, err = %d\n", ret);
+	}
 
 	/* re-initialize the nor chip */
 	ret = spi_nor_init(nor);

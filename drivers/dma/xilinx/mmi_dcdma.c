@@ -20,6 +20,7 @@
 #include "../virt-dma.h"
 
 #define MMI_DCDMA_NUM_CHAN		8
+#define MMI_DCDMA_AUD_CHAN_ID		6
 
 /* DCDMA registers */
 #define MMI_DCDMA_WPROTS		0x0000
@@ -178,6 +179,7 @@ struct mmi_dcdma_hw_desc {
  * @dma_addr: descriptor DMA address
  * @dma_pool: DMA pool this descriptor allocated from
  * @error: error reported by hardware while running this descriptor
+ * @node: list node for software descriptors
  */
 struct mmi_dcdma_sw_desc {
 	struct mmi_dcdma_hw_desc hw;
@@ -185,6 +187,7 @@ struct mmi_dcdma_sw_desc {
 	dma_addr_t dma_addr;
 	struct dma_pool *dma_pool;
 	u32 error;
+	struct list_head node;
 };
 
 struct mmi_dcdma_device;
@@ -198,6 +201,7 @@ struct mmi_dcdma_device;
  * @mdev: DCDMA device
  * @active_desc: descriptor currently running by the hardware
  * @wait_to_stop: queue to wait for outstanding transactions before the stop
+ * @dst_addr: in-device channel destination address
  * @video_group: flag if multi-channel operations are requested for a video
  */
 struct mmi_dcdma_chan {
@@ -209,6 +213,7 @@ struct mmi_dcdma_chan {
 
 	struct mmi_dcdma_sw_desc *active_desc;
 	wait_queue_head_t wait_to_stop;
+	dma_addr_t dst_addr;
 	bool video_group;
 };
 
@@ -321,6 +326,7 @@ mmi_dcdma_chan_alloc_sw_desc(struct mmi_dcdma_chan *chan)
 
 	desc->dma_addr = dma_addr;
 	desc->dma_pool = chan->desc_pool;
+	INIT_LIST_HEAD(&desc->node);
 
 	return desc;
 }
@@ -363,6 +369,7 @@ static void mmi_dcdma_sw_desc_set_dma_addr(struct mmi_dcdma_sw_desc *desc,
  * mmi_dcdma_chan_prep_interleaved_dma - Prepare an interleaved DMA descriptor
  * @chan: DMA channel
  * @xt: interleaved DMA transfer template
+ * @flags: DMA transfer configuration flags
  *
  * Prepare DCDMA descriptor for an interleaved DMA transfer.
  *
@@ -370,11 +377,13 @@ static void mmi_dcdma_sw_desc_set_dma_addr(struct mmi_dcdma_sw_desc *desc,
  */
 static struct mmi_dcdma_sw_desc *
 mmi_dcdma_chan_prep_interleaved_dma(struct mmi_dcdma_chan *chan,
-				    struct dma_interleaved_template *xt)
+				    struct dma_interleaved_template *xt,
+				    unsigned long flags)
 {
 	struct mmi_dcdma_sw_desc *sw_desc;
 	struct mmi_dcdma_hw_desc *hw_desc;
 	size_t line_size, stride, data_size;
+	bool repeat = flags & DMA_PREP_REPEAT;
 
 	if (!IS_ALIGNED(xt->src_start, MMI_DCDMA_ALIGN_BYTES)) {
 		dev_err(chan->mdev->base.dev,
@@ -387,7 +396,8 @@ mmi_dcdma_chan_prep_interleaved_dma(struct mmi_dcdma_chan *chan,
 	if (!sw_desc)
 		return NULL;
 
-	mmi_dcdma_sw_desc_set_dma_addr(sw_desc, sw_desc, xt->src_start);
+	mmi_dcdma_sw_desc_set_dma_addr(sw_desc, repeat ? sw_desc : NULL,
+				       xt->src_start);
 
 	hw_desc = &sw_desc->hw;
 	line_size = ALIGN(xt->sgl[0].size, MMI_DCDMA_LINESIZE_ALIGN_BITS >> 3);
@@ -400,14 +410,15 @@ mmi_dcdma_chan_prep_interleaved_dma(struct mmi_dcdma_chan *chan,
 
 	hw_desc->ctrl.preamble = MMI_DCDMA_DESC_CTRL_PREAMBLE;
 	hw_desc->ctrl.update_en = 0; /* set 1 to receive PTS */
-	hw_desc->ctrl.ignore_done = 1;
-	hw_desc->ctrl.last_descriptor = 0;
+	hw_desc->ctrl.ignore_done = repeat;
+	hw_desc->ctrl.last_descriptor = !repeat;
 	hw_desc->ctrl.last_descriptor_frame = 1;
 	hw_desc->data_size = data_size;
 	hw_desc->line_or_tile = 0;
 	hw_desc->line_size = line_size;
 	hw_desc->line_stride = stride >> 4; /* 16 bytes blocks */
-	hw_desc->irq_en = 0;
+	hw_desc->target_addr = chan->dst_addr;
+	hw_desc->irq_en = !repeat;
 
 	return sw_desc;
 }
@@ -430,12 +441,16 @@ to_dcdma_sw_desc(struct virt_dma_desc *vdesc)
  */
 static void mmi_dcdma_free_virt_desc(struct virt_dma_desc *vdesc)
 {
-	struct mmi_dcdma_sw_desc *desc;
+	struct mmi_dcdma_sw_desc *desc, *sw_desc, *tmp;
 
 	if (!vdesc)
 		return;
 
 	desc = to_dcdma_sw_desc(vdesc);
+	list_for_each_entry_safe(sw_desc, tmp, &desc->node, node) {
+		list_del(&sw_desc->node);
+		mmi_dcdma_free_sw_desc(sw_desc);
+	}
 	mmi_dcdma_free_sw_desc(desc);
 }
 
@@ -570,9 +585,18 @@ static void mmi_dcdma_chan_handle_error(struct mmi_dcdma_chan *chan, u32 error)
  */
 static void mmi_dcdma_chan_handle_done(struct mmi_dcdma_chan *chan)
 {
-	struct mmi_dcdma_device *mdev = chan->mdev;
+	unsigned long flags;
 
-	dev_err(mdev->base.dev, "chan%u: done reported\n", chan->id);
+	spin_lock_irqsave(&chan->vchan.lock, flags);
+	if (chan->active_desc) {
+		if (chan->id == MMI_DCDMA_AUD_CHAN_ID) {
+			vchan_cyclic_callback(&chan->active_desc->vdesc);
+		} else {
+			vchan_cookie_complete(&chan->active_desc->vdesc);
+			chan->active_desc = NULL;
+		}
+	}
+	spin_unlock_irqrestore(&chan->vchan.lock, flags);
 }
 
 /**
@@ -969,6 +993,81 @@ static void mmi_dcdma_free_chan_resources(struct dma_chan *dchan)
 }
 
 /**
+ * mmi_dcdma_setup_cyclic_transfer - Setup Cyclic DMA transfer
+ * @dchan: generic DMA channel
+ * @buf_addr: buffer address
+ * @buf_len: buffer length
+ * @period_len: number of periods
+ * @direction: transfer direction
+ * @flags: transfer flags
+ *
+ * Return: Allocated async DMA descriptor on success or NULL otherwise.
+ */
+static struct dma_async_tx_descriptor *
+mmi_dcdma_setup_cyclic_transfer(struct dma_chan *dchan, dma_addr_t buf_addr,
+				size_t buf_len, size_t period_len,
+				enum dma_transfer_direction direction,
+				unsigned long flags)
+{
+	struct mmi_dcdma_sw_desc *sw_desc, *head_sw_desc, *last = NULL;
+	struct mmi_dcdma_chan *chan = to_dcdma_chan(dchan);
+	u32 periods, i;
+
+	if (direction != DMA_MEM_TO_DEV || (buf_len % period_len))
+		return NULL;
+
+	periods = buf_len / period_len;
+
+	head_sw_desc = mmi_dcdma_chan_alloc_sw_desc(chan);
+	if (!head_sw_desc)
+		return NULL;
+
+	for (i = 0; i < periods; i++) {
+		struct mmi_dcdma_hw_desc *hw_desc;
+
+		if (!IS_ALIGNED(buf_addr, MMI_DCDMA_ALIGN_BYTES)) {
+			dev_err(chan->mdev->base.dev,
+				"chan%u: buffer should be aligned at %d B\n",
+				chan->id, MMI_DCDMA_ALIGN_BYTES);
+			goto free;
+		}
+
+		if (i == 0) {
+			sw_desc = head_sw_desc;
+		} else {
+			sw_desc = mmi_dcdma_chan_alloc_sw_desc(chan);
+			if (!sw_desc)
+				goto free;
+			list_add_tail(&sw_desc->node, &head_sw_desc->node);
+		}
+
+		mmi_dcdma_sw_desc_set_dma_addr(sw_desc, last, buf_addr);
+		hw_desc = &sw_desc->hw;
+		hw_desc->data_size = period_len;
+		hw_desc->line_size = period_len;
+		hw_desc->line_stride = period_len >> 4;
+		hw_desc->ctrl.preamble = MMI_DCDMA_DESC_CTRL_PREAMBLE;
+		hw_desc->ctrl.update_en = 0; /* set 1 to receive PTS */
+		hw_desc->ctrl.ignore_done = 1;
+		hw_desc->ctrl.last_descriptor = 0;
+		hw_desc->irq_en = 1;
+
+		buf_addr += period_len;
+		last = sw_desc;
+	}
+	/* Logic to make list cyclic i.e pointing last's next desc to the head */
+	last->hw.next_desc = head_sw_desc->dma_addr;
+	last->hw.ctrl.last_descriptor_frame = 1;
+
+	return vchan_tx_prep(&chan->vchan, &head_sw_desc->vdesc, flags);
+
+free:
+	mmi_dcdma_free_virt_desc(&head_sw_desc->vdesc);
+
+	return NULL;
+}
+
+/**
  * mmi_dcdma_prep_interleaved_dma - Prepare interleaved DMA transfer
  * @dchan: generic DMA channel
  * @xt: interleaved DMA transfer template
@@ -990,10 +1089,10 @@ mmi_dcdma_prep_interleaved_dma(struct dma_chan *dchan,
 	if (!xt->numf || !xt->sgl[0].size)
 		return NULL;
 
-	if (!(flags & DMA_PREP_REPEAT) || !(flags & DMA_PREP_LOAD_EOT))
+	if (flags & DMA_PREP_REPEAT && !(flags & DMA_PREP_LOAD_EOT))
 		return NULL;
 
-	desc = mmi_dcdma_chan_prep_interleaved_dma(chan, xt);
+	desc = mmi_dcdma_chan_prep_interleaved_dma(chan, xt, flags);
 	if (!desc)
 		return NULL;
 
@@ -1039,6 +1138,7 @@ static int mmi_dcdma_config(struct dma_chan *dchan,
 		return -EINVAL;
 
 	spin_lock_irqsave(&chan->vchan.lock, flags);
+	chan->dst_addr = config->dst_addr;
 	if (pconfig)
 		chan->video_group = pconfig->video_group;
 	spin_unlock_irqrestore(&chan->vchan.lock, flags);
@@ -1282,12 +1382,14 @@ static int mmi_dcdma_probe(struct platform_device *pdev)
 
 	dma_cap_set(DMA_SLAVE, ddev->cap_mask);
 	dma_cap_set(DMA_PRIVATE, ddev->cap_mask);
+	dma_cap_set(DMA_CYCLIC, ddev->cap_mask);
 	dma_cap_set(DMA_INTERLEAVE, ddev->cap_mask);
 	dma_cap_set(DMA_REPEAT, ddev->cap_mask);
 	dma_cap_set(DMA_LOAD_EOT, ddev->cap_mask);
 	ddev->copy_align = fls(MMI_DCDMA_ALIGN_BYTES - 1);
 	ddev->device_alloc_chan_resources = mmi_dcdma_alloc_chan_resources;
 	ddev->device_free_chan_resources = mmi_dcdma_free_chan_resources;
+	ddev->device_prep_dma_cyclic = mmi_dcdma_setup_cyclic_transfer;
 	ddev->device_prep_interleaved_dma = mmi_dcdma_prep_interleaved_dma;
 	ddev->device_tx_status = dma_cookie_status;
 	ddev->device_issue_pending = mmi_dcdma_issue_pending;
