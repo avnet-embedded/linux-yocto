@@ -862,54 +862,198 @@ static inline int get_mrmac_gtlanes_count(int port_speed)
 	return lane_count;
 }
 
+static ulong mrmac_gt_tx_reset_status(struct axienet_local *lp)
+{
+	ulong val;
+
+	gpiod_get_array_value_cansleep(lp->gds_gt_tx_reset_done->ndescs,
+				       lp->gds_gt_tx_reset_done->desc,
+				       lp->gds_gt_tx_reset_done->info, &val);
+
+	return val;
+}
+
+static ulong mrmac_gt_rx_reset_status(struct axienet_local *lp)
+{
+	ulong val;
+
+	gpiod_get_array_value_cansleep(lp->gds_gt_rx_reset_done->ndescs,
+				       lp->gds_gt_rx_reset_done->desc,
+				       lp->gds_gt_rx_reset_done->info, &val);
+
+	return val;
+}
+
+static inline int axienet_mrmac_ctrl_reset(struct axienet_local *lp, ulong val_gpio,
+					   ulong gt_reset_done_mask)
+{
+	u32 err;
+
+	gpiod_set_array_value_cansleep(lp->gds_gt_ctrl->ndescs,
+				       lp->gds_gt_ctrl->desc,
+				       lp->gds_gt_ctrl->info, &val_gpio);
+	mdelay(DELAY_1MS);
+	val_gpio = 0;
+	gpiod_set_array_value_cansleep(lp->gds_gt_ctrl->ndescs,
+				       lp->gds_gt_ctrl->desc,
+				       lp->gds_gt_ctrl->info, &val_gpio);
+
+	/* Check for GT TX RESET DONE */
+	err = readx_poll_timeout(mrmac_gt_tx_reset_status, lp, val_gpio,
+				 val_gpio == gt_reset_done_mask,
+				 10, 100 * DELAY_OF_ONE_MILLISEC);
+	if (err) {
+		netdev_err(lp->ndev,
+			   "GT TX Reset Done not achieved (Status = 0x%lx)\n", val_gpio);
+		return err;
+	}
+
+	/* Check for GT RX RESET DONE */
+	err = readx_poll_timeout(mrmac_gt_rx_reset_status, lp, val_gpio,
+				 val_gpio == gt_reset_done_mask,
+				 10, 100 * DELAY_OF_ONE_MILLISEC);
+	if (err) {
+		netdev_err(lp->ndev,
+			   "GT RX Reset Done not achieved (Status = 0x%lx)\n",
+			   val_gpio);
+		return err;
+	}
+	return 0;
+}
+
 static inline int axienet_mrmac_gt_reset(struct net_device *ndev)
 {
 	struct axienet_local *lp = netdev_priv(ndev);
+	ulong val_gpio = 0, gt_reset_done_mask = 0;
+	int i, num_gtlanes, gpio_count;
 	u32 err, val;
-	int i, num_gtlanes;
+
+	gpio_count = gpiod_count(lp->dev, "gt-ctrl");
 
 	num_gtlanes = get_mrmac_gtlanes_count(lp->max_speed);
-	if (mrmac_pll_rst == 0) {
-		for (i = 0; i < num_gtlanes; i++) {
-			iowrite32(MRMAC_GT_RST_ALL_MASK, (lp->gt_ctrl +
-				  (MRMAC_GT_LANE_OFFSET * i) +
-				  MRMAC_GT_CTRL_OFFSET));
-			mdelay(DELAY_1MS);
-			iowrite32(0, (lp->gt_ctrl + (MRMAC_GT_LANE_OFFSET * i) +
-				      MRMAC_GT_CTRL_OFFSET));
+
+	if (lp->use_gt_gpio) {
+		/* As per IP Documentation, GT Reset need to be done only once after
+		 * MRMAC IP Power On.
+		 */
+		if (!lp->gt_reset_done) {
+			if (lp->gds_gt_ctrl) {
+				if (gpio_count > 1) {
+					for (i = 0; i < num_gtlanes; i++) {
+						val_gpio |= (MRMAC_GT_RST_ALL_MASK) << i;
+						gt_reset_done_mask |= (MRMAC_GT_RST_DONE_MASK) << i;
+					}
+
+					err = axienet_mrmac_ctrl_reset(lp, val_gpio,
+								       gt_reset_done_mask);
+					if (err)
+						return err;
+				} else {
+					val_gpio = 1;
+					err = axienet_mrmac_ctrl_reset(lp, val_gpio,
+								       MRMAC_GT_RST_DONE_MASK);
+					if (err)
+						return err;
+				}
+			}
+			lp->gt_reset_done = true;
 		}
 
-		/* Wait for PLL lock with timeout */
-		err = readl_poll_timeout(lp->gt_pll + MRMAC_GT_PLL_STS_OFFSET,
-					 val, (val & MRMAC_GT_PLL_DONE_MASK),
-					 10, DELAY_OF_ONE_MILLISEC * 100);
-		if (err) {
-			netdev_err(ndev, "MRMAC PLL lock not complete! Cross-check the MAC ref clock configuration\n");
-			return -ENODEV;
+		/* Set GT configuration to default state before configuring with design speed */
+		val_gpio = MRMAC_GT_DEFAULT_MASK;
+		gpiod_set_array_value_cansleep(lp->gds_gt_ctrl_rate->ndescs,
+					       lp->gds_gt_ctrl_rate->desc,
+					       lp->gds_gt_ctrl_rate->info, &val_gpio);
+
+		mdelay(DELAY_1MS);
+
+		/* Configure Rate */
+		if (lp->max_speed == SPEED_100000) {
+			val_gpio = MRMAC_GT_100G_MASK;
+			gpiod_set_array_value_cansleep(lp->gds_gt_ctrl_rate->ndescs,
+						       lp->gds_gt_ctrl_rate->desc,
+						       lp->gds_gt_ctrl_rate->info, &val_gpio);
+		} else if (lp->max_speed == SPEED_25000) {
+			val_gpio = MRMAC_GT_25G_MASK;
+			gpiod_set_array_value_cansleep(lp->gds_gt_ctrl_rate->ndescs,
+						       lp->gds_gt_ctrl_rate->desc,
+						       lp->gds_gt_ctrl_rate->info, &val_gpio);
+		} else if (lp->max_speed == SPEED_10000) {
+			val_gpio = MRMAC_GT_10G_MASK;
+			gpiod_set_array_value_cansleep(lp->gds_gt_ctrl_rate->ndescs,
+						       lp->gds_gt_ctrl_rate->desc,
+						       lp->gds_gt_ctrl_rate->info, &val_gpio);
 		}
-		mrmac_pll_rst = 1;
+
+		/* Reset GT TX datapath */
+		val_gpio = MRMAC_GT_RST_TX_RX_MASK;
+		gpiod_set_array_value_cansleep(lp->gds_gt_tx_dpath->ndescs,
+					       lp->gds_gt_tx_dpath->desc,
+					       lp->gds_gt_tx_dpath->info, &val_gpio);
+
+		mdelay(DELAY_1MS);
+		val_gpio = 0;
+		gpiod_set_array_value_cansleep(lp->gds_gt_tx_dpath->ndescs,
+					       lp->gds_gt_tx_dpath->desc,
+					       lp->gds_gt_tx_dpath->info, &val_gpio);
+		mdelay(DELAY_1MS);
+
+		/* Reset GT Rx datapath */
+		val_gpio = MRMAC_GT_RST_TX_RX_MASK;
+		gpiod_set_array_value_cansleep(lp->gds_gt_rx_dpath->ndescs,
+					       lp->gds_gt_rx_dpath->desc,
+					       lp->gds_gt_rx_dpath->info, &val_gpio);
+
+		mdelay(DELAY_1MS);
+		val_gpio = 0;
+		gpiod_set_array_value_cansleep(lp->gds_gt_rx_dpath->ndescs,
+					       lp->gds_gt_rx_dpath->desc,
+					       lp->gds_gt_rx_dpath->info, &val_gpio);
+
+		mdelay(DELAY_1MS);
+	} else {
+		if (mrmac_pll_rst == 0) {
+			for (i = 0; i < num_gtlanes; i++) {
+				iowrite32(MRMAC_GT_RST_ALL_MASK, (lp->gt_ctrl +
+					  (MRMAC_GT_LANE_OFFSET * i) +
+					  MRMAC_GT_CTRL_OFFSET));
+				mdelay(DELAY_1MS);
+				iowrite32(0, (lp->gt_ctrl + (MRMAC_GT_LANE_OFFSET * i) +
+					      MRMAC_GT_CTRL_OFFSET));
+			}
+
+			/* Wait for PLL lock with timeout */
+			err = readl_poll_timeout(lp->gt_pll + MRMAC_GT_PLL_STS_OFFSET,
+						 val, (val & MRMAC_GT_PLL_DONE_MASK),
+						 10, DELAY_OF_ONE_MILLISEC * 100);
+			if (err) {
+				netdev_err(ndev, "MRMAC PLL lock not complete! Cross-check the MAC ref clock configuration\n");
+				return -ENODEV;
+			}
+			mrmac_pll_rst = 1;
+		}
+
+		if (lp->max_speed == SPEED_100000)
+			iowrite32(MRMAC_GT_100G_MASK, (lp->gt_ctrl +
+				  MRMAC_GT_LANE_OFFSET * lp->gt_lane +
+				  MRMAC_GT_RATE_OFFSET));
+		else if (lp->max_speed == SPEED_25000)
+			iowrite32(MRMAC_GT_25G_MASK, (lp->gt_ctrl +
+				  MRMAC_GT_LANE_OFFSET * lp->gt_lane +
+				  MRMAC_GT_RATE_OFFSET));
+		else
+			iowrite32(MRMAC_GT_10G_MASK, (lp->gt_ctrl +
+				  MRMAC_GT_LANE_OFFSET * lp->gt_lane +
+				  MRMAC_GT_RATE_OFFSET));
+
+		iowrite32(MRMAC_GT_RST_RX_MASK | MRMAC_GT_RST_TX_MASK,
+			  (lp->gt_ctrl + MRMAC_GT_LANE_OFFSET * lp->gt_lane +
+			  MRMAC_GT_CTRL_OFFSET));
+		mdelay(DELAY_1MS);
+		iowrite32(0, (lp->gt_ctrl + MRMAC_GT_LANE_OFFSET * lp->gt_lane +
+			  MRMAC_GT_CTRL_OFFSET));
+		mdelay(DELAY_1MS);
 	}
-
-	if (lp->max_speed == SPEED_100000)
-		iowrite32(MRMAC_GT_100G_MASK, (lp->gt_ctrl +
-			  MRMAC_GT_LANE_OFFSET * lp->gt_lane +
-			  MRMAC_GT_RATE_OFFSET));
-	else if (lp->max_speed == SPEED_25000)
-		iowrite32(MRMAC_GT_25G_MASK, (lp->gt_ctrl +
-			  MRMAC_GT_LANE_OFFSET * lp->gt_lane +
-			  MRMAC_GT_RATE_OFFSET));
-	else
-		iowrite32(MRMAC_GT_10G_MASK, (lp->gt_ctrl +
-			  MRMAC_GT_LANE_OFFSET * lp->gt_lane +
-			  MRMAC_GT_RATE_OFFSET));
-
-	iowrite32(MRMAC_GT_RST_RX_MASK | MRMAC_GT_RST_TX_MASK,
-		  (lp->gt_ctrl + MRMAC_GT_LANE_OFFSET * lp->gt_lane +
-		  MRMAC_GT_CTRL_OFFSET));
-	mdelay(DELAY_1MS);
-	iowrite32(0, (lp->gt_ctrl + MRMAC_GT_LANE_OFFSET * lp->gt_lane +
-		  MRMAC_GT_CTRL_OFFSET));
-	mdelay(DELAY_1MS);
 
 	return 0;
 }
@@ -1036,15 +1180,14 @@ void axienet_dma_stop(struct axienet_dma_q *dq)
  * axienet_device_reset - Reset and initialize the Axi Ethernet hardware.
  * @ndev:	Pointer to the net_device structure
  *
- * Return: 0 on success, Negative value on errors
- *
  * This function is called to reset and initialize the Axi Ethernet core. This
  * is typically called during initialization. It does a reset of the Axi DMA
  * Rx/Tx channels and initializes the Axi DMA BDs. Since Axi DMA reset lines
  * are connected to Axi Ethernet reset lines, this in turn resets the Axi
  * Ethernet core. No separate hardware reset is done for the Axi Ethernet
  * core.
- * Returns 0 on success or a negative error number otherwise.
+ *
+ * Return: 0 on success or a negative error number otherwise.
  */
 static int axienet_device_reset(struct net_device *ndev)
 {
@@ -1383,7 +1526,8 @@ static void axienet_rx_hwtstamp(struct axienet_local *lp,
  *
  * Would either be called after a successful transmit operation, or after
  * there was an error when setting up the chain.
- * Returns the number of packets handled.
+ *
+ * Return: The number of packets handled.
  */
 
 static int axienet_free_tx_chain(struct axienet_dma_q *q, u32 first_bd,
@@ -1487,20 +1631,17 @@ static inline int axienet_check_tx_bd_space(struct axienet_dma_q *q,
 #ifdef CONFIG_AXIENET_HAS_MCDMA
 	struct aximcdma_bd *cur_p;
 
-	if (CIRC_SPACE(q->tx_bd_tail, q->tx_bd_ci, lp->tx_bd_num) < (num_frag + 1))
-		return NETDEV_TX_BUSY;
-
 	cur_p = &q->txq_bd_v[(q->tx_bd_tail + num_frag) % lp->tx_bd_num];
 	if (cur_p->sband_stats & XMCDMA_BD_STS_ALL_MASK)
 		return NETDEV_TX_BUSY;
 #else
 	struct axidma_bd *cur_p;
 
-	if (CIRC_SPACE(q->tx_bd_tail, q->tx_bd_ci, lp->tx_bd_num) < (num_frag + 1))
-		return NETDEV_TX_BUSY;
-
-	cur_p = &q->tx_bd_v[(q->tx_bd_tail + num_frag) % lp->tx_bd_num];
-	if (cur_p->status & XAXIDMA_BD_STS_ALL_MASK)
+	/* Ensure we see all descriptor updates from device or TX polling */
+	rmb();
+	cur_p = &q->tx_bd_v[(READ_ONCE(q->tx_bd_tail) + num_frag) %
+			     lp->tx_bd_num];
+	if (cur_p->cntrl)
 		return NETDEV_TX_BUSY;
 #endif
 	return 0;
@@ -1922,7 +2063,6 @@ static int axienet_queue_xmit(struct sk_buff *skb,
 #else
 	struct axidma_bd *cur_p;
 #endif
-	unsigned long flags;
 	struct axienet_dma_q *q;
 
 	if (lp->axienet_config->mactype == XAXIENET_10G_25G ||
@@ -1950,31 +2090,20 @@ static int axienet_queue_xmit(struct sk_buff *skb,
 #else
 	cur_p = &q->tx_bd_v[q->tx_bd_tail];
 #endif
-	spin_lock_irqsave(&q->tx_lock, flags);
-	if (axienet_check_tx_bd_space(q, num_frag)) {
-		if (netif_queue_stopped(ndev)) {
-			spin_unlock_irqrestore(&q->tx_lock, flags);
-			return NETDEV_TX_BUSY;
-		}
+	if (axienet_check_tx_bd_space(q, num_frag + 1)) {
+		/* Should not happen as last start_xmit call should have
+		 * checked for sufficient space and queue should only be
+		 * woken when sufficient space is available.
+		 */
 		netif_stop_queue(ndev);
-
-		/* Matches barrier in axienet_free_tx_chain */
-		smp_mb();
-
-		/* Space might have just been freed - check again */
-		if (axienet_check_tx_bd_space(q, num_frag)) {
-			spin_unlock_irqrestore(&q->tx_lock, flags);
-			return NETDEV_TX_BUSY;
-		}
-
-		netif_wake_queue(ndev);
+		if (net_ratelimit())
+			netdev_warn(ndev, "TX ring unexpectedly full\n");
+		return NETDEV_TX_BUSY;
 	}
 
 #ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
-	if (axienet_skb_tstsmp(&skb, q, ndev)) {
-		spin_unlock_irqrestore(&q->tx_lock, flags);
+	if (axienet_skb_tstsmp(&skb, q, ndev))
 		return NETDEV_TX_BUSY;
-	}
 #endif
 
 	if (skb->ip_summed == CHECKSUM_PARTIAL && !lp->eth_hasnobuf &&
@@ -2027,8 +2156,6 @@ static int axienet_queue_xmit(struct sk_buff *skb,
 #else
 			desc_set_phys_addr(lp, phys, cur_p);
 #endif
-
-			spin_unlock_irqrestore(&q->tx_lock, flags);
 			dev_err(&ndev->dev, "TX buffer map failed\n");
 			return NETDEV_TX_BUSY;
 		}
@@ -2101,7 +2228,17 @@ out:
 	if (++q->tx_bd_tail >= lp->tx_bd_num)
 		q->tx_bd_tail = 0;
 
-	spin_unlock_irqrestore(&q->tx_lock, flags);
+	/* Stop queue if next transmit may not have space */
+	if (axienet_check_tx_bd_space(q, MAX_SKB_FRAGS + 1)) {
+		netif_stop_queue(ndev);
+
+		/* Matches barrier in axienet_start_xmit_done */
+		smp_mb();
+
+		/* Space might have just been freed - check again */
+		if (!axienet_check_tx_bd_space(q, MAX_SKB_FRAGS + 1))
+			netif_wake_queue(ndev);
+	}
 	return NETDEV_TX_OK;
 }
 
@@ -2839,6 +2976,12 @@ static int axienet_open(struct net_device *ndev)
 	}
 
 	if (lp->phy_mode == PHY_INTERFACE_MODE_USXGMII) {
+		/* Reset before configuring AN */
+		reg = axienet_ior(lp, XXVS_RESET_OFFSET);
+		axienet_iow(lp, XXVS_RESET_OFFSET, reg | USXGMII_RESET);
+		mdelay(DELAY_1MS);
+		axienet_iow(lp, XXVS_RESET_OFFSET, reg);
+
 		netdev_dbg(ndev, "RX reg: 0x%x\n",
 			   axienet_ior(lp, XXV_RCW1_OFFSET));
 		/* USXGMII setup at selected speed */
@@ -2954,6 +3097,7 @@ static int axienet_open(struct net_device *ndev)
 
 	/* If Runtime speed switching supported */
 	if (lp->axienet_config->mactype == XAXIENET_10G_25G &&
+	    lp->phy_mode != PHY_INTERFACE_MODE_USXGMII &&
 	    (axienet_ior(lp, XXV_STAT_CORE_SPEED_OFFSET) &
 	     XXV_STAT_CORE_SPEED_RTSW_MASK)) {
 		axienet_iow(lp, XXVS_AN_ABILITY_OFFSET,
@@ -4196,8 +4340,6 @@ static int __maybe_unused axienet_dma_probe(struct platform_device *pdev,
 		}
 		netif_napi_add(ndev, &q->napi_tx, axienet_tx_poll);
 		netif_napi_add(ndev, &q->napi_rx, xaxienet_rx_poll);
-
-		spin_lock_init(&q->tx_lock);
 	}
 
 	of_node_put(np);
@@ -4790,6 +4932,7 @@ static const struct axienet_config axienet_usxgmii_config = {
 	.setoptions = xxvenet_setoptions,
 	.clk_init = xxvenet_clk_init,
 	.tx_ptplen = 0,
+	.gt_reset = xxv_gt_reset,
 };
 
 static const struct axienet_config axienet_mrmac_config = {
@@ -4873,6 +5016,45 @@ static int axienet_eoe_netdev_event(struct notifier_block *this, unsigned long e
 	return NOTIFY_DONE;
 }
 
+static struct gpio_descs *axienet_mrmac_gpio_get_array(struct platform_device *pdev,
+						       int count, const char *name,
+						       enum gpiod_flags flags)
+{
+	struct gpio_descs *gpio_array;
+
+	gpio_array = devm_gpiod_get_array(&pdev->dev, name, flags);
+
+	if (IS_ERR(gpio_array)) {
+		if (PTR_ERR(gpio_array) != -EBUSY || count <= 1)
+			return gpio_array;
+
+		return NULL;
+	}
+
+	return gpio_array;
+}
+
+static struct gpio_descs *axienet_dcmac_gpio_get_array(struct platform_device *pdev,
+						       const char *new_name,
+						       const char *old_name,
+						       enum gpiod_flags flags)
+{
+	struct gpio_descs *gpio_array;
+
+	gpio_array = devm_gpiod_get_array(&pdev->dev, new_name, flags);
+
+	if (PTR_ERR(gpio_array) == -ENOENT) {
+		/* Fallback for deprecated property */
+		gpio_array = devm_gpiod_get_array(&pdev->dev, old_name, flags);
+
+		if (!IS_ERR(gpio_array))
+			dev_warn(&pdev->dev, "%s is deprecated, please use %s instead\n",
+				 old_name, new_name);
+	}
+
+	return gpio_array;
+}
+
 /**
  * axienet_probe - Axi Ethernet probe function.
  * @pdev:	Pointer to platform device structure.
@@ -4897,6 +5079,7 @@ static int axienet_probe(struct platform_device *pdev)
 	struct net_device *ndev;
 	struct resource *ethres;
 	u8 mac_addr[ETH_ALEN];
+	int gpio_count;
 	u32 value;
 
 #ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
@@ -5106,7 +5289,7 @@ static int axienet_probe(struct platform_device *pdev)
 		ret = of_property_read_string(pdev->dev.of_node,
 					      "xlnx,gt-mode",
 					      &gt_mode);
-		if (ret != -EINVAL && !strcasecmp(gt_mode, GT_MODE_NARROW))
+		if (ret == 0 && !strcasecmp(gt_mode, GT_MODE_NARROW))
 			lp->gt_mode_narrow = true;
 
 		/* Default AXI4-stream data widths */
@@ -5134,65 +5317,138 @@ static int axienet_probe(struct platform_device *pdev)
 		lp->xxv_ip_version = axienet_ior(lp, XXV_CONFIG_REVISION);
 
 	if (lp->axienet_config->mactype == XAXIENET_MRMAC) {
-		struct resource gtpll, gtctrl;
+		gpio_count = gpiod_count(&pdev->dev, "gt-ctrl");
+		if (gpio_count > 0) {
+			lp->gds_gt_ctrl = axienet_mrmac_gpio_get_array(pdev, gpio_count,
+								       "gt-ctrl", GPIOD_OUT_LOW);
 
-		if (mrmac_pll_reg) {
-			lp->gt_pll = mrmac_gt_pll;
-			lp->gt_ctrl = mrmac_gt_ctrl;
+			if (IS_ERR(lp->gds_gt_ctrl)) {
+				dev_err(&pdev->dev,
+					"Failed to request GT control GPIO\n");
+				ret = PTR_ERR(lp->gds_gt_ctrl);
+				goto cleanup_clk;
+			}
+
+			lp->gds_gt_tx_reset_done = axienet_mrmac_gpio_get_array(pdev, gpio_count,
+										"gt-tx-rst-done",
+										GPIOD_OUT_LOW);
+
+			if (IS_ERR(lp->gds_gt_tx_reset_done)) {
+				dev_err(&pdev->dev,
+					"Failed to request GT Tx Reset Done GPIO\n");
+				ret = PTR_ERR(lp->gds_gt_tx_reset_done);
+				goto cleanup_clk;
+			}
+
+			lp->gds_gt_rx_reset_done = axienet_mrmac_gpio_get_array(pdev, gpio_count,
+										"gt-rx-rst-done",
+										GPIOD_OUT_LOW);
+
+			if (IS_ERR(lp->gds_gt_rx_reset_done)) {
+				dev_err(&pdev->dev,
+					"Failed to request GT Rx Reset Done GPIO\n");
+				ret = PTR_ERR(lp->gds_gt_rx_reset_done);
+				goto cleanup_clk;
+			}
+
+			lp->gds_gt_ctrl_rate = devm_gpiod_get_array(&pdev->dev,
+								    "gt-ctrl-rate",
+								    GPIOD_OUT_LOW);
+
+			if (IS_ERR(lp->gds_gt_ctrl_rate)) {
+				dev_warn(&pdev->dev,
+					 "Failed to request GT Control Rate GPIO\n");
+				ret = PTR_ERR(lp->gds_gt_ctrl_rate);
+				goto cleanup_clk;
+			}
+
+			lp->gds_gt_tx_dpath = devm_gpiod_get_array(&pdev->dev,
+								   "gt-tx-dpath",
+								   GPIOD_OUT_LOW);
+
+			if (IS_ERR(lp->gds_gt_tx_dpath)) {
+				dev_err(&pdev->dev,
+					"Failed to request GT TX dpath GPIO\n");
+				ret = PTR_ERR(lp->gds_gt_tx_dpath);
+				goto cleanup_clk;
+			}
+
+			lp->gds_gt_rx_dpath = devm_gpiod_get_array(&pdev->dev,
+								   "gt-rx-dpath",
+								   GPIOD_OUT_LOW);
+
+			if (IS_ERR(lp->gds_gt_rx_dpath)) {
+				dev_err(&pdev->dev,
+					"Failed to request GT RX dpath GPIO\n");
+				ret = PTR_ERR(lp->gds_gt_rx_dpath);
+				goto cleanup_clk;
+			}
+			lp->use_gt_gpio = true;
 		} else {
-			np = of_parse_phandle(pdev->dev.of_node,
-					      "xlnx,gtpll", 0);
-			if (IS_ERR(np)) {
-				dev_err(&pdev->dev,
-					"couldn't find GT PLL\n");
-				ret = PTR_ERR(np);
-				goto cleanup_clk;
-			}
+			struct resource gtpll, gtctrl;
 
-			ret = of_address_to_resource(np, 0, &gtpll);
-			if (ret) {
-				dev_err(&pdev->dev,
-					"unable to get GT PLL resource\n");
-				goto cleanup_clk;
-			}
+			if (mrmac_pll_reg) {
+				lp->gt_pll = mrmac_gt_pll;
+				lp->gt_ctrl = mrmac_gt_ctrl;
+			} else {
+				np = of_parse_phandle(pdev->dev.of_node,
+						      "xlnx,gtpll", 0);
+				if (IS_ERR(np)) {
+					dev_err(&pdev->dev,
+						"couldn't find GT PLL\n");
+					ret = PTR_ERR(np);
+					goto cleanup_clk;
+				}
 
-			lp->gt_pll = devm_ioremap_resource(&pdev->dev,
-							   &gtpll);
-			if (IS_ERR(lp->gt_pll)) {
-				dev_err(&pdev->dev,
-					"couldn't map GT PLL regs\n");
-				ret = PTR_ERR(lp->gt_pll);
-				goto cleanup_clk;
-			}
+				ret = of_address_to_resource(np, 0, &gtpll);
+				if (ret) {
+					dev_err(&pdev->dev,
+						"unable to get GT PLL resource\n");
+					goto cleanup_clk;
+				}
 
-			np = of_parse_phandle(pdev->dev.of_node,
-					      "xlnx,gtctrl", 0);
-			if (IS_ERR(np)) {
-				dev_err(&pdev->dev,
-					"couldn't find GT control\n");
-				ret = PTR_ERR(np);
-				goto cleanup_clk;
-			}
+				lp->gt_pll = devm_ioremap_resource(&pdev->dev,
+								   &gtpll);
+				if (IS_ERR(lp->gt_pll)) {
+					dev_err(&pdev->dev,
+						"couldn't map GT PLL regs\n");
+					ret = PTR_ERR(lp->gt_pll);
+					goto cleanup_clk;
+				} else {
+					dev_warn(&pdev->dev, "xlnx,gtpll is deprecated,	please use gt-tx-rst-done and gt-tx-rst-done instead\n");
+				}
 
-			ret = of_address_to_resource(np, 0, &gtctrl);
-			if (ret) {
-				dev_err(&pdev->dev,
-					"unable to get GT control resource\n");
-				goto cleanup_clk;
-			}
+				np = of_parse_phandle(pdev->dev.of_node,
+						      "xlnx,gtctrl", 0);
+				if (IS_ERR(np)) {
+					dev_err(&pdev->dev,
+						"couldn't find GT control\n");
+					ret = PTR_ERR(np);
+					goto cleanup_clk;
+				}
 
-			lp->gt_ctrl = devm_ioremap_resource(&pdev->dev,
-							    &gtctrl);
-			if (IS_ERR(lp->gt_ctrl)) {
-				dev_err(&pdev->dev,
-					"couldn't map GT control regs\n");
-				ret = PTR_ERR(lp->gt_ctrl);
-				goto cleanup_clk;
-			}
+				ret = of_address_to_resource(np, 0, &gtctrl);
+				if (ret) {
+					dev_err(&pdev->dev,
+						"unable to get GT control resource\n");
+					goto cleanup_clk;
+				}
 
-			mrmac_gt_pll = lp->gt_pll;
-			mrmac_gt_ctrl = lp->gt_ctrl;
-			mrmac_pll_reg = 1;
+				lp->gt_ctrl = devm_ioremap_resource(&pdev->dev,
+								    &gtctrl);
+				if (IS_ERR(lp->gt_ctrl)) {
+					dev_err(&pdev->dev,
+						"couldn't map GT control regs\n");
+					ret = PTR_ERR(lp->gt_ctrl);
+					goto cleanup_clk;
+				} else {
+					dev_warn(&pdev->dev, "xlnx,gtctrl is deprecated, please use gt-ctrl instead\n");
+				}
+
+				mrmac_gt_pll = lp->gt_pll;
+				mrmac_gt_ctrl = lp->gt_ctrl;
+				mrmac_pll_reg = 1;
+			}
 		}
 #ifdef CONFIG_XILINX_AXI_EMAC_HWTSTAMP
 		ret = of_property_read_u32(pdev->dev.of_node, "xlnx,phcindex",
@@ -5208,9 +5464,8 @@ static int axienet_probe(struct platform_device *pdev)
 		}
 		dev_info(&pdev->dev, "GT lane: %d\n", lp->gt_lane);
 	} else if (lp->axienet_config->mactype == XAXIENET_DCMAC) {
-		lp->gds_gt_ctrl = devm_gpiod_get_array(&pdev->dev,
-						       "gt_ctrl",
-						       GPIOD_OUT_LOW);
+		lp->gds_gt_ctrl = axienet_dcmac_gpio_get_array(pdev, "gt-ctrl", "gt_ctrl",
+							       GPIOD_OUT_LOW);
 		if (IS_ERR(lp->gds_gt_ctrl)) {
 			dev_err(&pdev->dev,
 				"Failed to request GT control GPIO\n");
@@ -5218,9 +5473,9 @@ static int axienet_probe(struct platform_device *pdev)
 			goto cleanup_clk;
 		}
 
-		lp->gds_gt_rx_dpath = devm_gpiod_get_array(&pdev->dev,
-							   "gt_rx_dpath",
-							    GPIOD_OUT_LOW);
+		lp->gds_gt_rx_dpath = axienet_dcmac_gpio_get_array(pdev, "gt-rx-dpath",
+								   "gt_rx_dpath",
+								   GPIOD_OUT_LOW);
 		if (IS_ERR(lp->gds_gt_rx_dpath)) {
 			dev_err(&pdev->dev,
 				"Failed to request GT Rx dpath GPIO\n");
@@ -5228,9 +5483,9 @@ static int axienet_probe(struct platform_device *pdev)
 			goto cleanup_clk;
 		}
 
-		lp->gds_gt_tx_dpath = devm_gpiod_get_array(&pdev->dev,
-							   "gt_tx_dpath",
-							   GPIOD_OUT_LOW);
+		lp->gds_gt_tx_dpath = axienet_dcmac_gpio_get_array(pdev, "gt-tx-dpath",
+								   "gt_tx_dpath",
+								   GPIOD_OUT_LOW);
 		if (IS_ERR(lp->gds_gt_tx_dpath)) {
 			dev_err(&pdev->dev,
 				"Failed to request GT Tx dpath GPIO\n");
@@ -5238,9 +5493,8 @@ static int axienet_probe(struct platform_device *pdev)
 			goto cleanup_clk;
 		}
 
-		lp->gds_gt_rsts = devm_gpiod_get_array(&pdev->dev,
-						       "gt_rsts",
-						       GPIOD_OUT_LOW);
+		lp->gds_gt_rsts = axienet_dcmac_gpio_get_array(pdev, "gt-rsts", "gt_rsts",
+							       GPIOD_OUT_LOW);
 		if (IS_ERR(lp->gds_gt_rsts)) {
 			dev_err(&pdev->dev,
 				"Failed to request GT Resets GPIO\n");
@@ -5248,9 +5502,9 @@ static int axienet_probe(struct platform_device *pdev)
 			goto cleanup_clk;
 		}
 
-		lp->gds_gt_tx_reset_done =  devm_gpiod_get_array(&pdev->dev,
-								 "gt_tx_rst_done",
-								 GPIOD_IN);
+		lp->gds_gt_tx_reset_done = axienet_dcmac_gpio_get_array(pdev, "gt-tx-rst-done",
+									"gt_tx_rst_done",
+									GPIOD_IN);
 		if (IS_ERR(lp->gds_gt_tx_reset_done)) {
 			dev_err(&pdev->dev,
 				"Failed to request GT Tx Reset Done GPIO\n");
@@ -5258,9 +5512,9 @@ static int axienet_probe(struct platform_device *pdev)
 			goto cleanup_clk;
 		}
 
-		lp->gds_gt_rx_reset_done =  devm_gpiod_get_array(&pdev->dev,
-								 "gt_rx_rst_done",
-								 GPIOD_IN);
+		lp->gds_gt_rx_reset_done = axienet_dcmac_gpio_get_array(pdev, "gt-rx-rst-done",
+									"gt_rx_rst_done",
+									GPIOD_IN);
 		if (IS_ERR(lp->gds_gt_rx_reset_done)) {
 			dev_err(&pdev->dev,
 				"Failed to request GT Rx Reset Done GPIO\n");
@@ -5287,8 +5541,8 @@ static int axienet_probe(struct platform_device *pdev)
 
 		if (dma_set_mask_and_coherent(lp->dev, DMA_BIT_MASK(lp->dma_mask)) != 0) {
 			dev_warn(&pdev->dev, "default to %d-bit dma mask\n", XAE_DMA_MASK_MIN);
-			if (dma_set_mask_and_coherent(lp->dev,
-						      DMA_BIT_MASK(XAE_DMA_MASK_MIN)) != -3) {
+			ret = dma_set_mask_and_coherent(lp->dev, DMA_BIT_MASK(XAE_DMA_MASK_MIN));
+			if (ret) {
 				dev_err(&pdev->dev, "dma_set_mask_and_coherent failed, aborting\n");
 				goto cleanup_clk;
 			}
@@ -5502,12 +5756,11 @@ static int axienet_probe(struct platform_device *pdev)
 			ret = -EINVAL;
 			goto cleanup_mdio;
 		}
-		if (np) {
-			ret = axienet_mdio_setup(lp);
-			if (ret)
-				dev_warn(&pdev->dev,
-					 "error registering MDIO bus: %d\n", ret);
-		}
+
+		ret = axienet_mdio_setup(lp);
+		if (ret)
+			dev_warn(&pdev->dev,
+				 "error registering MDIO bus: %d\n", ret);
 
 		lp->pcs_phy = of_mdio_find_device(np);
 		if (!lp->pcs_phy) {
@@ -5518,7 +5771,8 @@ static int axienet_probe(struct platform_device *pdev)
 		of_node_put(np);
 	}
 
-	if (lp->axienet_config->mactype != XAXIENET_MRMAC) {
+	if (lp->axienet_config->mactype != XAXIENET_MRMAC &&
+	    lp->phy_mode != PHY_INTERFACE_MODE_USXGMII) {
 		lp->pcs.ops = &axienet_pcs_ops;
 		lp->pcs.neg_mode = true;
 		lp->pcs.poll = true;
@@ -5615,7 +5869,8 @@ static int axienet_probe(struct platform_device *pdev)
 
 	__set_bit(lp->phy_mode, lp->phylink_config.supported_interfaces);
 
-	if (lp->axienet_config->mactype != XAXIENET_MRMAC)
+	if (lp->axienet_config->mactype != XAXIENET_MRMAC &&
+	    lp->phy_mode != PHY_INTERFACE_MODE_USXGMII)
 		lp->phylink = phylink_create(&lp->phylink_config, pdev->dev.fwnode,
 					     lp->phy_mode,
 					     &axienet_phylink_ops);
@@ -5648,7 +5903,7 @@ static int axienet_probe(struct platform_device *pdev)
 	return 0;
 
 err_unregister_netdev:
-	unregister_netdev(ndev);
+	unregister_netdev(lp->ndev);
 
 cleanup_phylink:
 	phylink_destroy(lp->phylink);

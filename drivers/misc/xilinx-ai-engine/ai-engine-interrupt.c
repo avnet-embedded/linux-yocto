@@ -733,10 +733,10 @@ static void aie_l2_backtrack(struct aie_partition *apart)
 	struct aie_location loc;
 	u32 l2_mask_index = 0;
 	u32 n, ttype, num_nocs;
-	int ret;
+	int ret = 0;
 
 	trace_aie_l2_backtrack(apart);
-	ret = mutex_lock_interruptible(&apart->mlock);
+	mutex_lock(&apart->mlock);
 	if (ret) {
 		dev_err_ratelimited(&apart->dev,
 				    "Failed to acquire lock. Process was interrupted by fatal signals\n");
@@ -926,6 +926,7 @@ static void _aie2ps_interrupt_user_event1(struct aie_partition *apart)
 		return;
 	}
 
+	trace_aie2ps_interrupt_user_event1(apart);
 	loc.col = apart->range.start.col + 1;
 	loc.row = 0;
 	event_mod = apart->adev->pl_events;
@@ -941,12 +942,13 @@ static void _aie2ps_interrupt_user_event1(struct aie_partition *apart)
 		    BIT(event_mod->user_event1 % 32))) {
 			continue;
 		}
+		trace_aie_tile_eevent(apart, &loc, AIE_PL_MOD, event_mod->user_event1);
 		complete = true;
 		aie_clear_event_status(apart, &loc, AIE_PL_MOD, event_mod->user_event1);
-		dev_err(&apart->dev, "USER_EVENT1 on col: %d", loc.col);
 	}
 	if (complete && apart->user_event1_complete)
 		apart->user_event1_complete(apart->partition_id, apart->user_event1_priv);
+	trace_aie2ps_interrupt_user_event1_done(apart);
 }
 
 /**
@@ -963,15 +965,9 @@ static void aie2ps_partition_backtrack(struct aie_partition *apart)
 	int l2_mask_count = aperture->l2_mask.count;
 	u32 l2_mask_index = 0;
 	u32 col;
-	int ret;
 
 	trace_aie_l2_backtrack(apart);
-	ret = mutex_lock_interruptible(&apart->mlock);
-	if (ret) {
-		dev_err_ratelimited(&apart->dev,
-				    "Failed to acquire lock. Process was interrupted by fatal signals\n");
-		return;
-	}
+	mutex_lock(&apart->mlock);
 
 	/*
 	 * If partition isn't requested yet, then only record the
@@ -1037,17 +1033,11 @@ void aie_aperture_backtrack(struct work_struct *work)
 {
 	struct aie_aperture *aperture;
 	struct aie_partition *apart;
-	int ret;
 
 	aperture = container_of(work, struct aie_aperture, backtrack);
 	trace_aie_aperture_backtrack(aperture->adev);
 
-	ret = mutex_lock_interruptible(&aperture->mlock);
-	if (ret) {
-		dev_err_ratelimited(&aperture->dev,
-				    "Failed to acquire lock. Process was interrupted by fatal signals\n");
-		return;
-	}
+	mutex_lock(&aperture->mlock);
 
 	list_for_each_entry(apart, &aperture->partitions, node) {
 		/*
@@ -1137,6 +1127,7 @@ static irqreturn_t aie2ps_hw_err(struct aie_aperture *aperture)
 		status = aie_aperture_get_hw_err_status(aperture, &loc);
 		if (status) {
 			handled = IRQ_HANDLED;
+			trace_aie_hw_err(loc.col, status);
 			dev_err(&aperture->dev, "Received Hw err: 0x%x on col: %d",
 				status, loc.col);
 			ret = aie_aperture_clr_hw_err(aperture, &loc, (u16)status);
@@ -1183,13 +1174,11 @@ irqreturn_t aie2ps_interrupt_user_event1(int irq, void *data)
 	bool complete = false;
 	int end_col;
 
+	trace_aie2ps_interrupt_user_event1(apart);
 	aperture = apart->aperture;
-	mutex_lock(&aperture->mlock);
 	mutex_lock(&apart->mlock);
-	if (!apart->status) {
-		dev_err_ratelimited(&apart->dev, "USER_EVENT1 ISR: apart not active");
+	if (!apart->status)
 		goto out;
-	}
 	if (apart->range.size.col < 2) {
 		dev_err_ratelimited(&apart->adev->dev, "Cannot have partition with less than 2 cols.");
 		goto out;
@@ -1201,15 +1190,14 @@ irqreturn_t aie2ps_interrupt_user_event1(int irq, void *data)
 	end_col = apart->range.start.col + apart->range.size.col;
 
 	l2_mask = aie_aperture_get_l2_mask(aperture, &loc);
+	trace_aie_l2_mask(aperture->adev, loc.col, l2_mask);
 	if (!l2_mask)
 		goto out;
 
-	aie_aperture_disable_l2_ctrl(aperture, &loc, l2_mask);
 	l2_status = aie_aperture_get_l2_status(aperture, &loc);
-	if (!l2_status) {
-		aie_aperture_enable_l2_ctrl(aperture, &loc, l2_mask);
+	trace_aie_l2_status(aperture->adev, loc.col, l2_status);
+	if (!l2_status)
 		goto out;
-	}
 	aie_aperture_clear_l2_intr(aperture, &loc, l2_status);
 
 	aie_clear_l1_intr(apart, &loc, AIE_SHIM_SWITCH_A, AIE_SHIM_USER_EVENT1_BC_ID);
@@ -1222,17 +1210,21 @@ irqreturn_t aie2ps_interrupt_user_event1(int irq, void *data)
 		    BIT(event_mod->user_event1 % 32)))
 			continue;
 		complete = true;
+		trace_aie_tile_eevent(apart, &loc, AIE_PL_MOD, event_mod->user_event1);
 		aie_clear_event_status(apart, &loc, AIE_PL_MOD,
 				       event_mod->user_event1);
 	}
+	mutex_unlock(&apart->mlock);
 	if (complete && apart->user_event1_complete)
 		apart->user_event1_complete(apart->partition_id, apart->user_event1_priv);
 	loc.col = apart->range.start.col + 1;
 	loc.row = 0;
-	aie_aperture_enable_l2_ctrl(aperture, &loc, l2_mask);
+
+	trace_aie2ps_interrupt_user_event1_done(apart);
+	return complete ? IRQ_HANDLED : IRQ_NONE;
 out:
 	mutex_unlock(&apart->mlock);
-	mutex_unlock(&aperture->mlock);
+	trace_aie2ps_interrupt_user_event1_done(apart);
 	return complete ? IRQ_HANDLED : IRQ_NONE;
 }
 
@@ -1779,19 +1771,13 @@ EXPORT_SYMBOL_GPL(aie_register_error_notification);
 int aie_unregister_error_notification(struct device *dev)
 {
 	struct aie_partition *apart;
-	int ret;
 
 	if (!dev)
 		return -EINVAL;
 
 	apart = container_of(dev, struct aie_partition, dev);
 
-	ret = mutex_lock_interruptible(&apart->mlock);
-	if (ret) {
-		dev_err(&apart->dev,
-			"Failed to acquire lock. Process was interrupted by fatal signals\n");
-		return ret;
-	}
+	mutex_lock(&apart->mlock);
 
 	apart->error_cb.cb = NULL;
 	apart->error_cb.priv = NULL;

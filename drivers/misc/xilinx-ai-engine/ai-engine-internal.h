@@ -88,8 +88,12 @@ enum aie_tile_type {
 #define AIE_MAX_MM2S_CH		6U
 #define AIE_MAX_S2MM_CH		6U
 
+/* DMA directions */
+#define AIE_S2MM_DIR		0U
+#define AIE_MM2S_DIR		1U
+
 /* Max size of DMA buffer descriptors */
-#define AIE_MAX_BD_SIZE		8U
+#define AIE_MAX_BD_SIZE		9U
 
 /* Program memory offset and size index */
 #define AIE_PM_MEM_OFFSET_IDX	1U
@@ -231,6 +235,18 @@ enum aie_uc_mem_type {
 	AIE_UC_PRIVATE_DATA_MEM,
 	AIE_UC_SHARED_DATA_MEM,
 	AIE_UC_MEM_MAX
+};
+
+/*
+ * Macro for AI engine memory type.
+ * To access the uc memories in partition memory,
+ * AIE_MEM_MAX can be added to the uc mem type.
+ */
+enum aie_memory_type {
+	AIE_TILE_DATA_MEM,
+	AIE_TILE_PROG_MEM,
+	AIE_MEMTILE_DATA_MEM,
+	AIE_MEM_MAX
 };
 
 /*
@@ -459,6 +475,7 @@ struct aie_bd_aieml_dim_attr {
  * @use_next: buffer descriptor use next bd field attributes
  * @addr: buffer descriptor address attributes
  * @addr_2: buffer descriptor address attributes of second address
+ * @addr_3: buffer descriptor address attributes of extended address
  * @lock: buffer descriptor lock attributes
  * @lock_2: buffer descriptor lock attributes of second lock
  * @packet: buffer descriptor packet attributes
@@ -484,6 +501,7 @@ struct aie_bd_attr {
 	struct aie_single_reg_field use_next;
 	struct aie_bd_addr_attr addr;
 	struct aie_bd_addr_attr addr_2;
+	struct aie_bd_addr_attr addr_3;
 	struct aie_bd_lock_attr lock;
 	struct aie_bd_lock_attr lock_2;
 	struct aie_bd_pkt_attr packet;
@@ -518,6 +536,7 @@ struct aie_bd_attr {
  * @curbd: current buffer descriptor field attributes
  * @qsts: queue status field attributes
  * @fifo_cnt: FIFO counter field attributes
+ * @taskq_bd: DMA channel task queue start bd attributes
  * @bd_regoff: SHIM DMA buffer descriptors register offset
  * @mm2s_sts_regoff: MM2S status register offset
  * @s2mm_sts_regoff: S2MM status register offset
@@ -526,6 +545,9 @@ struct aie_bd_attr {
  * @num_s2mm_chan: number of S2MM channels
  * @num_bds: number of buffer descriptors
  * @bd_len: length of a buffer descriptor in bytes
+ * @num_bd_regs: number of buffer descriptor registers
+ * @chan_idx_offset: dma channel ID index offset in bytes
+ * @chan_dir_offset: dma channel direction index offset in bytes
  */
 struct aie_dma_attr {
 	struct aie_single_reg_field laddr;
@@ -538,6 +560,7 @@ struct aie_dma_attr {
 	struct aie_single_reg_field curbd;
 	struct aie_single_reg_field qsts;
 	struct aie_single_reg_field fifo_cnt;
+	struct aie_single_reg_field taskq_bd;
 	u32 bd_regoff;
 	u32 mm2s_sts_regoff;
 	u32 s2mm_sts_regoff;
@@ -546,6 +569,57 @@ struct aie_dma_attr {
 	u32 num_s2mm_chan;
 	u32 num_bds;
 	u32 bd_len;
+	u32 num_bd_regs;
+	u32 chan_idx_offset;
+	u32 chan_dir_offset;
+};
+
+/*
+ * enum aie_strmsw_port_type - identifies the type of stream switch port
+ */
+enum aie_strmsw_port_type {
+	AIE_STRMSW_CORE,
+	AIE_STRMSW_DMA,
+	AIE_STRMSW_CTRL,
+	AIE_STRMSW_FIFO,
+	AIE_STRMSW_SOUTH,
+	AIE_STRMSW_WEST,
+	AIE_STRMSW_NORTH,
+	AIE_STRMSW_EAST,
+	AIE_STRMSW_TRACE,
+	AIE_STRMSW_MAX
+};
+
+/**
+ * struct aie_strmsw_port_attr - AI engine stream switch port attributes structure
+ * @num_ports: number of ports
+ * @port_regoff: base address of port
+ */
+struct aie_strmsw_port_attr {
+	u32 num_ports;
+	u32 port_regoff;
+};
+
+/**
+ * struct aie_strmsw_attr - AI engine stream switch attributes structure
+ * @mstr_en: master port enable address field attributes
+ * @config: master port configuration address field attributes
+ * @mstr_ports: port attributes for all master port types
+ * @slv_en: slave port enable address field attributes
+ * @slv_ports: port attributes for all slave port types
+ * @slv_config_base: base register address for slave port configurations
+ * @mux_ports: port attributes for input stream mux
+ * @demux_ports: port attributes for output stream demux
+ */
+struct aie_strmsw_attr {
+	struct aie_single_reg_field mstr_en;
+	struct aie_single_reg_field config;
+	const struct aie_strmsw_port_attr *mstr_ports;
+	struct aie_single_reg_field slv_en;
+	const struct aie_strmsw_port_attr *slv_ports;
+	u32 slv_config_base;
+	const struct aie_single_reg_field *mux_ports;
+	const struct aie_single_reg_field *demux_ports;
 };
 
 struct aie_aperture;
@@ -596,6 +670,7 @@ struct aie_aperture;
  * @part_clear_context: partition clear context, subset of partition init.
  * @part_clean: partition clean for tiles.
  * @part_reset: reset partition.
+ * @strmsw_port_verify: verify stream switch port configuration
  *
  * Different AI engine device version has its own device
  * operation.
@@ -663,6 +738,9 @@ struct aie_tile_operations {
 	int (*part_clear_context)(struct aie_partition *apart);
 	int (*part_clean)(struct aie_partition *apart);
 	int (*part_reset)(struct aie_partition *apart);
+	int (*strmsw_port_verify)(u8 ttype,
+				  enum aie_strmsw_port_type slv, u8 slv_port_num,
+				  enum aie_strmsw_port_type mstr, u8 mstr_port_num);
 };
 
 /**
@@ -1085,6 +1163,9 @@ struct aie_addrlen {
  * @shim_dma: SHIM DMA attribute
  * @tile_dma: tile DMA attribute
  * @memtile_dma: MEM tile DMA attribute
+ * @tile_strmsw: tile stream switch attributes
+ * @memory_strmsw: memtile stream switch attributes
+ * @shim_strmsw: shim stream switch attributes
  * @pl_events: pl module event attribute
  * @memtile_events: memory tile event attribute
  * @mem_events: memory module event attribute
@@ -1136,6 +1217,9 @@ struct aie_device {
 	const struct aie_dma_attr *shim_dma;
 	const struct aie_dma_attr *tile_dma;
 	const struct aie_dma_attr *memtile_dma;
+	const struct aie_strmsw_attr *tile_strmsw;
+	const struct aie_strmsw_attr *memory_strmsw;
+	const struct aie_strmsw_attr *shim_strmsw;
 	const struct aie_event_attr *pl_events;
 	const struct aie_event_attr *memtile_events;
 	const struct aie_event_attr *mem_events;
@@ -1245,14 +1329,10 @@ struct aie_op_uc_zeroisation {
 	u16 flag;         /* Value to be written to the uc zeroization register */
 } __aligned(4);
 
-struct aie_op_handshake_data {
-	void *addr;
-	size_t size;
-};
-
 struct aie_op_handshake {
 	u16 type;         /* Operation Type */
 	u16 len;          /* Operation struct length*/
+	u32 offset;	  /* Handshake region offset */
 	u32 high_addr; /* physical address of the buffer that has handshake data */
 	u32 low_addr;
 } __aligned(4);
@@ -1297,6 +1377,13 @@ struct aie_pm_ops {
 	size_t size;
 	size_t offset;
 	struct aie_op_start_num_col *op_range;
+};
+
+struct aie_op_handshake_addr {
+	void *hs_va;
+	size_t size;
+	size_t offset;
+	dma_addr_t hs_dma;
 };
 
 /**
@@ -1593,8 +1680,18 @@ int aie_mem_get_info(struct aie_partition *apart, unsigned long arg);
 
 long aie_part_attach_dmabuf_req(struct aie_partition *apart,
 				void __user *user_args);
+long aie_part_attach_dmabuf_fd(struct aie_partition *apart, int dmabuf_fd);
 long aie_part_detach_dmabuf_req(struct aie_partition *apart,
 				void __user *user_args);
+long aie_part_detach_dmabuf_fd(struct aie_partition *apart, int dmabuf_fd);
+int aie_part_push_bd(struct aie_partition *apart, struct aie_location *loc,
+		     u8 bd_id, u8 dir, u8 chan_id);
+int aie_part_set_valid_bd(struct aie_partition *apart, struct aie_location loc,
+			  u32 *bd);
+int aie_part_set_len_bd(struct aie_partition *apart, struct aie_location loc,
+			u32 *bd, size_t len);
+int aie_part_set_dmabuf_bd_kernel(struct aie_partition *apart,
+				  struct aie_dmabuf_bd_args *args);
 long aie_part_set_bd_from_user(struct aie_partition *apart,
 					void __user *user_args);
 long aie_part_set_bd(struct aie_partition *apart,
@@ -1613,6 +1710,7 @@ bool aie_part_check_clk_enable_loc(struct aie_partition *apart,
 				   struct aie_location *loc);
 int aie_part_set_freq(struct aie_partition *apart, u64 freq);
 int aie_part_get_freq(struct aie_partition *apart, u64 *freq);
+int aie_init_freq(struct aie_aperture *aperture);
 
 int aie_part_request_tiles(struct aie_partition *apart, int num_tiles,
 			   struct aie_location *locs);
@@ -1782,7 +1880,10 @@ u32 aie_get_core_lr(struct aie_partition *apart,
 u32 aie_get_core_sp(struct aie_partition *apart,
 		    struct aie_location *loc);
 int aie_dma_mem_alloc(struct aie_partition *apart, __kernel_size_t size);
+void *aie_dma_mem_alloc_buffer(struct aie_partition *apart, size_t bufsize,
+			       int *dmabuf_fd);
 int aie_dma_mem_free(int fd);
+void aie_dma_mem_free_buffer(struct aie_partition *apart, int dmabuf_fd);
 int aie_dma_begin_cpu_access(struct dma_buf *dmabuf,
 			     enum dma_data_direction direction);
 int aie_dma_end_cpu_access(struct dma_buf *dmabuf,
@@ -1801,5 +1902,14 @@ int aie_part_maskpoll_register(struct aie_partition *apart, u32 offset, u32 data
 			       u32 timeout);
 int aie_partition_uc_zeroize_mem(struct device *dev, struct aie_location *loc, u32 regval);
 int aie_error_handling_init(struct aie_partition *apart);
-
+int aie2ps_part_write_handshake(struct aie_partition *apart,
+				struct aie_op_handshake_data *data,
+				uint32_t handshake_cols);
+int aie_part_set_strmsw_cct(struct aie_partition *apart, struct aie_location *loc,
+			    enum aie_strmsw_port_type slv, u8 slv_port_num,
+			    enum aie_strmsw_port_type mstr, u8 mstr_port_num);
+int aie_part_enable_noc_to_aie(struct aie_partition *apart,
+			       struct aie_location *loc, u8 port_num);
+int aie_part_enable_aie_to_noc(struct aie_partition *apart,
+			       struct aie_location *loc, u8 port_num);
 #endif /* AIE_INTERNAL_H */

@@ -57,6 +57,7 @@
  * @slcr: MDB System Level Control and Status Register (SLCR) base
  * @intx_domain: INTx IRQ domain pointer
  * @mdb_domain: MDB IRQ domain pointer
+ * @perst_gpio: GPIO descriptor for PERST# signal handling
  * @intx_irq: INTx IRQ interrupt number
  */
 struct amd_mdb_pcie {
@@ -64,6 +65,7 @@ struct amd_mdb_pcie {
 	void __iomem			*slcr;
 	struct irq_domain		*intx_domain;
 	struct irq_domain		*mdb_domain;
+	struct gpio_desc		*perst_gpio;
 	int				intx_irq;
 };
 
@@ -243,6 +245,25 @@ static void amd_mdb_pcie_free_irq_domains(struct amd_mdb_pcie *pcie)
 	}
 
 	if (pcie->mdb_domain) {
+		int i, irq;
+
+		for (i = 0; i < ARRAY_SIZE(intr_cause); i++) {
+			if (!intr_cause[i].str)
+				continue;
+			irq = irq_find_mapping(pcie->mdb_domain, i);
+			if (irq) {
+				disable_irq(irq);
+				free_irq(irq,pcie);
+				irq_dispose_mapping(irq);
+			}
+		}
+		irq = irq_find_mapping(pcie->mdb_domain, AMD_MDB_PCIE_INTR_INTX);
+		if (irq) {
+			disable_irq(irq);
+			free_irq(irq, pcie);
+			irq_dispose_mapping(irq);
+		}
+
 		irq_domain_remove(pcie->mdb_domain);
 		pcie->mdb_domain = NULL;
 	}
@@ -285,7 +306,7 @@ static int amd_mdb_pcie_init_irq_domains(struct amd_mdb_pcie *pcie,
 	struct device_node *pcie_intc_node;
 	int err;
 
-	pcie_intc_node = of_get_next_child(node, NULL);
+	pcie_intc_node = of_get_child_by_name(node, "interrupt-controller");
 	if (!pcie_intc_node) {
 		dev_err(dev, "No PCIe Intc node found\n");
 		return -ENODEV;
@@ -403,13 +424,34 @@ static int amd_mdb_setup_irq(struct amd_mdb_pcie *pcie,
 	return 0;
 }
 
+static int amd_mdb_parse_pcie_port(struct amd_mdb_pcie *pcie)
+{
+	struct device *dev = pcie->pci.dev;
+	struct device_node *pcie_port_node __maybe_unused;
+
+	/*
+	 * This platform currently supports only one Root Port, so the loop
+	 * will execute only once.
+	 * TODO: Enhance the driver to handle multiple Root Ports in the future.
+	 */
+	for_each_child_of_node_with_prefix(dev->of_node, pcie_port_node, "pcie") {
+		pcie->perst_gpio = devm_fwnode_gpiod_get(dev, of_fwnode_handle(pcie_port_node),
+							 "reset", GPIOD_OUT_HIGH, NULL);
+		if (IS_ERR(pcie->perst_gpio))
+			return dev_err_probe(dev, PTR_ERR(pcie->perst_gpio),
+					     "Failed to request reset GPIO\n");
+		return 0;
+	}
+
+	return -ENODEV;
+}
+
 static int amd_mdb_add_pcie_port(struct amd_mdb_pcie *pcie,
 				 struct platform_device *pdev)
 {
 	struct dw_pcie *pci = &pcie->pci;
 	struct dw_pcie_rp *pp = &pci->pp;
 	struct device *dev = &pdev->dev;
-	struct gpio_desc *reset_gpio;
 	int err;
 
 	pcie->slcr = devm_platform_ioremap_resource_byname(pdev, "slcr");
@@ -428,23 +470,10 @@ static int amd_mdb_add_pcie_port(struct amd_mdb_pcie *pcie,
 
 	pp->ops = &amd_mdb_pcie_host_ops;
 
-	/* Request the GPIO for PCIe reset signal and assert */
-	reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
-	if (IS_ERR(reset_gpio))
-		return dev_err_probe(dev, PTR_ERR(reset_gpio),
-				     "Failed to request reset GPIO\n");
-
-	if (reset_gpio) {
-		/*
-		 * "PERST# active time", as per Table 2-10: Power Sequencing
-		 * and Reset Signal Timings of the PCIe Electromechanical
-		 * Specification, Revision 6.0, symbol "T_PERST".
-		 */
-		udelay(100);
-
-		/* Deassert the reset signal */
-		gpiod_set_value_cansleep(reset_gpio, 0);
-		mdelay(PCIE_T_RRS_READY_MS);
+	if (pcie->perst_gpio) {
+		mdelay(PCIE_T_PVPERL_MS);
+		gpiod_set_value_cansleep(pcie->perst_gpio, 0);
+		mdelay(PCIE_RESET_CONFIG_DEVICE_WAIT_MS);
 	}
 
 	err = dw_pcie_host_init(pp);
@@ -465,6 +494,7 @@ static int amd_mdb_pcie_probe(struct platform_device *pdev)
 	struct device *dev = &pdev->dev;
 	struct amd_mdb_pcie *pcie;
 	struct dw_pcie *pci;
+	int ret;
 
 	pcie = devm_kzalloc(dev, sizeof(*pcie), GFP_KERNEL);
 	if (!pcie)
@@ -474,6 +504,24 @@ static int amd_mdb_pcie_probe(struct platform_device *pdev)
 	pci->dev = dev;
 
 	platform_set_drvdata(pdev, pcie);
+
+	ret = amd_mdb_parse_pcie_port(pcie);
+	/*
+	 * If amd_mdb_parse_pcie_port returns -ENODEV, it indicates that the
+	 * PCIe Bridge node was not found in the device tree. This is not
+	 * considered a fatal error and will trigger a fallback where the
+	 * reset GPIO is acquired directly from the PCIe Host Bridge node.
+	 */
+	if (ret) {
+		if (ret != -ENODEV)
+			return ret;
+
+		pcie->perst_gpio = devm_gpiod_get_optional(dev, "reset",
+							   GPIOD_OUT_HIGH);
+		if (IS_ERR(pcie->perst_gpio))
+			return dev_err_probe(dev, PTR_ERR(pcie->perst_gpio),
+					     "Failed to request reset GPIO\n");
+	}
 
 	return amd_mdb_add_pcie_port(pcie, pdev);
 }

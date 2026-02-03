@@ -29,6 +29,8 @@
 #include "ai-engine-internal.h"
 #include "ai-engine-trace.h"
 
+#define LOAD_CERT_TIMEOUT	100000
+
 /**
  * aie_cal_loc() - calculate tile location from register offset to the AI
  *		   engine device
@@ -194,15 +196,14 @@ int aie_part_maskpoll_register(struct aie_partition *apart, u32 offset, u32 data
 			       u32 timeout)
 {
 	u32 value;
-	u32 min_usleep = 10;
-	u32 max_usleep = 20;
+	u32 usleep_time = 10;
 	u32 i;
 
-	for (i = 0; i < timeout; i += min_usleep) {
+	for (i = 0; i < timeout; i += usleep_time) {
 		value = ioread32(apart->aperture->base + offset);
 		if ((value & mask) == data)
 			return 0;
-		usleep_range(min_usleep, max_usleep);
+		udelay(usleep_time);
 	}
 
 	value = ioread32(apart->aperture->base + offset);
@@ -651,16 +652,12 @@ static void aie_part_release_event_bitmap(struct aie_partition *apart)
 static int aie_part_release(struct inode *inode, struct file *filp)
 {
 	struct aie_partition *apart = filp->private_data;
-	int ret;
 
 	/* some reset bits in NPI are global, we need to lock adev */
-	ret = mutex_lock_interruptible(&apart->adev->mlock);
-	if (ret)
-		return ret;
+	mutex_lock(&apart->adev->mlock);
 
-	ret = mutex_lock_interruptible(&apart->mlock);
-	if (ret)
-		return ret;
+	trace_aie_part_release(apart);
+	mutex_lock(&apart->mlock);
 
 	aie_part_release_dmabufs(apart);
 	/* aie_part_clean() will do hardware reset */
@@ -678,6 +675,12 @@ static int aie_part_release(struct inode *inode, struct file *filp)
 	aie_part_rscmgr_reset(apart);
 
 	mutex_unlock(&apart->mlock);
+	if (apart->adev->dev_gen == AIE_DEVICE_GEN_AIE2PS) {
+		struct aie_aperture *aperture = apart->aperture;
+		int npi_irq = (apart->partition_id % AIE_USER_EVENT1_NUM_IRQ) + 1;
+
+		devm_free_irq(&apart->dev, aperture->npi_irq[npi_irq], apart);
+	}
 	aie_part_remove(apart);
 
 	return 0;
@@ -997,13 +1000,9 @@ static void aie_part_release_device(struct device *dev)
 {
 	struct aie_partition *apart = dev_to_aiepart(dev);
 	struct aie_aperture *aperture = apart->aperture;
-	int ret;
 
-	ret = mutex_lock_interruptible(&aperture->mlock);
-	if (ret) {
-		dev_warn(&apart->dev,
-			 "getting adev->mlock is interrupted by signal\n");
-	}
+	trace_aie_part_release_device(apart);
+	mutex_lock(&aperture->mlock);
 
 	aie_resource_put_region(&aperture->cols_res, apart->range.start.col,
 				apart->range.size.col);
@@ -1015,6 +1014,7 @@ static void aie_part_release_device(struct device *dev)
 	aie_part_rscmgr_finish(apart);
 	/* Check and set frequency requirement for aperture */
 	aie_part_set_freq(apart, 0);
+	trace_aie_part_release_device_done(apart);
 }
 
 /**
@@ -1097,17 +1097,17 @@ static int aie_create_tiles(struct aie_partition *apart)
 				put_device(tdev);
 				return ret;
 			}
-			if (apart->aperture->adev->dev_gen != AIE_DEVICE_GEN_AIE2PS) {
-				ret = aie_tile_sysfs_create_entries(atile);
-				if (ret) {
-					dev_err(tdev,
-						"failed to create tile sysfs: %d\n",
-						ret);
-					device_del(tdev);
-					put_device(tdev);
-					return ret;
-				}
+
+			ret = aie_tile_sysfs_create_entries(atile);
+			if (ret) {
+				dev_err(tdev,
+					"failed to create tile sysfs: %d\n",
+					ret);
+				device_del(tdev);
+				put_device(tdev);
+				return ret;
 			}
+
 			atile++;
 		}
 	}
@@ -1161,8 +1161,7 @@ struct aie_partition *aie_create_partition(struct aie_aperture *aperture,
 	ret = device_register(dev);
 	if (ret) {
 		dev_err(dev, "device_add failed: %d\n", ret);
-		put_device(dev);
-		return ERR_PTR(ret);
+		goto put_dev;
 	}
 
 	/* Set up the DMA mask */
@@ -1178,8 +1177,7 @@ struct aie_partition *aie_create_partition(struct aie_aperture *aperture,
 	ret = aie_create_tiles(apart);
 	if (ret) {
 		dev_err(dev, "Failed to create tile devices.\n");
-		put_device(dev);
-		return ERR_PTR(ret);
+		goto err;
 	}
 
 	/*
@@ -1188,14 +1186,12 @@ struct aie_partition *aie_create_partition(struct aie_aperture *aperture,
 	 */
 	ret = aie_part_create_mems_info(apart);
 	if (ret) {
-		put_device(dev);
-		return ERR_PTR(ret);
+		goto err;
 	}
 
 	ret = apart->adev->ops->init_part_clk_state(apart);
 	if (ret) {
-		put_device(dev);
-		return ERR_PTR(ret);
+		goto err;
 	}
 
 	/*
@@ -1205,32 +1201,26 @@ struct aie_partition *aie_create_partition(struct aie_aperture *aperture,
 	ret = aie_part_create_event_bitmap(apart);
 	if (ret < 0) {
 		dev_err(&apart->dev, "Failed to allocate event bitmap.\n");
-		put_device(dev);
-		return ERR_PTR(ret);
+		goto err;
 	}
 
 	ret = aie_part_rscmgr_init(apart);
 	if (ret < 0) {
 		dev_err(&apart->dev,
 			"Failed to initialize resources bitmaps.\n");
-		put_device(dev);
-		return ERR_PTR(ret);
+		goto err;
 	}
 
-	if (aperture->adev->dev_gen != AIE_DEVICE_GEN_AIE2PS) {
-		ret = aie_part_sysfs_create_entries(apart);
-		if (ret) {
-			dev_err(&apart->dev, "Failed to create partition sysfs.\n");
-			put_device(dev);
-			return ERR_PTR(ret);
-		}
+	ret = aie_part_sysfs_create_entries(apart);
+	if (ret) {
+		dev_err(&apart->dev, "Failed to create partition sysfs.\n");
+		goto err;
 	}
 
 	ret = aie_part_pm_ops_create(apart);
 	if (ret) {
 		dev_err(&apart->dev, "Failed to create pm ops pkt.");
-		put_device(dev);
-		return ERR_PTR(ret);
+		goto err;
 	}
 	if (apart->adev->dev_gen == AIE_DEVICE_GEN_AIE2PS) {
 		ret = devm_request_threaded_irq(&apart->dev, aperture->npi_irq[npi_irq], NULL,
@@ -1238,14 +1228,19 @@ struct aie_partition *aie_create_partition(struct aie_aperture *aperture,
 						IRQF_SHARED | IRQF_ONESHOT, dev_name(dev), apart);
 		if (ret) {
 			dev_err(dev, "Failed to register user event1 interrupt: %d", ret);
-			put_device(dev);
-			return ERR_PTR(ret);
+			goto err;
 		}
 	}
 
 	dev_dbg(dev, "created AIE partition device.\n");
 
 	return apart;
+err:
+	device_del(dev);
+put_dev:
+	put_device(dev);
+
+	return ERR_PTR(ret);
 }
 
 /**
@@ -1256,8 +1251,7 @@ struct aie_partition *aie_create_partition(struct aie_aperture *aperture,
  */
 static void aie_tile_remove(struct aie_tile *atile)
 {
-	if (atile->apart->aperture->adev->dev_gen != AIE_DEVICE_GEN_AIE2PS)
-		aie_tile_sysfs_remove_entries(atile);
+	aie_tile_sysfs_remove_entries(atile);
 	device_del(&atile->dev);
 	put_device(&atile->dev);
 }
@@ -1278,8 +1272,7 @@ void aie_part_remove(struct aie_partition *apart)
 	     index++, atile++)
 		aie_tile_remove(atile);
 
-	if (aperture->adev->dev_gen != AIE_DEVICE_GEN_AIE2PS)
-		aie_part_sysfs_remove_entries(apart);
+	aie_part_sysfs_remove_entries(apart);
 
 	device_del(&apart->dev);
 	put_device(&apart->dev);
@@ -1481,14 +1474,12 @@ static int aie_apart_load_uc_phdr(struct aie_partition *apart,
 		ttype = apart->adev->ops->get_tile_type(apart->adev, &loc);
 		if (ttype != AIE_TILE_TYPE_SHIMNOC)
 			continue;
-
 		offset = aie_cal_regoff(adev, loc, tile_addr);
 		ret = aie_part_write_register(apart, offset, addrlen->len, addrlen->addr, 0);
 		if (ret < 0) {
 			dev_err(&apart->dev, "failed to load cert.\n");
 			return ret;
 		}
-
 	}
 
 	return 0;
@@ -1545,7 +1536,6 @@ int aie_load_cert(struct device *dev, unsigned char *elf_addr)
 		default:
 			continue;
 		}
-
 		/* ignore uninitialized sections, as zeroize already initializes to zero */
 		if (!phdr->p_filesz)
 			continue;
@@ -1561,3 +1551,351 @@ int aie_load_cert(struct device *dev, unsigned char *elf_addr)
 	return ret;
 }
 EXPORT_SYMBOL_GPL(aie_load_cert);
+
+/**
+ * aie_partition_handshake_update() - loads cert in program memory of uc in shim tile.
+ * @dev: AI Engine partition device
+ * @handshake: struct with the handshake write info.
+ * @return: 0 on success, negative value on failure.
+ */
+int aie_partition_handshake_update(struct device *dev,
+				   struct aie_op_handshake_data *handshake,
+				   uint32_t handshake_cols)
+{
+	struct aie_partition *apart;
+	int ret;
+
+	if (!dev || !handshake || !handshake_cols)
+		return -EINVAL;
+
+	apart = dev_to_aiepart(dev);
+	if (!apart)
+		return -EINVAL;
+
+	ret = mutex_lock_interruptible(&apart->mlock);
+	if (ret)
+		return ret;
+
+	ret = aie2ps_part_write_handshake(apart, handshake, handshake_cols);
+
+	mutex_unlock(&apart->mlock);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(aie_partition_handshake_update);
+
+/**
+ * aie_get_parity_bit() - Calcuates odd parity bit for a given 32 value
+ * @header: value to find odd parity bit for
+ * @return: bit to make value odd parity
+ */
+static u8 aie_get_parity_bit(u32 header)
+{
+	for (u8 i = 16; i > 0; i >>= 1)
+		header ^= (header >> i);
+	return (header & 1) ? 0 : 1;
+}
+
+/**
+ * aie_ctrl_pktize_elf() - Parses CERT elf file and transforms it into control
+ *			   packets.
+ * @apart: AI Engine partition device
+ * @ctrlbuf: pointer to pre-allocated control buffer
+ * @elf_addr: pointer to CERT elf file
+ * @ctrlbuf_size: size of pre-alloacted control buffer in bytes
+ * @return: 0 for success and negative value for failure
+ */
+static int aie_ctrl_pktize_elf(struct aie_partition *apart, u32 *ctrlbuf,
+			       void *elf_addr, size_t ctrlbuf_size)
+{
+	const Elf32_Ehdr *ehdr = (Elf32_Ehdr *)elf_addr;
+	struct aie_device *adev = apart->adev;
+	u32 ctrlbuf_idx = 0;
+	u32 mem_type;
+
+	for (u32 i = 0; i < ehdr->e_phnum; i++) {
+		size_t memsz32, tile_addr;
+		struct aie_part_mem pmem;
+		const Elf32_Phdr *phdr;
+		u32 *sptr32;
+
+		phdr = (Elf32_Phdr *)(elf_addr + sizeof(*ehdr) + i * sizeof(*phdr));
+		/* ignore non-loadable sections */
+		if (phdr->p_type != PT_LOAD)
+			continue;
+
+		mem_type = adev->ops->map_uc_mem(apart, phdr->p_paddr, &pmem);
+		/* ignore non program mem and non priv data mem sections */
+		switch (mem_type) {
+		case AIE_UC_PROGRAM_MEM:
+		case AIE_UC_PRIVATE_DATA_MEM:
+			break;
+		default:
+			continue;
+		}
+
+		/* ignore uninitialized sections */
+		if (!phdr->p_filesz)
+			continue;
+
+		sptr32 = (u32 *)(elf_addr + phdr->p_offset);
+		memsz32 = ALIGN(phdr->p_memsz, 4) / sizeof(u32);
+		tile_addr = (phdr->p_paddr & (pmem.mem.size - 1)) + pmem.mem.offset;
+		for (u32 j = 0; j < memsz32; j += 4) {
+			u32 ctrl_header;
+			u8 pkt_size;
+
+			/*
+			 * control pkt header needs:
+			 * bit 31: parity bit of header
+			 * bit 21-20: size of payload 1-4
+			 * bit 19-0: tile address
+			 */
+			pkt_size = min(memsz32 - j, 4);
+			ctrl_header = ((pkt_size - 1) << 20) |
+					(tile_addr + (j * sizeof(u32)));
+			ctrl_header |= aie_get_parity_bit(ctrl_header) << 31;
+
+			if ((ctrlbuf_size / sizeof(u32)) <
+					(ctrlbuf_idx + pkt_size + 2)) {
+				dev_err(&apart->dev,
+					"control packet buffer is not large enough");
+				return -EINVAL;
+			}
+
+			/*
+			 * dummy packet header is needed even if stream switch
+			 * is configured for circuit switch
+			 */
+			ctrlbuf[ctrlbuf_idx] = 1 << 31;
+			ctrlbuf_idx++;
+			ctrlbuf[ctrlbuf_idx] = ctrl_header;
+			ctrlbuf_idx++;
+
+			for (u32 k = 0; k < pkt_size; k++)
+				ctrlbuf[ctrlbuf_idx + k] = sptr32[j + k];
+
+			ctrlbuf_idx += pkt_size;
+		}
+	}
+
+	return 0;
+}
+
+/**
+ * aie_load_cert_strmsw_config() - Configures stream switch for CERT broadcast.
+ *				   CERT control packets will be routed from NoC
+ *				   in column 0, then to each columns control port
+ *				   and its neighboring column.
+ * @apart: AI Engine partition instance
+ * @return: 0 for success and negative value for failure
+ */
+static int aie_load_cert_strmsw_config(struct aie_partition *apart)
+{
+	struct aie_location loc;
+	int ret;
+
+	loc.row = 0;
+	loc.col = apart->range.start.col;
+	ret = aie_part_enable_noc_to_aie(apart, &loc, 3);
+	if (ret < 0) {
+		dev_err(&apart->dev,
+			"failed to configure mux for NoC input stream");
+		return ret;
+	}
+
+	ret = aie_part_set_strmsw_cct(apart, &loc, AIE_STRMSW_SOUTH, 3,
+				      AIE_STRMSW_CTRL, 0);
+	ret |= aie_part_set_strmsw_cct(apart, &loc, AIE_STRMSW_SOUTH, 3,
+				       AIE_STRMSW_EAST, 0);
+	if (ret < 0)
+		goto fail;
+
+	for (loc.col = apart->range.start.col + 1;
+	     loc.col < apart->range.start.col + apart->range.size.col - 1;
+	     loc.col++) {
+		ret = aie_part_set_strmsw_cct(apart, &loc, AIE_STRMSW_WEST, 0,
+					      AIE_STRMSW_CTRL, 0);
+		ret |= aie_part_set_strmsw_cct(apart, &loc, AIE_STRMSW_WEST, 0,
+					       AIE_STRMSW_EAST, 0);
+		if (ret < 0)
+			goto fail;
+	}
+
+	loc.col = apart->range.start.col + apart->range.size.col - 1;
+	ret = aie_part_set_strmsw_cct(apart, &loc, AIE_STRMSW_WEST, 0,
+				      AIE_STRMSW_CTRL, 0);
+	if (ret < 0)
+		goto fail;
+
+	return ret;
+fail:
+
+	dev_err(&apart->dev,
+		"failed to set CERT stream switch configuration for column: %d",
+		loc.col);
+	return ret;
+}
+
+/**
+ * aie_load_cert_start_dma() - Creates a buffer descriptor and starts DMA
+ *			       transaction for CERT firmware contorl packets
+ * @apart: AI Engine partition device
+ * @dmabuf_fd: dmabuf file descriptor
+ * @bufsize: size of CERT firmware control packet buffer in bytes
+ * @return: 0 for success and negative value for failure
+ */
+static int aie_load_cert_start_dma(struct aie_partition *apart, int dmabuf_fd,
+				   size_t bufsize)
+{
+	struct aie_dmabuf_bd_args dmabuf_args;
+	u32 bd[AIE_MAX_BD_SIZE] = {0};
+	struct aie_location start_col;
+	u8 chan_id = 0, bd_id = 0;
+	int ret;
+
+	start_col.row = 0;
+	start_col.col = apart->range.start.col;
+
+	dmabuf_args.bd = bd;
+	dmabuf_args.buf_fd = dmabuf_fd;
+	dmabuf_args.loc = start_col;
+	dmabuf_args.bd_id = bd_id;
+
+	ret = aie_part_set_valid_bd(apart, start_col, bd);
+	if (ret < 0) {
+		dev_err(&apart->dev, "failed to set valid bd");
+		return ret;
+	}
+
+	ret = aie_part_set_len_bd(apart, start_col, bd, bufsize / sizeof(u32));
+	if (ret < 0) {
+		dev_err(&apart->dev, "failed to set bd length");
+		return ret;
+	}
+
+	ret = aie_part_set_dmabuf_bd_kernel(apart, &dmabuf_args);
+	if (ret < 0) {
+		dev_err(&apart->dev, "failed to set shim dma buffer descriptor");
+		return ret;
+	}
+
+	ret = aie_part_push_bd(apart, &start_col, bd_id, AIE_MM2S_DIR, chan_id);
+	if (ret < 0)
+		dev_err(&apart->dev, "failed to push bd to queue");
+
+	return ret;
+}
+
+/**
+ * aie_load_cert_broadcast() - Load CERT firmware to all column processors
+ *			       (AIE2PS only). Firmware will be transferred to
+ *			       the device using SHIM DMA. The firmware will then
+ *			       be broadcasted to each column through the stream
+ *			       switch network.
+ * @dev: pointer to AI Engine partition device
+ * @elf_addr: CERT elf address
+ * @return: 0 for success and negative value for failure
+ */
+int aie_load_cert_broadcast(struct device *dev, void *elf_addr)
+{
+	const Elf32_Ehdr *ehdr = (Elf32_Ehdr *)elf_addr;
+	u16 data_ops = AIE_PART_ZEROIZE_UC_MEM_ALL;
+	u32 mem_type, end_elf_word = 0;
+	struct aie_location last_col;
+	struct aie_partition *apart;
+	Elf32_Addr end_elf_addr = 0;
+	struct aie_device *adev;
+	size_t ctrlbuf_size = 0;
+	int ret, i, dma_fd;
+	void *ctrlbuf;
+
+	if (!dev || !elf_addr)
+		return -EINVAL;
+
+	apart = dev_to_aiepart(dev);
+	if (!apart) {
+		pr_err("failed to find aie partition");
+		return -ENODEV;
+	}
+	adev = apart->adev;
+	if (!adev->ops->map_uc_mem)
+		return -EINVAL;
+
+	/* clear uC memory */
+	ret = aie_part_pm_ops(apart, &data_ops, AIE_PART_INIT_OPT_UC_ZEROIZATION,
+			      apart->range, 1);
+	if (ret)
+		return ret;
+
+	/* find CERT size from ELF */
+	for (i = 0; i < ehdr->e_phnum; i++) {
+		u32 num_headers, offset, *sptr32;
+		struct aie_part_mem pmem;
+		const Elf32_Phdr *phdr;
+		size_t memsz32;
+
+		phdr = (Elf32_Phdr *)(elf_addr + sizeof(*ehdr) + i * sizeof(*phdr));
+		/* ignore non-loadable sections */
+		if (phdr->p_type != PT_LOAD)
+			continue;
+
+		mem_type = adev->ops->map_uc_mem(apart, phdr->p_paddr, &pmem);
+		/* ignore non program mem and non priv data mem sections */
+		switch (mem_type) {
+		case AIE_UC_PROGRAM_MEM:
+		case AIE_UC_PRIVATE_DATA_MEM:
+			break;
+		default:
+			continue;
+		}
+
+		/* ignore uninitialized sections */
+		if (!phdr->p_filesz)
+			continue;
+
+		/*
+		 * Control packets can have a payload of 4 32 bit words. Each
+		 * packet also contains a header that is 2 32 bit words.
+		 */
+		memsz32 = ALIGN(phdr->p_memsz, 4) / sizeof(u32);
+		num_headers = (ALIGN(memsz32, 4) / 4) * 2;
+		ctrlbuf_size += ALIGN(phdr->p_memsz, 4) + (num_headers * sizeof(u32));
+
+		/* store last word and address to poll */
+		offset = ALIGN(phdr->p_memsz, 4) - sizeof(u32);
+		sptr32 = (u32 *)(elf_addr + phdr->p_offset);
+		end_elf_addr = (phdr->p_paddr & (pmem.mem.size - 1)) +
+					pmem.mem.offset + offset;
+		end_elf_word = sptr32[memsz32 - 1];
+	}
+
+	ctrlbuf = aie_dma_mem_alloc_buffer(apart, PAGE_ALIGN(ctrlbuf_size), &dma_fd);
+	if (IS_ERR(ctrlbuf))
+		goto out;
+
+	ret = aie_ctrl_pktize_elf(apart, (u32 *)ctrlbuf, elf_addr, ctrlbuf_size);
+	if (ret < 0)
+		goto out;
+
+	ret = aie_load_cert_strmsw_config(apart);
+	if (ret < 0)
+		goto out;
+
+	ret = aie_load_cert_start_dma(apart, dma_fd, ctrlbuf_size);
+	if (ret < 0)
+		goto out;
+
+	/* poll uC PM in last column to confirm CERT loaded */
+	last_col.row = 0;
+	last_col.col = apart->range.start.col + apart->range.size.col - 1;
+	ret = aie_part_maskpoll_register(apart,
+					 aie_cal_regoff(adev, last_col, end_elf_addr),
+					 end_elf_word, 0xFFFFFFFF, LOAD_CERT_TIMEOUT);
+	if (ret < 0)
+		dev_err(&apart->dev, "failed to load cert: timeout reached");
+
+out:
+	aie_dma_mem_free_buffer(apart, dma_fd);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(aie_load_cert_broadcast);

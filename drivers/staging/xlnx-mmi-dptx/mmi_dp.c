@@ -451,7 +451,7 @@ static void mmi_dp_soft_reset_all(struct dptx *dptx)
  */
 void mmi_dp_core_init_phy(struct dptx *dptx)
 {
-	mmi_dp_set(dptx->base, PHYIF_CTRL, PHYIF_PHY_WIDTH);
+	mmi_dp_clr(dptx->base, PHYIF_CTRL, PHYIF_PHY_WIDTH);
 }
 
 /**
@@ -614,22 +614,6 @@ void mmi_dp_phy_set_lanes(struct dptx *dptx, unsigned int lanes)
 void mmi_dp_phy_set_rate(struct dptx *dptx, unsigned int rate)
 {
 	dptx_dbg(dptx, "%s: rate=%d\n", __func__, rate);
-
-	switch (rate) {
-	case DPTX_PHYIF_CTRL_RATE_RBR:
-	case DPTX_PHYIF_CTRL_RATE_HBR:
-		/* Set 20-bit PHY width */
-		mmi_dp_clr(dptx->base, PHYIF_CTRL, PHYIF_PHY_WIDTH);
-		break;
-	case DPTX_PHYIF_CTRL_RATE_HBR2:
-	case DPTX_PHYIF_CTRL_RATE_HBR3:
-		/* Set 40-bit PHY width */
-		mmi_dp_set(dptx->base, PHYIF_CTRL, PHYIF_PHY_WIDTH);
-		break;
-	default:
-		dptx_warn(dptx, "Invalid PHY rate %d\n", rate);
-		break;
-	}
 
 	mmi_dp_write_mask(dptx, PHYIF_CTRL, PHYIF_PHY_RATE, rate);
 }
@@ -922,10 +906,10 @@ mmi_dp_bridge_mode_valid(struct drm_bridge *bridge,
 	dptx->bpp = mmi_dp_get_color_depth_bpp(dptx->vparams[0].bpc,
 					       dptx->vparams[0].pix_enc);
 
-	link_rate = mmi_dp_get_link_rate(dptx->max_rate);
+	link_rate = mmi_dp_get_link_rate(dptx->link.rate);
 	link_rate *= 1000;
 
-	max_pxl_clk = mmi_dp_max_rate(link_rate, dptx->max_lanes, dptx->bpp);
+	max_pxl_clk = mmi_dp_max_rate(link_rate, dptx->link.lanes, dptx->bpp);
 
 	dptx_dbg(dptx, "%s Bpp %d, link_rate %d pixel clock set %d\n", __func__,
 		 dptx->bpp, link_rate, max_pxl_clk);
@@ -980,6 +964,23 @@ static int mmi_dp_configure_video(struct dptx *dptx,
 	u8 bpp;
 	s64 fixp;
 	int retval;
+
+	/*
+	 * See sec 5.1.5 of DP 1.4 spec for guidance on downstream device
+	 * power management by source device.
+	 */
+	mmi_dp_write_dpcd(dptx, DP_SET_POWER, 2);
+	mdelay(10);
+	mmi_dp_write_dpcd(dptx, DP_SET_POWER, 1);
+	mdelay(30);
+	mmi_dp_write_dpcd(dptx, DP_SET_POWER, 1);
+	mdelay(10);
+
+	dptx->link.rate = dptx->max_rate;
+	dptx->link.lanes = dptx->max_lanes;
+	retval = mmi_dp_full_link_training(dptx);
+	if (retval)
+		return -EINVAL;
 
 	vparams = &dptx->vparams[0];
 
@@ -1042,8 +1043,7 @@ static void mmi_dp_bridge_atomic_enable(struct drm_bridge *bridge,
 		dptx_err(dptx, "Failed to configure video mode\n");
 		return;
 	}
-	mmi_dp_intr_en(dptx, DPTX_IEN_VIDEO_FIFO_UNDERFLOW |
-		       DPTX_IEN_VIDEO_FIFO_OVERFLOW |
+	mmi_dp_intr_en(dptx, DPTX_IEN_VIDEO_FIFO_OVERFLOW |
 		       DPTX_IEN_AUDIO_FIFO_OVERFLOW);
 }
 
@@ -1080,6 +1080,7 @@ static int mmi_dp_probe(struct platform_device *pdev)
 	struct resource *res;
 	struct device *dev;
 	struct dptx *dptx;
+	u32 max_lanes;
 	int retval;
 
 	dev = &pdev->dev;
@@ -1112,6 +1113,14 @@ static int mmi_dp_probe(struct platform_device *pdev)
 
 	dev_info(dev, "IRQ number %d.\n", dptx->irq);
 
+	retval = of_property_read_u32(dev->of_node, "xlnx,dp-lanes", &max_lanes);
+	if (retval < 0 || (max_lanes != 1 && max_lanes != 2 && max_lanes != 4)) {
+		max_lanes = 1;
+		dev_warn(dev, "no lanes/invalid lane count, defaulting to 1 lane\n");
+	}
+
+	dptx->max_lanes = max_lanes;
+
 	dptx->cr_fail = false;
 	dptx->mst = false; /* Should be disabled for HDCP. */
 	dptx->ssc_en = false;
@@ -1124,8 +1133,7 @@ static int mmi_dp_probe(struct platform_device *pdev)
 	atomic_set(&dptx->shutdown, 0);
 	atomic_set(&dptx->c_connect, 0);
 
-	dptx->max_rate = DPTX_DEFAULT_LINK_RATE;
-	dptx->max_lanes = DPTX_DEFAULT_LINK_LANES;
+	dptx->max_rate = DPTX_MAX_LINK_RATE;
 
 	platform_set_drvdata(pdev, dptx);
 

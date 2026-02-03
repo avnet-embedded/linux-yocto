@@ -28,6 +28,7 @@
 
 #define RSC_TBL_XLNX_MAGIC	((uint32_t)'x' << 24 | (uint32_t)'a' << 16 | \
 				 (uint32_t)'m' << 8 | (uint32_t)'p')
+#define NUM_PM_IOCTL_ARGS	3
 
 /*
  * settings for RPU cluster mode which
@@ -68,7 +69,7 @@ struct zynqmp_sram_bank {
 };
 
 /**
- * struct mbox_info
+ * struct mbox_info - mailbox channel data
  *
  * @rx_mc_buf: to copy data from mailbox rx channel
  * @tx_mc_buf: to copy data to mailbox tx channel
@@ -89,7 +90,7 @@ struct mbox_info {
 };
 
 /**
- * struct rsc_tbl_data
+ * struct rsc_tbl_data - resource table metadata
  *
  * Platform specific data structure used to sync resource table address.
  * It's important to maintain order and size of each field on remote side.
@@ -128,7 +129,7 @@ static const struct mem_bank_data zynqmp_tcm_banks_lockstep[] = {
 };
 
 /**
- * struct zynqmp_r5_core
+ * struct zynqmp_r5_core - remoteproc core's internal data
  *
  * @rsc_tbl_va: resource table virtual address
  * @sram: Array of sram memories assigned to this core
@@ -157,7 +158,7 @@ struct zynqmp_r5_core {
 };
 
 /**
- * struct zynqmp_r5_cluster
+ * struct zynqmp_r5_cluster - remoteproc cluster's internal data
  *
  * @dev: r5f subsystem cluster device node
  * @mode: cluster mode of type zynqmp_r5_cluster_mode
@@ -232,17 +233,19 @@ static void zynqmp_r5_mb_rx_cb(struct mbox_client *cl, void *msg)
 
 	ipi = container_of(cl, struct mbox_info, mbox_cl);
 
-	/* copy data from ipi buffer to r5_core */
+	/* copy data from ipi buffer to r5_core if IPI is buffered. */
 	ipi_msg = (struct zynqmp_ipi_message *)msg;
-	buf_msg = (struct zynqmp_ipi_message *)ipi->rx_mc_buf;
-	len = ipi_msg->len;
-	if (len > IPI_BUF_LEN_MAX) {
-		dev_warn(cl->dev, "msg size exceeded than %d\n",
-			 IPI_BUF_LEN_MAX);
-		len = IPI_BUF_LEN_MAX;
-	}
-	buf_msg->len = len;
-	memcpy(buf_msg->data, ipi_msg->data, len);
+        if (ipi_msg) {
+                 buf_msg = (struct zynqmp_ipi_message *)ipi->rx_mc_buf;
+                 len = ipi_msg->len;
+                 if (len > IPI_BUF_LEN_MAX) {
+                         dev_warn(cl->dev, "msg size exceeded than %d\n",
+                                  IPI_BUF_LEN_MAX);
+                         len = IPI_BUF_LEN_MAX;
+                 }
+                 buf_msg->len = len;
+                 memcpy(buf_msg->data, ipi_msg->data, len);
+         }
 
 	/* received and processed interrupt ack */
 	if (mbox_send_message(ipi->rx_chan, NULL) < 0)
@@ -346,6 +349,42 @@ static void zynqmp_r5_rproc_kick(struct rproc *rproc, int vqid)
 		dev_warn(dev, "failed to send message\n");
 }
 
+/**
+ * zynqmp_setup_ddr_boot() - Set RPU boot address to boot_addr
+ * @r5_core: single core's corresponding core instance
+ * @boot_addr: Boot address used for core
+ *
+ * If R52 is used and booting from DDR, then set R52 boot
+ * address. This is done using AMD-Xilinx native firmware interface
+ * to tell firmware to configure R52 for DDR Boot.
+ *
+ * Return: 0 on success, otherwise non-zero value on failure
+ */
+static int zynqmp_setup_ddr_boot(struct zynqmp_r5_core *r5_core,
+				 u64 boot_addr)
+{
+	int ret;
+
+	/* This API is needed so that the RPU core has the TCMBOOT flag set to OFF */
+	ret = zynqmp_pm_is_function_supported(PM_IOCTL, IOCTL_RPU_BOOT_ADDR_CONFIG);
+	if (ret < 0) {
+		dev_err(r5_core->dev, "Setting the RPU Address is not supported.\n");
+		return ret;
+	}
+
+	ret = zynqmp_pm_invoke_fn(PM_IOCTL, NULL, NUM_PM_IOCTL_ARGS,
+				  r5_core->pm_domain_id,
+				  IOCTL_RPU_BOOT_ADDR_CONFIG, boot_addr);
+	if (ret < 0) {
+		dev_err(r5_core->dev, "failed to set RPU Boot address.\n");
+		return ret;
+	}
+
+	r5_core->rproc->bootaddr = boot_addr;
+
+	return 0;
+}
+
 /*
  * zynqmp_r5_rproc_start()
  * @rproc: single R5 core's corresponding rproc instance
@@ -357,7 +396,8 @@ static void zynqmp_r5_rproc_kick(struct rproc *rproc, int vqid)
 static int zynqmp_r5_rproc_start(struct rproc *rproc)
 {
 	struct zynqmp_r5_core *r5_core = rproc->priv;
-	enum rpu_boot_mem bootmem;
+	struct rproc_mem_entry *mem;
+	u64 bootmem;
 	int ret;
 
 	/*
@@ -376,12 +416,29 @@ static int zynqmp_r5_rproc_start(struct rproc *rproc)
 	 * and jitter. Also, if the OCM is secured and the Cortex-R5F processor
 	 * is non-secured, then the Cortex-R5F processor cannot access the
 	 * HIVEC exception vectors in the OCM.
+	 *
+	 * There exists case where R52 can boot from DDR.
 	 */
-	bootmem = (rproc->bootaddr >= 0xFFFC0000) ?
-		   PM_RPU_BOOTMEM_HIVEC : PM_RPU_BOOTMEM_LOVEC;
+	mem = rproc_find_carveout_by_name(rproc, "ddrboot");
+	if (mem) {
+		bootmem = (u64)mem->dma;
 
-	dev_dbg(r5_core->dev, "RPU boot addr 0x%llx from %s.", rproc->bootaddr,
-		bootmem == PM_RPU_BOOTMEM_HIVEC ? "OCM" : "TCM");
+		if (upper_32_bits(bootmem)) {
+			dev_err(r5_core->dev, "RPU Boot only supports 32 bit.\n");
+			return -EINVAL;
+		}
+
+		ret = zynqmp_setup_ddr_boot(r5_core, bootmem);
+		if (ret)
+			return ret;
+	} else {
+		/* TCM / OCM boot modes */
+		bootmem = (rproc->bootaddr >= 0xFFFC0000) ?
+			   PM_RPU_BOOTMEM_HIVEC : PM_RPU_BOOTMEM_LOVEC;
+
+		dev_dbg(r5_core->dev, "RPU boot addr 0x%llx from %s.", rproc->bootaddr,
+			bootmem == PM_RPU_BOOTMEM_HIVEC ? "OCM" : "TCM");
+	}
 
 	/* Request node before starting RPU core if new version of API is supported */
 	if (zynqmp_pm_feature(PM_REQUEST_NODE) > 1) {
@@ -729,7 +786,7 @@ static int zynqmp_r5_parse_fw(struct rproc *rproc, const struct firmware *fw)
 }
 
 /**
- * zynqmp_r5_rproc_prepare()
+ * zynqmp_r5_rproc_prepare() - prepare core to boot/attach
  * adds carveouts for TCM bank and reserved memory regions
  *
  * @rproc: Device node of each rproc
@@ -762,7 +819,7 @@ static int zynqmp_r5_rproc_prepare(struct rproc *rproc)
 }
 
 /**
- * zynqmp_r5_rproc_unprepare()
+ * zynqmp_r5_rproc_unprepare() - programming sequence after stop/detach.
  * Turns off TCM banks using power-domain id
  *
  * @rproc: Device node of each rproc
@@ -905,7 +962,7 @@ static const struct rproc_ops zynqmp_r5_rproc_ops = {
 };
 
 /**
- * zynqmp_r5_add_rproc_core()
+ * zynqmp_r5_add_rproc_core() - Add core data to framework.
  * Allocate and add struct rproc object for each r5f core
  * This is called for each individual r5f core
  *
@@ -1141,7 +1198,7 @@ static int zynqmp_r5_get_tcm_node_from_dt(struct zynqmp_r5_cluster *cluster)
 }
 
 /**
- * zynqmp_r5_get_tcm_node()
+ * zynqmp_r5_get_tcm_node() - Get TCM info
  * Ideally this function should parse tcm node and store information
  * in r5_core instance. For now, Hardcoded TCM information is used.
  * This approach is used as TCM bindings for system-dt is being developed
@@ -1460,6 +1517,45 @@ static void zynqmp_r5_cluster_exit(void *data)
 }
 
 /*
+ * zynqmp_r5_remoteproc_shutdown()
+ * Follow shutdown sequence in case of kexec call.
+ *
+ * @pdev: domain platform device for cluster
+ *
+ * Return: None.
+ */
+static void zynqmp_r5_remoteproc_shutdown(struct platform_device *pdev)
+{
+	const char *rproc_state_str = NULL;
+	struct zynqmp_r5_cluster *cluster;
+	struct zynqmp_r5_core *r5_core;
+	struct rproc *rproc;
+	int i, ret = 0;
+
+	cluster = platform_get_drvdata(pdev);
+
+	for (i = 0; i < cluster->core_count; i++) {
+		r5_core = cluster->r5_cores[i];
+		rproc = r5_core->rproc;
+
+		if (rproc->state == RPROC_RUNNING) {
+			ret = rproc_shutdown(rproc);
+			rproc_state_str = "shutdown";
+		} else if (rproc->state == RPROC_ATTACHED) {
+			ret = rproc_detach(rproc);
+			rproc_state_str = "detach";
+		} else {
+			ret = 0;
+		}
+
+		if (ret) {
+			dev_err(cluster->dev, "failed to %s rproc %d\n",
+				rproc_state_str, rproc->index);
+		}
+	}
+}
+
+/*
  * zynqmp_r5_remoteproc_probe()
  * parse device-tree, initialize hardware and allocate required resources
  * and remoteproc ops
@@ -1520,6 +1616,7 @@ static struct platform_driver zynqmp_r5_remoteproc_driver = {
 		.name = "zynqmp_r5_remoteproc",
 		.of_match_table = zynqmp_r5_remoteproc_match,
 	},
+	.shutdown = zynqmp_r5_remoteproc_shutdown,
 };
 module_platform_driver(zynqmp_r5_remoteproc_driver);
 
