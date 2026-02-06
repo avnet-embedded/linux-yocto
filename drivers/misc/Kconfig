@@ -647,6 +647,7 @@ config MCHP_LAN966X_PCI
 config MARVELL_LOKI
 	bool "Marvell Loki driver"
 	default y
+	depends on ARM64
 	help
 	  Handles GPINT0 interrupt on Loki SoC.
 
