@@ -40,10 +40,10 @@ jobs:
                       ${{ secrets.LIST_EMAILS_NOTIFICATIONS }}
                    ],
                    "dynamic_template_data":{
-                      "subject": "New PR opened : ${{ github.event.pull_request.title }} on ${{ github.repository }}",
+                      "subject": "New PR opened : ${{ env.PR }} on ${{ github.repository }}",
                       "author": "${{ steps.email.outputs.email }}",
                       "repo": "${{ github.repository }}",
-                      "source": "${{ github.head_ref }}",
+                      "source": "${{ env.SOURCE }}",
                       "target": "${{ github.base_ref }}",
                       "url": "${{ github.event.pull_request.html_url }}",
                    }
@@ -55,4 +55,3 @@ jobs:
           SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
           PR: ${{ github.event.pull_request.title }}
           SOURCE: ${{ github.head_ref }}
-          TARGET: ${{ github.base_ref }}
