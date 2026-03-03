@@ -134,6 +134,12 @@ struct v3d_dev {
 	void __iomem *gca_regs;
 	void __iomem *sms_regs;
 	struct clk *clk;
+	struct delayed_work clk_down_work;
+	unsigned long clk_up_rate, clk_down_rate;
+	struct mutex clk_lock;
+	u32 clk_refcount;
+	bool clk_up;
+
 	struct reset_control *reset;
 
 	/* Virtual and DMA addresses of the single shared page table. */
@@ -594,6 +600,7 @@ int v3d_submit_cpu_ioctl(struct drm_device *dev, void *data,
 			 struct drm_file *file_priv);
 
 /* v3d_irq.c */
+extern bool debug_mmu;
 int v3d_irq_init(struct v3d_dev *v3d);
 void v3d_irq_enable(struct v3d_dev *v3d);
 void v3d_irq_disable(struct v3d_dev *v3d);
@@ -638,3 +645,4 @@ int v3d_perfmon_set_global_ioctl(struct drm_device *dev, void *data,
 /* v3d_sysfs.c */
 int v3d_sysfs_init(struct device *dev);
 void v3d_sysfs_destroy(struct device *dev);
+void v3d_submit_init(struct drm_device *dev);
