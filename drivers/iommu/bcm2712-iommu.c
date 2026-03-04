@@ -123,7 +123,7 @@
  */
 static u32 bcm2712_iommu_get_page(struct bcm2712_iommu *mmu, u32 **ptr)
 {
-	*ptr = iommu_alloc_pages_sz(GFP_KERNEL, IOMMU_PAGE_SIZE);
+	*ptr = iommu_alloc_pages_sz(GFP_ATOMIC, IOMMU_PAGE_SIZE);
 	if (*ptr) {
 		dma_addr_t dma = dma_map_single(mmu->dev, *ptr,
 						PAGE_SIZE, DMA_TO_DEVICE);
