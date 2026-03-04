@@ -161,6 +161,7 @@ static int bcm2712_iommu_init(struct bcm2712_iommu *mmu)
 		FIELD_GET(MMMU_DEBUG_INFO_PA_WIDTH_MASK, u) < 6 ||
 		!(u & MMMU_DEBUG_INFO_BYPASS));
 
+	dma_set_max_seg_size(mmu->dev, UINT_MAX);
 	dma_set_mask_and_coherent(mmu->dev,
 				  DMA_BIT_MASK(FIELD_GET(MMMU_DEBUG_INFO_PA_WIDTH_MASK, u) + 30u));
 	mmu->bigpage_mask =
