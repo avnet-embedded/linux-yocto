@@ -444,7 +444,9 @@ static int gpiochip_get_direction(struct gpio_chip *gc, unsigned int offset)
 {
 	int ret;
 
+#ifndef REJECT_HOTPLUG_TAX
 	lockdep_assert_held(&gc->gpiodev->srcu);
+#endif
 
 	if (WARN_ON(!gc->get_direction))
 		return -EOPNOTSUPP;
@@ -525,7 +527,9 @@ static int gpiodev_add_to_list_unlocked(struct gpio_device *gdev)
 {
 	struct gpio_device *prev, *next;
 
+#ifndef REJECT_HOTPLUG_TAX
 	lockdep_assert_held(&gpio_devices_lock);
+#endif
 
 	if (list_empty(&gpio_devices)) {
 		/* initial entry in list */
@@ -2830,7 +2834,9 @@ static int gpiochip_direction_input(struct gpio_chip *gc, unsigned int offset)
 {
 	int ret;
 
+#ifndef REJECT_HOTPLUG_TAX
 	lockdep_assert_held(&gc->gpiodev->srcu);
+#endif
 
 	if (WARN_ON(!gc->direction_input))
 		return -EOPNOTSUPP;
@@ -2847,7 +2853,9 @@ static int gpiochip_direction_output(struct gpio_chip *gc, unsigned int offset,
 {
 	int ret;
 
+#ifndef REJECT_HOTPLUG_TAX
 	lockdep_assert_held(&gc->gpiodev->srcu);
+#endif
 
 	if (WARN_ON(!gc->direction_output))
 		return -EOPNOTSUPP;
@@ -2938,7 +2946,9 @@ static int gpiochip_set(struct gpio_chip *gc, unsigned int offset, int value)
 {
 	int ret;
 
+#ifndef REJECT_HOTPLUG_TAX
 	lockdep_assert_held(&gc->gpiodev->srcu);
+#endif
 
 	if (WARN_ON(unlikely(!gc->set)))
 		return -EOPNOTSUPP;
@@ -3294,7 +3304,9 @@ static int gpiochip_get(struct gpio_chip *gc, unsigned int offset)
 {
 	int ret;
 
+#ifndef REJECT_HOTPLUG_TAX
 	lockdep_assert_held(&gc->gpiodev->srcu);
+#endif
 
 	/* Make sure this is called after checking for gc->get(). */
 	ret = gc->get(gc, offset);
@@ -3355,7 +3367,9 @@ static int gpiod_get_raw_value_commit(const struct gpio_desc *desc)
 static int gpio_chip_get_multiple(struct gpio_chip *gc,
 				  unsigned long *mask, unsigned long *bits)
 {
+#ifndef REJECT_HOTPLUG_TAX
 	lockdep_assert_held(&gc->gpiodev->srcu);
+#endif
 
 	if (gc->get_multiple) {
 		int ret;
@@ -3707,7 +3721,9 @@ static int gpiochip_set_multiple(struct gpio_chip *gc,
 	unsigned int i;
 	int ret;
 
+#ifndef REJECT_HOTPLUG_TAX
 	lockdep_assert_held(&gc->gpiodev->srcu);
+#endif
 
 	if (gc->set_multiple) {
 		ret = gc->set_multiple(gc, mask, bits);
