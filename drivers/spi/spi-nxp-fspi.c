@@ -888,17 +888,38 @@ static void nxp_fspi_fill_txfifo(struct nxp_fspi *f,
 {
 	void __iomem *base = f->iobase;
 	int i, ret;
+	int len, cnt;
 	u8 *buf = (u8 *) op->data.buf.out;
 
 	/* clear the TX FIFO. */
 	fspi_writel(f, FSPI_IPTXFCR_CLR, base + FSPI_IPTXFCR);
 
-	/*
-	 * Default value of water mark level is 8 bytes, hence in single
-	 * write request controller can write max 8 bytes of data.
-	 */
+	len = op->data.nbytes;
 
-	for (i = 0; i < ALIGN_DOWN(op->data.nbytes, 8); i += 8) {
+	/* handle the DTR with ODD address case */
+	if (f->flags & FSPI_DTR_ODD_ADDR) {
+		u8 tmp[8];
+
+		tmp[0] = 0xff;
+		/* Wait for TXFIFO empty */
+		ret = fspi_readl_poll_tout(f, f->iobase + FSPI_INTR,
+					   FSPI_INTR_IPTXWE, 0,
+					   POLL_TOUT, true);
+
+		WARN_ON(ret);
+
+		cnt = min(len, 7);
+		/* discard the first byte */
+		memcpy(tmp + 1, buf, cnt);
+
+		fspi_writel(f, *(u32 *)tmp, base + FSPI_TFDR);
+		fspi_writel(f, *(u32 *)(tmp + 4), base + FSPI_TFDR + 4);
+		fspi_writel(f, FSPI_INTR_IPTXWE, base + FSPI_INTR);
+		len -= cnt;
+		buf += cnt;
+	}
+
+	for (i = 0; i < ALIGN_DOWN(len, 8); i += 8) {
 		/* Wait for TXFIFO empty */
 		ret = fspi_readl_poll_tout(f, f->iobase + FSPI_INTR,
 					   FSPI_INTR_IPTXWE, 0,
@@ -910,10 +931,10 @@ static void nxp_fspi_fill_txfifo(struct nxp_fspi *f,
 		fspi_writel(f, FSPI_INTR_IPTXWE, base + FSPI_INTR);
 	}
 
-	if (i < op->data.nbytes) {
+	if (i < len) {
 		u32 data = 0;
 		int j;
-		int remaining = op->data.nbytes - i;
+		int remaining = len - i;
 		/* Wait for TXFIFO empty */
 		ret = fspi_readl_poll_tout(f, f->iobase + FSPI_INTR,
 					   FSPI_INTR_IPTXWE, 0,
@@ -1040,16 +1061,20 @@ static int nxp_fspi_do_op(struct nxp_fspi *f, const struct spi_mem_op *op)
 	 * data needed.
 	 */
 	seqid_lut = f->devtype_data->lut_num - 1;
-	if (f->flags & FSPI_DTR_ODD_ADDR)
+	if (f->flags & FSPI_DTR_ODD_ADDR) {
 		fspi_writel(f, (op->data.nbytes + 1) |
 			 (seqid_lut << FSPI_IPCR1_SEQID_SHIFT) |
 			 (seqnum << FSPI_IPCR1_SEQNUM_SHIFT),
 			 base + FSPI_IPCR1);
-	else
+
+		if (op->data.dir == SPI_MEM_DATA_OUT)
+			f->flags &= ~FSPI_DTR_ODD_ADDR;
+	} else {
 		fspi_writel(f, op->data.nbytes |
 			 (seqid_lut << FSPI_IPCR1_SEQID_SHIFT) |
 			 (seqnum << FSPI_IPCR1_SEQNUM_SHIFT),
 			 base + FSPI_IPCR1);
+	}
 
 	/* Trigger the LUT now. */
 	fspi_writel(f, FSPI_IPCMD_TRG, base + FSPI_IPCMD);
@@ -1122,6 +1147,11 @@ static int nxp_fspi_adjust_op_size(struct spi_mem *mem, struct spi_mem_op *op)
 	struct nxp_fspi *f = spi_controller_get_devdata(mem->spi->controller);
 
 	if (op->data.dir == SPI_MEM_DATA_OUT) {
+		if ((op->addr.val & 1) && op->cmd.dtr && op->addr.dtr &&
+			op->dummy.dtr && op->data.dtr) {
+			f->flags |= FSPI_DTR_ODD_ADDR;
+		}
+
 		if (op->data.nbytes > f->devtype_data->txfifo)
 			op->data.nbytes = f->devtype_data->txfifo;
 	} else {
