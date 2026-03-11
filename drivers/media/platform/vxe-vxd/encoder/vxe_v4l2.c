@@ -1387,7 +1387,6 @@ static int vxe_g_ext_ctrls(struct file *file, void *priv,
 	int i;
 
 	ctrls->reserved[0] = 0;
-	ctrls->reserved[1] = 0;
 
 	if (ctrls->which == V4L2_CTRL_WHICH_DEF_VAL) {
 		for (i = 0; i < ctrls->count; i++) {
@@ -1445,7 +1444,6 @@ static int vxe_try_ext_ctrls(struct file *file, void *priv,
 	int i;
 
 	ctrls->reserved[0] = 0;
-	ctrls->reserved[1] = 0;
 
 	/* Can't write default values or support requests */
 	if (ctrls->which != V4L2_CTRL_WHICH_CUR_VAL)
@@ -1494,7 +1492,6 @@ static int vxe_s_ext_ctrls(struct file *file, void *priv,
 	int ret;
 
 	ctrls->reserved[0] = 0;
-	ctrls->reserved[1] = 0;
 
 	if (ctrls->which != V4L2_CTRL_WHICH_CUR_VAL)
 		return -EINVAL;
