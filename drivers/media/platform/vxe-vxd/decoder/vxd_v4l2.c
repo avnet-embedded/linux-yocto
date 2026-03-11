@@ -403,6 +403,7 @@ static void vxd_return_resource(void *ctx_handle, enum vxd_cb_type type,
 			break;
 		}
 		buf->buffer.vb.field = V4L2_FIELD_NONE;
+
 		q_data = get_q_data(ctx, buf->buffer.vb.vb2_buf.vb2_queue->type);
 		if (!q_data)
 			return;
@@ -443,6 +444,7 @@ static void vxd_return_resource(void *ctx_handle, enum vxd_cb_type type,
 		}
 		buf->mapping->reuse = FALSE;
 		buf->buffer.vb.field = V4L2_FIELD_NONE;
+
 		q_data = get_q_data(ctx, buf->buffer.vb.vb2_buf.vb2_queue->type);
 		if (!q_data)
 			return;
@@ -796,8 +798,10 @@ static void vxd_dec_buf_queue(struct vb2_buffer *vb)
 	int i;
 
 	if (V4L2_TYPE_IS_OUTPUT(vb->type)) {
+		vbuf->sequence = ctx->out_seq++;
 		v4l2_m2m_buf_queue(ctx->fh.m2m_ctx, vbuf);
 	} else {
+		vbuf->sequence = ctx->cap_seq++;
 		mutex_lock_nested(ctx->mutex, SUBCLASS_VXD_V4L2);
 		if (buf->mapping->reuse) {
 			mutex_unlock(ctx->mutex);
@@ -1170,7 +1174,6 @@ static int __enum_fmt(struct v4l2_fmtdesc *f, unsigned int type)
 {
 	int i, index;
 	struct vxd_dec_fmt *fmt = NULL;
-
 	index = 0;
 	for (i = 0; i < ARRAY_SIZE(vxd_dec_formats); ++i) {
 		if (vxd_dec_formats[i].type & type) {
@@ -1200,7 +1203,6 @@ static int vxd_dec_enum_fmt(struct file *file, void *priv, struct v4l2_fmtdesc *
 static struct vxd_dec_fmt *find_format(struct v4l2_format *f, unsigned int type)
 {
 	int i;
-
 	for (i = 0; i < ARRAY_SIZE(vxd_dec_formats); ++i) {
 		if (vxd_dec_formats[i].fourcc == f->fmt.pix_mp.pixelformat &&
 		    vxd_dec_formats[i].type == type)
@@ -1730,6 +1732,9 @@ static void device_run(void *priv)
 	if (!dst_vb)
 		dev_err(dev, "Next dst buffer is null\n");
 
+
+	dst_vb->vb2_buf.timestamp = src_vb->vb2_buf.timestamp;
+
 	src_vxdb = container_of(src_vb, struct vxd_buffer, buffer.vb);
 	dst_vxdb = container_of(dst_vb, struct vxd_buffer, buffer.vb);
 
@@ -1746,7 +1751,7 @@ static void device_run(void *priv)
 		dev_err(dev, "bspp_stream_submit_buffer failed %d\n", ret);
 
 	if (ctx->stop_initiated &&
-	    (v4l2_m2m_num_src_bufs_ready(ctx->fh.m2m_ctx) == 0))
+			(v4l2_m2m_num_src_bufs_ready(ctx->fh.m2m_ctx) == 0))
 		ctx->eos = TRUE;
 
 	ctx->curr_src = src_vxdb;
