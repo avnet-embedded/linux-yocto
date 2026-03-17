@@ -28,6 +28,7 @@
 #include <linux/iopoll.h>
 #include <linux/irqdomain.h>
 #include <linux/irq.h>
+#include <linux/irq_work.h>
 #include <linux/kernel.h>
 #include <linux/of_address.h>
 #include <linux/of_clk.h>
@@ -194,6 +195,37 @@
 #define  WAKE_AOWAKE_CTRL_INTR_POLARITY BIT(0)
 
 #define SW_WAKE_ID		83 /* wake83 */
+
+#define SCRATCH_SECURE_RSV104_1		0x3a8
+#define  ROOTFS_SR_MAGIC_SHIFT		(0)
+#define  ROOTFS_SR_MAGIC_MASK		(0xffff)
+#define  ROOTFS_SR_MAGIC_V(r)		((r >> ROOTFS_SR_MAGIC_SHIFT) & \
+						ROOTFS_SR_MAGIC_MASK)
+#define  ROOTFS_SR_MAGIC_MIN		(0)
+#define  ROOTFS_SR_MAGIC_MAX		(0xffff)
+#define  ROOTFS_CURRENT_SHIFT		(16)
+#define  ROOTFS_CURRENT_MASK		(0x3)
+#define  ROOTFS_CURRENT_V(r)		((r >> ROOTFS_CURRENT_SHIFT) & \
+						ROOTFS_CURRENT_MASK)
+#define  ROOTFS_CURRENT_MIN		(0)
+#define  ROOTFS_CURRENT_MAX		(1)
+#define  ROOTFS_RETRY_COUNT_B_SHIFT	(18)
+#define  ROOTFS_RETRY_COUNT_B_MASK	(0x3)
+#define  ROOTFS_RETRY_COUNT_B_V(r)	((r >> ROOTFS_RETRY_COUNT_B_SHIFT) & \
+						ROOTFS_RETRY_COUNT_B_MASK)
+#define  ROOTFS_RETRY_COUNT_B_MIN	(0)
+#define  ROOTFS_RETRY_COUNT_B_MAX	(3)
+#define  ROOTFS_RETRY_COUNT_A_SHIFT	(20)
+#define  ROOTFS_RETRY_COUNT_A_MASK	(0x3)
+#define  ROOTFS_RETRY_COUNT_A_V(r)	((r >> ROOTFS_RETRY_COUNT_A_SHIFT) & \
+						ROOTFS_RETRY_COUNT_A_MASK)
+#define  ROOTFS_RETRY_COUNT_A_MIN	(0)
+#define  ROOTFS_RETRY_COUNT_A_MAX	(3)
+
+#define SCRATCH_SECURE_RSV109_0		0x3cc
+#define  BOOT_CHAIN_STATUS_A_V(r)	((r) & 0x1)
+#define  BOOT_CHAIN_STATUS_B_V(r)	((r >> 1) & 0x1)
+#define  BOOT_CHAIN_CURRENT_V(r)	((r >> 4) & 0x3)
 
 /* for secure PMC */
 #define TEGRA_SMC_PMC		0xc2fffe00
@@ -386,6 +418,7 @@ struct tegra_pmc_soc {
 	bool has_usb_sleepwalk;
 	bool supports_core_domain;
 	bool has_single_mmio_aperture;
+	bool allow_boot_chain_sel;
 };
 
 /**
@@ -467,6 +500,10 @@ struct tegra_pmc {
 	unsigned long *wake_sw_status_map;
 	unsigned long *wake_cntrl_level_map;
 	struct syscore_ops syscore;
+
+	/* Pending wake IRQ processing */
+	struct irq_work wake_work;
+	u32 *wake_status;
 };
 
 static struct tegra_pmc *pmc = &(struct tegra_pmc) {
@@ -1904,6 +1941,50 @@ static int tegra_pmc_parse_dt(struct tegra_pmc *pmc, struct device_node *np)
 	return 0;
 }
 
+/* translate sc7 wake sources back into IRQs to catch edge triggered wakeups */
+static void tegra186_pmc_wake_handler(struct irq_work *work)
+{
+	struct tegra_pmc *pmc = container_of(work, struct tegra_pmc, wake_work);
+	unsigned int i, wake;
+
+	for (i = 0; i < pmc->soc->max_wake_vectors; i++) {
+		unsigned long status = pmc->wake_status[i];
+
+		for_each_set_bit(wake, &status, 32) {
+			irq_hw_number_t hwirq = wake + (i * 32);
+			struct irq_desc *desc;
+			unsigned int irq;
+
+			irq = irq_find_mapping(pmc->domain, hwirq);
+			if (!irq) {
+				dev_warn(pmc->dev,
+					 "No IRQ found for WAKE#%lu!\n",
+					 hwirq);
+				continue;
+			}
+
+			dev_dbg(pmc->dev,
+				"Resume caused by WAKE#%lu mapped to IRQ#%u\n",
+				hwirq, irq);
+
+			desc = irq_to_desc(irq);
+			if (!desc) {
+				dev_warn(pmc->dev,
+					 "No descriptor found for IRQ#%u\n",
+					 irq);
+				continue;
+			}
+
+			if (!desc->action || !desc->action->name)
+				continue;
+
+			generic_handle_irq(irq);
+		}
+
+		pmc->wake_status[i] = 0;
+	}
+}
+
 static int tegra_pmc_init(struct tegra_pmc *pmc)
 {
 	if (pmc->soc->max_wake_events > 0) {
@@ -1922,6 +2003,18 @@ static int tegra_pmc_init(struct tegra_pmc *pmc)
 		pmc->wake_cntrl_level_map = bitmap_zalloc(pmc->soc->max_wake_events, GFP_KERNEL);
 		if (!pmc->wake_cntrl_level_map)
 			return -ENOMEM;
+
+		pmc->wake_status = kcalloc(pmc->soc->max_wake_vectors, sizeof(u32), GFP_KERNEL);
+		if (!pmc->wake_status)
+			return -ENOMEM;
+
+		/*
+		 * Initialize IRQ work for processing wake IRQs. Must use
+		 * HARD_IRQ variant to run in hard IRQ context on PREEMPT_RT
+		 * because we call generic_handle_irq() which requires hard
+		 * IRQ context.
+		 */
+		pmc->wake_work = IRQ_WORK_INIT_HARD(tegra186_pmc_wake_handler);
 	}
 
 	if (pmc->soc->init)
@@ -2193,6 +2286,153 @@ static ssize_t reset_level_show(struct device *dev,
 
 static DEVICE_ATTR_RO(reset_level);
 
+static ssize_t tegra_pmc_scratch_rsv104_store(struct tegra_pmc *pmc,
+					const char *buf, u32 mask, u32 shift,
+					u32 min, u32 max, size_t count)
+{
+	int ret;
+	u32 reg, val;
+
+	ret = sscanf(buf, "0x%x", &val);
+	if (ret != 1)
+		return -EINVAL;
+
+	if (val < min || val > max)
+		return -EINVAL;
+
+	reg = tegra_pmc_scratch_readl(pmc, SCRATCH_SECURE_RSV104_1);
+	reg &= ~(mask << shift);
+	reg |= (val << shift);
+	tegra_pmc_scratch_writel(pmc, reg, SCRATCH_SECURE_RSV104_1);
+
+	return count;
+}
+
+/* Store magic id */
+static ssize_t rootfs_sr_magic_store(struct device *dev,
+				struct device_attribute *attr, const char *buf,
+				size_t count)
+{
+	return tegra_pmc_scratch_rsv104_store(pmc, buf, ROOTFS_SR_MAGIC_MASK,
+					ROOTFS_SR_MAGIC_SHIFT,
+					ROOTFS_SR_MAGIC_MIN,
+					ROOTFS_SR_MAGIC_MAX, count);
+}
+
+static ssize_t rootfs_sr_magic_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	u32 reg;
+
+	reg = tegra_pmc_scratch_readl(pmc, SCRATCH_SECURE_RSV104_1);
+
+	return sprintf(buf, "0x%x\n", ROOTFS_SR_MAGIC_V(reg));
+}
+static DEVICE_ATTR_RW(rootfs_sr_magic);
+
+/* Store current rootfs chain */
+static ssize_t rootfs_current_store(struct device *dev,
+				struct device_attribute *attr, const char *buf,
+				size_t count)
+{
+	return tegra_pmc_scratch_rsv104_store(pmc, buf, ROOTFS_CURRENT_MASK,
+					ROOTFS_CURRENT_SHIFT,
+					ROOTFS_CURRENT_MIN,
+					ROOTFS_CURRENT_MAX, count);
+}
+
+static ssize_t rootfs_current_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	u32 reg;
+
+	reg = tegra_pmc_scratch_readl(pmc, SCRATCH_SECURE_RSV104_1);
+
+	return sprintf(buf, "0x%x\n", ROOTFS_CURRENT_V(reg));
+}
+static DEVICE_ATTR_RW(rootfs_current);
+
+/* Store retry counter of rootfs chain B */
+static ssize_t rootfs_retry_count_b_store(struct device *dev,
+				struct device_attribute *attr, const char *buf,
+				size_t count)
+{
+	return tegra_pmc_scratch_rsv104_store(pmc, buf,
+					ROOTFS_RETRY_COUNT_B_MASK,
+					ROOTFS_RETRY_COUNT_B_SHIFT,
+					ROOTFS_RETRY_COUNT_B_MIN,
+					ROOTFS_RETRY_COUNT_B_MAX, count);
+}
+static ssize_t rootfs_retry_count_b_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	u32 reg;
+
+	reg = tegra_pmc_scratch_readl(pmc, SCRATCH_SECURE_RSV104_1);
+
+	return sprintf(buf, "0x%x\n", ROOTFS_RETRY_COUNT_B_V(reg));
+}
+static DEVICE_ATTR_RW(rootfs_retry_count_b);
+
+/* Store retry counter of rootfs chain A */
+static ssize_t rootfs_retry_count_a_store(struct device *dev,
+				struct device_attribute *attr, const char *buf,
+				size_t count)
+{
+	return tegra_pmc_scratch_rsv104_store(pmc, buf,
+					ROOTFS_RETRY_COUNT_A_MASK,
+					ROOTFS_RETRY_COUNT_A_SHIFT,
+					ROOTFS_RETRY_COUNT_A_MIN,
+					ROOTFS_RETRY_COUNT_A_MAX, count);
+}
+
+static ssize_t rootfs_retry_count_a_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	u32 reg;
+
+	reg = tegra_pmc_scratch_readl(pmc, SCRATCH_SECURE_RSV104_1);
+
+	return sprintf(buf, "0x%x\n", ROOTFS_RETRY_COUNT_A_V(reg));
+}
+static DEVICE_ATTR_RW(rootfs_retry_count_a);
+
+/* Status of bootloader chain A */
+static ssize_t boot_chain_status_a_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	u32 reg;
+
+	reg = tegra_pmc_scratch_readl(pmc, SCRATCH_SECURE_RSV109_0);
+
+	return sprintf(buf, "0x%x\n", BOOT_CHAIN_STATUS_A_V(reg));
+}
+static DEVICE_ATTR_RO(boot_chain_status_a);
+
+/* Status of bootloader chain B */
+static ssize_t boot_chain_status_b_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	u32 reg;
+
+	reg = tegra_pmc_scratch_readl(pmc, SCRATCH_SECURE_RSV109_0);
+
+	return sprintf(buf, "0x%x\n", BOOT_CHAIN_STATUS_B_V(reg));
+}
+static DEVICE_ATTR_RO(boot_chain_status_b);
+
+/* Current bootloader chain */
+static ssize_t boot_chain_current_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	u32 reg;
+
+	reg = tegra_pmc_scratch_readl(pmc, SCRATCH_SECURE_RSV109_0);
+
+	return sprintf(buf, "0x%x\n", BOOT_CHAIN_CURRENT_V(reg));
+}
+static DEVICE_ATTR_RO(boot_chain_current);
+
 static void tegra_pmc_reset_sysfs_init(struct tegra_pmc *pmc)
 {
 	struct device *dev = pmc->dev;
@@ -2212,6 +2452,44 @@ static void tegra_pmc_reset_sysfs_init(struct tegra_pmc *pmc)
 			dev_warn(dev,
 				 "failed to create attr \"reset_level\": %d\n",
 				 err);
+	}
+
+	if (pmc->soc->allow_boot_chain_sel) {
+		err = device_create_file(dev, &dev_attr_rootfs_sr_magic);
+		if (err < 0)
+			dev_warn(dev,
+				"failed to create attr rootfs_sr_magic: %d\n",
+				err);
+		err = device_create_file(dev, &dev_attr_rootfs_current);
+		if (err < 0)
+			dev_warn(dev,
+				"failed to create attr rootfs_current: %d\n",
+				err);
+		err = device_create_file(dev, &dev_attr_rootfs_retry_count_b);
+		if (err < 0)
+			dev_warn(dev,
+				"failed to create attr rootfs_retry_count_b %d\n",
+				err);
+		err = device_create_file(dev, &dev_attr_rootfs_retry_count_a);
+		if (err < 0)
+			dev_warn(dev,
+				"failed to create attr rootfs_retry_count_a %d\n",
+				err);
+		err = device_create_file(dev, &dev_attr_boot_chain_status_a);
+		if (err < 0)
+			dev_warn(dev,
+				"failed to create attr boot_chain_status_a %d\n",
+				err);
+		err = device_create_file(dev, &dev_attr_boot_chain_status_b);
+		if (err < 0)
+			dev_warn(dev,
+				"failed to create attr boot_chain_status_b %d\n",
+				err);
+		err = device_create_file(dev, &dev_attr_boot_chain_current);
+		if (err < 0)
+			dev_warn(dev,
+				"failed to create attr boot_chain_current %d\n",
+				err);
 	}
 }
 
@@ -3121,47 +3399,30 @@ static void wke_clear_wake_status(struct tegra_pmc *pmc)
 	}
 }
 
-/* translate sc7 wake sources back into IRQs to catch edge triggered wakeups */
-static void tegra186_pmc_process_wake_events(struct tegra_pmc *pmc, unsigned int index,
-					     unsigned long status)
-{
-	unsigned int wake;
-
-	dev_dbg(pmc->dev, "Wake[%d:%d]  status=%#lx\n", (index * 32) + 31, index * 32, status);
-
-	for_each_set_bit(wake, &status, 32) {
-		irq_hw_number_t hwirq = wake + 32 * index;
-		struct irq_desc *desc;
-		unsigned int irq;
-
-		irq = irq_find_mapping(pmc->domain, hwirq);
-
-		desc = irq_to_desc(irq);
-		if (!desc || !desc->action || !desc->action->name) {
-			dev_dbg(pmc->dev, "Resume caused by WAKE%ld, IRQ %d\n", hwirq, irq);
-			continue;
-		}
-
-		dev_dbg(pmc->dev, "Resume caused by WAKE%ld, %s\n", hwirq, desc->action->name);
-		generic_handle_irq(irq);
-	}
-}
-
 static void tegra186_pmc_wake_syscore_resume(void)
 {
-	u32 status, mask;
 	unsigned int i;
+	u32 mask;
 
 	for (i = 0; i < pmc->soc->max_wake_vectors; i++) {
 		mask = readl(pmc->wake + WAKE_AOWAKE_TIER2_ROUTING(i));
-		status = readl(pmc->wake + WAKE_AOWAKE_STATUS_R(i)) & mask;
-
-		tegra186_pmc_process_wake_events(pmc, i, status);
+		pmc->wake_status[i] = readl(pmc->wake + WAKE_AOWAKE_STATUS_R(i)) & mask;
 	}
+
+	/* Schedule IRQ work to process wake IRQs (if any) */
+	irq_work_queue(&pmc->wake_work);
 }
 
 static int tegra186_pmc_wake_syscore_suspend(void)
 {
+	unsigned int i;
+
+	/* Check if there are unhandled wake IRQs */
+	for (i = 0; i < pmc->soc->max_wake_vectors; i++)
+		if (pmc->wake_status[i])
+			dev_warn(pmc->dev,
+				 "Unhandled wake IRQs pending vector[%u]: 0x%x\n",
+				 i, pmc->wake_status[i]);
 	wke_read_sw_wake_status(pmc);
 
 	/* flip the wakeup trigger for dual-edge triggered pads
@@ -4250,6 +4511,7 @@ static const struct tegra_pmc_soc tegra234_pmc_soc = {
 	.num_pmc_clks = 0,
 	.has_blink_output = false,
 	.has_single_mmio_aperture = false,
+	.allow_boot_chain_sel = true,
 };
 
 static const struct tegra_pmc_regs tegra264_pmc_regs = {
