@@ -411,7 +411,7 @@
 };
 
 &uart10 {
-	compatible = "arm,pl011-axi";
+	arm,primecell-periphid = <0x00341011>;
 };
 
 &aon_intr {
