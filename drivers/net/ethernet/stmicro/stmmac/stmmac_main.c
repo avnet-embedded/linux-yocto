@@ -3932,6 +3932,7 @@ static int __stmmac_open(struct net_device *dev,
 	phylink_start(priv->phylink);
 	/* We may have called phylink_speed_down before */
 	phylink_speed_up(priv->phylink);
+	priv->is_phy_started = true;
 
 	stmmac_vlan_restore(priv);
 
@@ -4010,6 +4011,7 @@ static void __stmmac_release(struct net_device *dev)
 
 	/* Stop and disconnect the PHY */
 	phylink_stop(priv->phylink);
+	priv->is_phy_started = false;
 
 	stmmac_disable_all_queues(priv);
 
@@ -6652,7 +6654,15 @@ static int stmmac_vlan_rx_kill_vid(struct net_device *ndev, __be16 proto, u16 vi
 	}
 
 	if (priv->hw->num_vlan) {
-		ret = stmmac_del_hw_vlan_rx_fltr(priv, ndev, priv->hw, proto, vid);
+		if (priv->is_phy_started == false) {
+			stmmac_init_phy(ndev);
+			phylink_start(priv->phylink);
+			ret = stmmac_del_hw_vlan_rx_fltr(priv, ndev, priv->hw, proto, vid);
+			phylink_stop(priv->phylink);
+			phylink_disconnect_phy(priv->phylink);
+		} else {
+			ret = stmmac_del_hw_vlan_rx_fltr(priv, ndev, priv->hw, proto, vid);
+		}
 		if (ret) {
 			set_bit(vid, priv->active_vlans);
 			stmmac_vlan_update(priv, priv->num_double_vlans);
@@ -7696,6 +7706,9 @@ error_phy_setup:
 error_pcs_setup:
 	stmmac_mdio_unregister(ndev);
 error_mdio_register:
+	pm_runtime_disable(device);
+	pm_runtime_set_suspended(device);
+	pm_runtime_put_noidle(device);
 	stmmac_napi_del(ndev);
 error_hw_init:
 	destroy_workqueue(priv->wq);
@@ -7759,11 +7772,13 @@ int stmmac_suspend(struct device *dev)
 	if (!ndev || !netif_running(ndev))
 		return 0;
 
-	mutex_lock(&priv->lock);
-
-	netif_device_detach(ndev);
-
 	stmmac_disable_all_queues(priv);
+
+	netif_tx_lock_bh(ndev);
+	netif_device_detach(ndev);
+	netif_tx_unlock_bh(ndev);
+
+	mutex_lock(&priv->lock);
 
 	for (chan = 0; chan < priv->plat->tx_queues_to_use; chan++)
 		hrtimer_cancel(&priv->dma_conf.tx_queue[chan].txtimer);
@@ -7785,7 +7800,6 @@ int stmmac_suspend(struct device *dev)
 		priv->irq_wake = 1;
 	} else {
 		stmmac_mac_set(priv, priv->ioaddr, false);
-		pinctrl_pm_select_sleep_state(priv->device);
 	}
 
 	mutex_unlock(&priv->lock);
@@ -7795,6 +7809,9 @@ int stmmac_suspend(struct device *dev)
 		phylink_speed_down(priv->phylink, false);
 
 	phylink_suspend(priv->phylink, stmmac_wol_enabled_mac(priv));
+
+	if (device_may_wakeup(priv->device) && !priv->plat->pmt)
+		pinctrl_pm_select_sleep_state(priv->device);
 	rtnl_unlock();
 
 	if (stmmac_fpe_supported(priv))
@@ -7839,8 +7856,10 @@ static void stmmac_reset_queues_param(struct stmmac_priv *priv)
 	for (queue = 0; queue < rx_cnt; queue++)
 		stmmac_reset_rx_queue(priv, queue);
 
-	for (queue = 0; queue < tx_cnt; queue++)
+	for (queue = 0; queue < tx_cnt; queue++) {
 		stmmac_reset_tx_queue(priv, queue);
+		stmmac_clear_tx_descriptors(priv, &priv->dma_conf, queue);
+	}
 }
 
 /**
@@ -7878,7 +7897,7 @@ int stmmac_resume(struct device *dev)
 	} else {
 		pinctrl_pm_select_default_state(priv->device);
 		/* reset the phy so that it's ready */
-		if (priv->mii)
+		if (priv->mii && priv->mdio_rst_after_resume)
 			stmmac_mdio_reset(priv->mii);
 	}
 
@@ -7903,7 +7922,6 @@ int stmmac_resume(struct device *dev)
 	stmmac_reset_queues_param(priv);
 
 	stmmac_free_tx_skbufs(priv);
-	stmmac_clear_descriptors(priv, &priv->dma_conf);
 
 	ret = stmmac_hw_setup(ndev);
 	if (ret < 0) {
@@ -7922,7 +7940,6 @@ int stmmac_resume(struct device *dev)
 
 	stmmac_vlan_restore(priv);
 
-	stmmac_enable_all_queues(priv);
 	stmmac_enable_all_dma_irq(priv);
 
 	mutex_unlock(&priv->lock);
@@ -7937,7 +7954,11 @@ int stmmac_resume(struct device *dev)
 
 	rtnl_unlock();
 
+	netif_tx_lock_bh(ndev);
 	netif_device_attach(ndev);
+	netif_tx_unlock_bh(ndev);
+
+	stmmac_enable_all_queues(priv);
 
 	return 0;
 }

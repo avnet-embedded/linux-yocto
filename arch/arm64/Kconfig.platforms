@@ -259,10 +259,16 @@ config ARCH_LAYERSCAPE
 	help
 	  This enables support for the Freescale Layerscape SoC family.
 
+config HAVE_IMX_BUSFREQ
+	bool "i.MX8 busfreq"
+	depends on ARCH_MXC
+	default y
+
 config ARCH_MXC
 	bool "NXP i.MX SoC family"
 	select ARM64_ERRATUM_843419
 	select ARM64_ERRATUM_845719 if COMPAT
+	select GPIOLIB
 	select IMX_GPCV2
 	select IMX_GPCV2_PM_DOMAINS
 	select PM
@@ -275,9 +281,18 @@ config ARCH_MXC
 
 config ARCH_S32
 	bool "NXP S32 SoC Family"
+	select ARCH_S32_CLK
+	select PINCTRL
 	help
 	  This enables support for the NXP S32 family of processors.
 
+endif
+
+if ARCH_S32
+menu "S32 SOC selection"
+	config SOC_S32V234
+		bool "S32V234 SOC"
+endmenu
 endif
 
 config ARCH_MA35

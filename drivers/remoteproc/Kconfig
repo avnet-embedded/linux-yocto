@@ -27,6 +27,8 @@ config IMX_REMOTEPROC
 	tristate "i.MX remoteproc support"
 	depends on ARCH_MXC
 	depends on HAVE_ARM_SMCCC
+	depends on IMX_SCMI_CPU_DRV || !IMX_SCMI_CPU_DRV
+	depends on IMX_SCMI_LMM_DRV || !IMX_SCMI_LMM_DRV
 	select MAILBOX
 	help
 	  Say y here to support iMX's remote processors via the remote
@@ -41,6 +43,15 @@ config IMX_DSP_REMOTEPROC
 	select MAILBOX
 	help
 	  Say y here to support iMX's DSP remote processors via the remote
+	  processor framework.
+
+	  It's safe to say N here.
+
+config IMX_NEUTRON_REMOTEPROC
+	tristate "i.MX neutron remoteproc support"
+	depends on ARCH_MXC
+	help
+	  Say y here to support iMX's neutron npu via the remote
 	  processor framework.
 
 	  It's safe to say N here.

@@ -777,6 +777,8 @@ patternProperties:
     description: InnoComm Mobile Technology Corp.
   "^innolux,.*":
     description: Innolux Corporation
+  "^inphi,.*":
+    description: Inphi Corporation
   "^inside-secure,.*":
     description: INSIDE Secure
   "^insignal,.*":
@@ -1042,6 +1044,8 @@ patternProperties:
     description: Mixel, Inc.
   "^miyoo,.*":
     description: Miyoo
+  "^mixel,.*":
+    description: Mixel, Inc
   "^mntre,.*":
     description: MNT Research GmbH
   "^mobileye,.*":
@@ -1351,6 +1355,8 @@ patternProperties:
     description: Embest RIoT
   "^riscv,.*":
     description: RISC-V Foundation
+  "^riverdi,.*":
+    description: Riverdi Sp. z o.o
   "^rockchip,.*":
     description: Rockchip Electronics Co., Ltd.
   "^rocktech,.*":
