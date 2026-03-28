@@ -29,7 +29,6 @@
 #include <linux/of_gpio.h>
 #include <linux/of_mdio.h>
 #include <linux/of_net.h>
-#include <linux/of_platform.h>
 #include <linux/ip.h>
 #include <linux/udp.h>
 #include <linux/tcp.h>
@@ -39,7 +38,6 @@
 #include <linux/ptp_classify.h>
 #include <linux/reset.h>
 #include <linux/firmware/xlnx-zynqmp.h>
-#include <linux/inetdevice.h>
 #include <linux/gcd.h>
 #include "macb.h"
 
@@ -933,13 +931,6 @@ static int macb_phylink_connect(struct macb *bp)
 		return ret;
 	}
 
-	/* Since this driver uses runtime handling of clocks, initiate a phy
-	 * reset if the attached phy requires it. Check return to see if phy
-	 * was reset and then do a phy initialization.
-	 */
-	if (phy_reset_after_clk_enable(dev->phydev) == 1)
-		phy_init_hw(dev->phydev);
-
 	phylink_start(bp->phylink);
 
 	return 0;
@@ -1015,8 +1006,7 @@ static int macb_mii_probe(struct net_device *dev)
 
 static int macb_mdiobus_register(struct macb *bp)
 {
-	struct device_node *child, *np = bp->pdev->dev.of_node, *mdio_np, *dev_np;
-	struct platform_device *mdio_pdev = NULL;
+	struct device_node *child, *np = bp->pdev->dev.of_node;
 
 	/* If we have a child named mdio, probe it instead of looking for PHYs
 	 * directly under the MAC node
@@ -1044,35 +1034,12 @@ static int macb_mdiobus_register(struct macb *bp)
 			return of_mdiobus_register(bp->mii_bus, np);
 		}
 
-	/* For shared MDIO usecases find out MDIO producer platform
-	 * device node by traversing through phy-handle DT property.
-	 */
-	np = of_parse_phandle(np, "phy-handle", 0);
-	mdio_np = of_get_parent(np);
-	of_node_put(np);
-	dev_np = of_get_parent(mdio_np);
-	of_node_put(mdio_np);
-	/* Handle error where bus_find_device returns a match for NULL */
-	if (dev_np)
-		mdio_pdev = of_find_device_by_node(dev_np);
-
-	of_node_put(dev_np);
-
-	/* Check MDIO producer device driver data to see if it's probed */
-	if (mdio_pdev && !dev_get_drvdata(&mdio_pdev->dev)) {
-		platform_device_put(mdio_pdev);
-		netdev_info(bp->dev, "Defer probe as mdio producer %s is not probed\n",
-			    dev_name(&mdio_pdev->dev));
-		return -EPROBE_DEFER;
-	}
-
-	platform_device_put(mdio_pdev);
 	return mdiobus_register(bp->mii_bus);
 }
 
 static int macb_mii_init(struct macb *bp)
 {
-	struct device_node *mdio_np, *child, *np = bp->pdev->dev.of_node;
+	struct device_node *child, *np = bp->pdev->dev.of_node;
 	int err = -ENXIO;
 
 	/* With fixed-link, we don't need to register the MDIO bus,
@@ -1102,21 +1069,13 @@ static int macb_mii_init(struct macb *bp)
 	snprintf(bp->mii_bus->id, MII_BUS_ID_SIZE, "%s-%x",
 		 bp->pdev->name, bp->pdev->id);
 	bp->mii_bus->priv = bp;
-	bp->mii_bus->parent = &bp->dev->dev;
+	bp->mii_bus->parent = &bp->pdev->dev;
 
 	dev_set_drvdata(&bp->dev->dev, bp->mii_bus);
 
-	mdio_np = of_get_child_by_name(np, "mdio");
-	if (mdio_np) {
-		of_node_put(mdio_np);
-		err = of_mdiobus_register(bp->mii_bus, mdio_np);
-		if (err)
-			goto err_out_free_mdiobus;
-	} else {
-		err = macb_mdiobus_register(bp);
-		if (err)
-			goto err_out_free_mdiobus;
-	}
+	err = macb_mdiobus_register(bp);
+	if (err)
+		goto err_out_free_mdiobus;
 
 	err = macb_mii_probe(bp->dev);
 	if (err)
@@ -1965,6 +1924,64 @@ static void macb_hresp_error_task(struct tasklet_struct *t)
 	netif_tx_start_all_queues(dev);
 }
 
+static irqreturn_t macb_wol_interrupt(int irq, void *dev_id)
+{
+	struct macb_queue *queue = dev_id;
+	struct macb *bp = queue->bp;
+	u32 status;
+
+	status = queue_readl(queue, ISR);
+
+	if (unlikely(!status))
+		return IRQ_NONE;
+
+	spin_lock(&bp->lock);
+
+	if (status & MACB_BIT(WOL)) {
+		queue_writel(queue, IDR, MACB_BIT(WOL));
+		macb_writel(bp, WOL, 0);
+		netdev_vdbg(bp->dev, "MACB WoL: queue = %u, isr = 0x%08lx\n",
+			    (unsigned int)(queue - bp->queues),
+			    (unsigned long)status);
+		if (bp->caps & MACB_CAPS_ISR_CLEAR_ON_WRITE)
+			queue_writel(queue, ISR, MACB_BIT(WOL));
+		pm_wakeup_event(&bp->pdev->dev, 0);
+	}
+
+	spin_unlock(&bp->lock);
+
+	return IRQ_HANDLED;
+}
+
+static irqreturn_t gem_wol_interrupt(int irq, void *dev_id)
+{
+	struct macb_queue *queue = dev_id;
+	struct macb *bp = queue->bp;
+	u32 status;
+
+	status = queue_readl(queue, ISR);
+
+	if (unlikely(!status))
+		return IRQ_NONE;
+
+	spin_lock(&bp->lock);
+
+	if (status & GEM_BIT(WOL)) {
+		queue_writel(queue, IDR, GEM_BIT(WOL));
+		gem_writel(bp, WOL, 0);
+		netdev_vdbg(bp->dev, "GEM WoL: queue = %u, isr = 0x%08lx\n",
+			    (unsigned int)(queue - bp->queues),
+			    (unsigned long)status);
+		if (bp->caps & MACB_CAPS_ISR_CLEAR_ON_WRITE)
+			queue_writel(queue, ISR, GEM_BIT(WOL));
+		pm_wakeup_event(&bp->pdev->dev, 0);
+	}
+
+	spin_unlock(&bp->lock);
+
+	return IRQ_HANDLED;
+}
+
 static irqreturn_t macb_interrupt(int irq, void *dev_id)
 {
 	struct macb_queue *queue = dev_id;
@@ -1980,12 +1997,6 @@ static irqreturn_t macb_interrupt(int irq, void *dev_id)
 	spin_lock(&bp->lock);
 
 	while (status) {
-		if (status & MACB_BIT(WOL)) {
-			if (bp->caps & MACB_CAPS_ISR_CLEAR_ON_WRITE)
-				queue_writel(queue, ISR, MACB_BIT(WOL));
-			break;
-		}
-
 		/* close possible race with dev_close */
 		if (unlikely(!netif_running(dev))) {
 			queue_writel(queue, IDR, -1);
@@ -2569,12 +2580,6 @@ static void macb_free_consistent(struct macb *bp)
 	}
 
 	bp->macbgem_ops.mog_free_rx_buffers(bp);
-
-	if (bp->rx_ring_tieoff) {
-		dma_free_coherent(&bp->pdev->dev, macb_dma_desc_get_size(bp),
-				  bp->rx_ring_tieoff, bp->rx_ring_tieoff_dma);
-		bp->rx_ring_tieoff = NULL;
-	}
 
 	for (q = 0, queue = bp->queues; q < bp->num_queues; ++q, ++queue) {
 		kfree(queue->tx_skb);
@@ -3382,30 +3387,38 @@ static void macb_get_wol(struct net_device *netdev, struct ethtool_wolinfo *wol)
 {
 	struct macb *bp = netdev_priv(netdev);
 
-	memset(wol, 0, sizeof(struct ethtool_wolinfo));
+	if (bp->wol & MACB_WOL_HAS_MAGIC_PACKET) {
+		phylink_ethtool_get_wol(bp->phylink, wol);
+		wol->supported |= WAKE_MAGIC;
 
-	if (bp->caps & MACB_CAPS_WOL) {
-		wol->supported = WAKE_ARP;
-
-		if (bp->wol)
-			wol->wolopts |= WAKE_ARP;
+		if (bp->wol & MACB_WOL_ENABLED)
+			wol->wolopts |= WAKE_MAGIC;
 	}
 }
 
 static int macb_set_wol(struct net_device *netdev, struct ethtool_wolinfo *wol)
 {
 	struct macb *bp = netdev_priv(netdev);
+	int ret;
 
-	if (!(bp->caps & MACB_CAPS_WOL) ||
-	    (wol->wolopts & ~WAKE_ARP))
+	/* Pass the order to phylink layer */
+	ret = phylink_ethtool_set_wol(bp->phylink, wol);
+	/* Don't manage WoL on MAC if handled by the PHY
+	 * or if there's a failure in talking to the PHY
+	 */
+	if (!ret || ret != -EOPNOTSUPP)
+		return ret;
+
+	if (!(bp->wol & MACB_WOL_HAS_MAGIC_PACKET) ||
+	    (wol->wolopts & ~WAKE_MAGIC))
 		return -EOPNOTSUPP;
 
-	if (wol->wolopts & WAKE_ARP)
-		bp->wol = 1;
+	if (wol->wolopts & WAKE_MAGIC)
+		bp->wol |= MACB_WOL_ENABLED;
 	else
-		bp->wol = 0;
+		bp->wol &= ~MACB_WOL_ENABLED;
 
-	device_set_wakeup_enable(&bp->dev->dev, bp->wol);
+	device_set_wakeup_enable(&bp->pdev->dev, bp->wol & MACB_WOL_ENABLED);
 
 	return 0;
 }
@@ -3871,6 +3884,8 @@ static const struct ethtool_ops macb_ethtool_ops = {
 	.get_regs		= macb_get_regs,
 	.get_link		= ethtool_op_get_link,
 	.get_ts_info		= ethtool_op_get_ts_info,
+	.get_wol		= macb_get_wol,
+	.set_wol		= macb_set_wol,
 	.get_link_ksettings     = macb_get_link_ksettings,
 	.set_link_ksettings     = macb_set_link_ksettings,
 	.get_ringparam		= macb_get_ringparam,
@@ -3880,6 +3895,8 @@ static const struct ethtool_ops macb_ethtool_ops = {
 static const struct ethtool_ops gem_ethtool_ops = {
 	.get_regs_len		= macb_get_regs_len,
 	.get_regs		= macb_get_regs,
+	.get_wol		= macb_get_wol,
+	.set_wol		= macb_set_wol,
 	.get_link		= ethtool_op_get_link,
 	.get_ts_info		= macb_get_ts_info,
 	.get_ethtool_stats	= gem_get_ethtool_stats,
@@ -3891,8 +3908,6 @@ static const struct ethtool_ops gem_ethtool_ops = {
 	.set_ringparam		= macb_set_ringparam,
 	.get_rxnfc			= gem_get_rxnfc,
 	.set_rxnfc			= gem_set_rxnfc,
-	.get_wol		= macb_get_wol,
-	.set_wol		= macb_set_wol,
 };
 
 static int macb_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
@@ -4972,8 +4987,7 @@ static const struct macb_config np4_config = {
 static const struct macb_config zynqmp_config = {
 	.caps = MACB_CAPS_GIGABIT_MODE_AVAILABLE |
 		MACB_CAPS_JUMBO |
-		MACB_CAPS_GEM_HAS_PTP | MACB_CAPS_BD_RD_PREFETCH |
-		MACB_CAPS_WOL,
+		MACB_CAPS_GEM_HAS_PTP | MACB_CAPS_BD_RD_PREFETCH,
 	.dma_burst_length = 16,
 	.clk_init = macb_clk_init,
 	.init = init_reset_optional,
@@ -5023,8 +5037,7 @@ static const struct macb_config sama7g5_emac_config = {
 
 static const struct macb_config versal_config = {
 	.caps = MACB_CAPS_GIGABIT_MODE_AVAILABLE | MACB_CAPS_JUMBO |
-		MACB_CAPS_GEM_HAS_PTP | MACB_CAPS_BD_RD_PREFETCH | MACB_CAPS_NEED_TSUCLK |
-		MACB_CAPS_WOL | MACB_CAPS_QUEUE_DISABLE,
+		MACB_CAPS_GEM_HAS_PTP | MACB_CAPS_BD_RD_PREFETCH | MACB_CAPS_NEED_TSUCLK,
 	.dma_burst_length = 16,
 	.clk_init = macb_clk_init,
 	.init = init_reset_optional,
@@ -5159,6 +5172,11 @@ static int macb_probe(struct platform_device *pdev)
 	else
 		bp->max_tx_length = GEM_MAX_TX_LEN;
 
+	bp->wol = 0;
+	if (of_property_read_bool(np, "magic-packet"))
+		bp->wol |= MACB_WOL_HAS_MAGIC_PACKET;
+	device_set_wakeup_capable(&pdev->dev, bp->wol & MACB_WOL_HAS_MAGIC_PACKET);
+
 	bp->usrio = macb_config->usrio;
 
 	/* By default we set to partial store and forward mode for zynqmp.
@@ -5244,22 +5262,20 @@ static int macb_probe(struct platform_device *pdev)
 	err = init(pdev);
 	if (err)
 		goto err_out_free_netdev;
-	err = register_netdev(dev);
-	if (err) {
-		dev_err(&pdev->dev, "Cannot register net device, aborting.\n");
-		goto err_out_free_netdev;
-	}
 
 	err = macb_mii_init(bp);
 	if (err)
-		goto err_out_unregister_netdev;
+		goto err_out_phy_exit;
 
 	netif_carrier_off(dev);
 
-	tasklet_setup(&bp->hresp_err_tasklet, macb_hresp_error_task);
+	err = register_netdev(dev);
+	if (err) {
+		dev_err(&pdev->dev, "Cannot register net device, aborting.\n");
+		goto err_out_unregister_mdio;
+	}
 
-	if (bp->caps & MACB_CAPS_WOL)
-		device_set_wakeup_capable(&bp->dev->dev, 1);
+	tasklet_setup(&bp->hresp_err_tasklet, macb_hresp_error_task);
 
 	netdev_info(dev, "Cadence %s rev 0x%08x at 0x%08lx irq %d (%pM)\n",
 		    macb_is_gem(bp) ? "GEM" : "MACB", macb_readl(bp, MID),
@@ -5270,8 +5286,11 @@ static int macb_probe(struct platform_device *pdev)
 
 	return 0;
 
-err_out_unregister_netdev:
-	unregister_netdev(dev);
+err_out_unregister_mdio:
+	mdiobus_unregister(bp->mii_bus);
+	mdiobus_free(bp->mii_bus);
+
+err_out_phy_exit:
 	phy_exit(bp->sgmii_phy);
 
 err_out_free_netdev:
@@ -5322,7 +5341,7 @@ static int __maybe_unused macb_suspend(struct device *dev)
 	struct macb_queue *queue;
 	unsigned long flags;
 	unsigned int q;
-	u32 arpipmask;
+	int err;
 	u32 tmp;
 
 	if (!device_may_wakeup(&bp->dev->dev))
@@ -5331,11 +5350,7 @@ static int __maybe_unused macb_suspend(struct device *dev)
 	if (!netif_running(netdev))
 		return 0;
 
-	if (device_may_wakeup(&bp->dev->dev)) {
-		if (!bp->dev->ip_ptr->ifa_list) {
-			netdev_err(netdev, "IP address not assigned\n");
-			return -EOPNOTSUPP;
-		}
+	if (bp->wol & MACB_WOL_ENABLED) {
 		spin_lock_irqsave(&bp->lock, flags);
 
 		/* Disable Tx and Rx engines before  disabling the queues,
@@ -5369,19 +5384,37 @@ static int __maybe_unused macb_suspend(struct device *dev)
 		macb_writel(bp, TSR, -1);
 		macb_writel(bp, RSR, -1);
 
-		/* Enable WOL (Q0 only) and disable all other interrupts */
-		macb_writel(bp, IER, MACB_BIT(WOL));
-		for (q = 1, queue = bp->queues; q < bp->num_queues;
-		     ++q, ++queue) {
-			queue_writel(queue, IDR, bp->rx_intr_mask |
-						 MACB_TX_INT_FLAGS |
-						 MACB_BIT(HRESP));
+		/* Change interrupt handler and
+		 * Enable WoL IRQ on queue 0
+		 */
+		devm_free_irq(dev, bp->queues[0].irq, bp->queues);
+		if (macb_is_gem(bp)) {
+			err = devm_request_irq(dev, bp->queues[0].irq, gem_wol_interrupt,
+					       IRQF_SHARED, netdev->name, bp->queues);
+			if (err) {
+				dev_err(dev,
+					"Unable to request IRQ %d (error %d)\n",
+					bp->queues[0].irq, err);
+				spin_unlock_irqrestore(&bp->lock, flags);
+				return err;
+			}
+			queue_writel(bp->queues, IER, GEM_BIT(WOL));
+			gem_writel(bp, WOL, MACB_BIT(MAG));
+		} else {
+			err = devm_request_irq(dev, bp->queues[0].irq, macb_wol_interrupt,
+					       IRQF_SHARED, netdev->name, bp->queues);
+			if (err) {
+				dev_err(dev,
+					"Unable to request IRQ %d (error %d)\n",
+					bp->queues[0].irq, err);
+				spin_unlock_irqrestore(&bp->lock, flags);
+				return err;
+			}
+			queue_writel(bp->queues, IER, MACB_BIT(WOL));
+			macb_writel(bp, WOL, MACB_BIT(MAG));
 		}
-
-		arpipmask = cpu_to_be32p(&bp->dev->ip_ptr->ifa_list->ifa_local)
-					 & 0xFFFF;
-		gem_writel(bp, WOL, MACB_BIT(ARP) | arpipmask);
 		spin_unlock_irqrestore(&bp->lock, flags);
+
 		enable_irq_wake(bp->queues[0].irq);
 	}
 
@@ -5392,7 +5425,7 @@ static int __maybe_unused macb_suspend(struct device *dev)
 		napi_disable(&queue->napi_tx);
 	}
 
-	if (!device_may_wakeup(&bp->dev->dev)) {
+	if (!(bp->wol & MACB_WOL_ENABLED)) {
 		rtnl_lock();
 		phylink_stop(bp->phylink);
 		rtnl_unlock();
@@ -5409,7 +5442,7 @@ static int __maybe_unused macb_suspend(struct device *dev)
 
 	if (bp->ptp_info)
 		bp->ptp_info->ptp_remove(netdev);
-	if (!device_may_wakeup(&bp->dev->dev))
+	if (!device_may_wakeup(dev))
 		pm_runtime_force_suspend(dev);
 
 	return 0;
@@ -5422,6 +5455,7 @@ static int __maybe_unused macb_resume(struct device *dev)
 	struct macb_queue *queue;
 	unsigned long flags;
 	unsigned int q;
+	int err;
 
 	if (!device_may_wakeup(&bp->dev->dev))
 		phy_init(bp->sgmii_phy);
@@ -5429,18 +5463,38 @@ static int __maybe_unused macb_resume(struct device *dev)
 	if (!netif_running(netdev))
 		return 0;
 
-	if (!device_may_wakeup(&bp->dev->dev))
+	if (!device_may_wakeup(dev))
 		pm_runtime_force_resume(dev);
 
-	if (device_may_wakeup(&bp->dev->dev)) {
+	if (bp->wol & MACB_WOL_ENABLED) {
 		spin_lock_irqsave(&bp->lock, flags);
-		macb_writel(bp, IDR, MACB_BIT(WOL));
-		gem_writel(bp, WOL, 0);
-		/* Clear Q0 ISR as WOL was enabled on Q0 */
+		/* Disable WoL */
+		if (macb_is_gem(bp)) {
+			queue_writel(bp->queues, IDR, GEM_BIT(WOL));
+			gem_writel(bp, WOL, 0);
+		} else {
+			queue_writel(bp->queues, IDR, MACB_BIT(WOL));
+			macb_writel(bp, WOL, 0);
+		}
+		/* Clear ISR on queue 0 */
+		queue_readl(bp->queues, ISR);
 		if (bp->caps & MACB_CAPS_ISR_CLEAR_ON_WRITE)
-			macb_writel(bp, ISR, -1);
-		disable_irq_wake(bp->queues[0].irq);
+			queue_writel(bp->queues, ISR, -1);
+		/* Replace interrupt handler on queue 0 */
+		devm_free_irq(dev, bp->queues[0].irq, bp->queues);
+		err = devm_request_irq(dev, bp->queues[0].irq, macb_interrupt,
+				       IRQF_SHARED, netdev->name, bp->queues);
+		if (err) {
+			dev_err(dev,
+				"Unable to request IRQ %d (error %d)\n",
+				bp->queues[0].irq, err);
+			spin_unlock_irqrestore(&bp->lock, flags);
+			return err;
+		}
 		spin_unlock_irqrestore(&bp->lock, flags);
+
+		disable_irq_wake(bp->queues[0].irq);
+
 		/* Now make sure we disable phy before moving
 		 * to common restore path
 		 */
@@ -5492,7 +5546,7 @@ static int __maybe_unused macb_runtime_suspend(struct device *dev)
 	struct net_device *netdev = dev_get_drvdata(dev);
 	struct macb *bp = netdev_priv(netdev);
 
-	if (!(device_may_wakeup(&bp->dev->dev)))
+	if (!(device_may_wakeup(dev)))
 		macb_clks_disable(bp->pclk, bp->hclk, bp->tx_clk, bp->rx_clk, bp->tsu_clk);
 	else if (!(bp->caps & MACB_CAPS_NEED_TSUCLK))
 		macb_clks_disable(NULL, NULL, NULL, NULL, bp->tsu_clk);
@@ -5505,7 +5559,7 @@ static int __maybe_unused macb_runtime_resume(struct device *dev)
 	struct net_device *netdev = dev_get_drvdata(dev);
 	struct macb *bp = netdev_priv(netdev);
 
-	if (!(device_may_wakeup(&bp->dev->dev))) {
+	if (!(device_may_wakeup(dev))) {
 		clk_prepare_enable(bp->pclk);
 		clk_prepare_enable(bp->hclk);
 		clk_prepare_enable(bp->tx_clk);
