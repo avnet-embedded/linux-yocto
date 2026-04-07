@@ -198,7 +198,7 @@ static struct spi_mem_op spi_nor_spimem_get_read_op(struct spi_nor *nor)
 		SPI_MEM_OP(SPI_MEM_OP_CMD(nor->read_opcode, 0),
 			   SPI_MEM_OP_ADDR(nor->addr_nbytes, 0, 0),
 			   SPI_MEM_OP_DUMMY(nor->read_dummy, 0),
-			   SPI_MEM_OP_DATA_IN(1, NULL, 0));
+			   SPI_MEM_OP_DATA_IN(2, NULL, 0));
 
 	spi_nor_spimem_setup_op(nor, &op, nor->read_proto);
 
