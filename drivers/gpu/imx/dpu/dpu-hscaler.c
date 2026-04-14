@@ -58,7 +58,7 @@ static const hs_src_sel_t src_sels[3][6] = {
 struct dpu_hscaler {
 	void __iomem *pec_base;
 	void __iomem *base;
-	struct mutex mutex;
+	raw_spinlock_t lock;
 	int id;
 	bool inuse;
 	struct dpu_soc *dpu;
@@ -103,18 +103,18 @@ int hscaler_pixengcfg_dynamic_src_sel(struct dpu_hscaler *hs, hs_src_sel_t src)
 	if (WARN_ON(i == ARRAY_SIZE(hs_id_array)))
 		return -EINVAL;
 
-	mutex_lock(&hs->mutex);
+	raw_spin_lock(&hs->lock);
 	for (j = 0; j < ARRAY_SIZE(src_sels[0]); j++) {
 		if (src_sels[i][j] == src) {
 			val = dpu_pec_hs_read(hs, PIXENGCFG_DYNAMIC);
 			val &= ~PIXENGCFG_DYNAMIC_SRC_SEL_MASK;
 			val |= src;
 			dpu_pec_hs_write(hs, PIXENGCFG_DYNAMIC, val);
-			mutex_unlock(&hs->mutex);
+			raw_spin_unlock(&hs->lock);
 			return 0;
 		}
 	}
-	mutex_unlock(&hs->mutex);
+	raw_spin_unlock(&hs->lock);
 
 	dev_err(dpu->dev, "Invalid source for HScaler%d\n", hs->id);
 
@@ -126,12 +126,12 @@ void hscaler_pixengcfg_clken(struct dpu_hscaler *hs, pixengcfg_clken_t clken)
 {
 	u32 val;
 
-	mutex_lock(&hs->mutex);
+	raw_spin_lock(&hs->lock);
 	val = dpu_pec_hs_read(hs, PIXENGCFG_DYNAMIC);
 	val &= ~CLKEN_MASK;
 	val |= clken << CLKEN_MASK_SHIFT;
 	dpu_pec_hs_write(hs, PIXENGCFG_DYNAMIC, val);
-	mutex_unlock(&hs->mutex);
+	raw_spin_unlock(&hs->lock);
 }
 EXPORT_SYMBOL_GPL(hscaler_pixengcfg_clken);
 
@@ -139,14 +139,14 @@ void hscaler_shden(struct dpu_hscaler *hs, bool enable)
 {
 	u32 val;
 
-	mutex_lock(&hs->mutex);
+	raw_spin_lock(&hs->lock);
 	val = dpu_hs_read(hs, STATICCONTROL);
 	if (enable)
 		val |= SHDEN;
 	else
 		val &= ~SHDEN;
 	dpu_hs_write(hs, STATICCONTROL, val);
-	mutex_unlock(&hs->mutex);
+	raw_spin_unlock(&hs->lock);
 }
 EXPORT_SYMBOL_GPL(hscaler_shden);
 
@@ -172,9 +172,9 @@ void hscaler_setup1(struct dpu_hscaler *hs, u32 src, u32 dst)
 
 	WARN_ON(scale_factor > 0x80000);
 
-	mutex_lock(&hs->mutex);
+	raw_spin_lock(&hs->lock);
 	dpu_hs_write(hs, SETUP1, SCALE_FACTOR(scale_factor));
-	mutex_unlock(&hs->mutex);
+	raw_spin_unlock(&hs->lock);
 
 	dev_dbg(dpu->dev, "Hscaler%d scale factor 0x%08x\n",
 						hs->id, scale_factor);
@@ -183,9 +183,9 @@ EXPORT_SYMBOL_GPL(hscaler_setup1);
 
 void hscaler_setup2(struct dpu_hscaler *hs, u32 phase_offset)
 {
-	mutex_lock(&hs->mutex);
+	raw_spin_lock(&hs->lock);
 	dpu_hs_write(hs, SETUP2, PHASE_OFFSET(phase_offset));
-	mutex_unlock(&hs->mutex);
+	raw_spin_unlock(&hs->lock);
 }
 EXPORT_SYMBOL_GPL(hscaler_setup2);
 
@@ -193,12 +193,12 @@ void hscaler_output_size(struct dpu_hscaler *hs, u32 line_num)
 {
 	u32 val;
 
-	mutex_lock(&hs->mutex);
+	raw_spin_lock(&hs->lock);
 	val = dpu_hs_read(hs, CONTROL);
 	val &= ~OUTPUT_SIZE_MASK;
 	val |= OUTPUT_SIZE(line_num);
 	dpu_hs_write(hs, CONTROL, val);
-	mutex_unlock(&hs->mutex);
+	raw_spin_unlock(&hs->lock);
 }
 EXPORT_SYMBOL_GPL(hscaler_output_size);
 
@@ -206,12 +206,12 @@ void hscaler_filter_mode(struct dpu_hscaler *hs, scaler_filter_mode_t m)
 {
 	u32 val;
 
-	mutex_lock(&hs->mutex);
+	raw_spin_lock(&hs->lock);
 	val = dpu_hs_read(hs, CONTROL);
 	val &= ~FILTER_MODE;
 	val |= m;
 	dpu_hs_write(hs, CONTROL, val);
-	mutex_unlock(&hs->mutex);
+	raw_spin_unlock(&hs->lock);
 }
 EXPORT_SYMBOL_GPL(hscaler_filter_mode);
 
@@ -219,12 +219,12 @@ void hscaler_scale_mode(struct dpu_hscaler *hs, scaler_scale_mode_t m)
 {
 	u32 val;
 
-	mutex_lock(&hs->mutex);
+	raw_spin_lock(&hs->lock);
 	val = dpu_hs_read(hs, CONTROL);
 	val &= ~SCALE_MODE;
 	val |= m;
 	dpu_hs_write(hs, CONTROL, val);
-	mutex_unlock(&hs->mutex);
+	raw_spin_unlock(&hs->lock);
 }
 EXPORT_SYMBOL_GPL(hscaler_scale_mode);
 
@@ -232,12 +232,12 @@ void hscaler_mode(struct dpu_hscaler *hs, scaler_mode_t m)
 {
 	u32 val;
 
-	mutex_lock(&hs->mutex);
+	raw_spin_lock(&hs->lock);
 	val = dpu_hs_read(hs, CONTROL);
 	val &= ~MODE;
 	val |= m;
 	dpu_hs_write(hs, CONTROL, val);
-	mutex_unlock(&hs->mutex);
+	raw_spin_unlock(&hs->lock);
 }
 EXPORT_SYMBOL_GPL(hscaler_mode);
 
@@ -245,9 +245,9 @@ bool hscaler_is_enabled(struct dpu_hscaler *hs)
 {
 	u32 val;
 
-	mutex_lock(&hs->mutex);
+	raw_spin_lock(&hs->lock);
 	val = dpu_hs_read(hs, CONTROL);
-	mutex_unlock(&hs->mutex);
+	raw_spin_unlock(&hs->lock);
 
 	return (val & MODE) == SCALER_ACTIVE;
 }
@@ -304,16 +304,16 @@ struct dpu_hscaler *dpu_hs_get(struct dpu_soc *dpu, int id)
 
 	hs = dpu->hs_priv[i];
 
-	mutex_lock(&hs->mutex);
+	raw_spin_lock(&hs->lock);
 
 	if (hs->inuse) {
-		mutex_unlock(&hs->mutex);
+		raw_spin_unlock(&hs->lock);
 		return ERR_PTR(-EBUSY);
 	}
 
 	hs->inuse = true;
 
-	mutex_unlock(&hs->mutex);
+	raw_spin_unlock(&hs->lock);
 
 	return hs;
 }
@@ -321,11 +321,11 @@ EXPORT_SYMBOL_GPL(dpu_hs_get);
 
 void dpu_hs_put(struct dpu_hscaler *hs)
 {
-	mutex_lock(&hs->mutex);
+	raw_spin_lock(&hs->lock);
 
 	hs->inuse = false;
 
-	mutex_unlock(&hs->mutex);
+	raw_spin_unlock(&hs->lock);
 }
 EXPORT_SYMBOL_GPL(dpu_hs_put);
 
@@ -378,7 +378,7 @@ int dpu_hs_init(struct dpu_soc *dpu, unsigned int id,
 	hs->dpu = dpu;
 	hs->id = id;
 
-	mutex_init(&hs->mutex);
+	raw_spin_lock_init(&hs->lock);
 
 	_dpu_hs_init(dpu, id);
 
