@@ -61,7 +61,7 @@ static const vs_src_sel_t src_sels[3][6] = {
 struct dpu_vscaler {
 	void __iomem *pec_base;
 	void __iomem *base;
-	struct mutex mutex;
+	raw_spinlock_t lock;
 	int id;
 	bool inuse;
 	struct dpu_soc *dpu;
@@ -106,18 +106,18 @@ int vscaler_pixengcfg_dynamic_src_sel(struct dpu_vscaler *vs, vs_src_sel_t src)
 	if (WARN_ON(i == ARRAY_SIZE(vs_id_array)))
 		return -EINVAL;
 
-	mutex_lock(&vs->mutex);
+	raw_spin_lock(&vs->lock);
 	for (j = 0; j < ARRAY_SIZE(src_sels[0]); j++) {
 		if (src_sels[i][j] == src) {
 			val = dpu_pec_vs_read(vs, PIXENGCFG_DYNAMIC);
 			val &= ~PIXENGCFG_DYNAMIC_SRC_SEL_MASK;
 			val |= src;
 			dpu_pec_vs_write(vs, PIXENGCFG_DYNAMIC, val);
-			mutex_unlock(&vs->mutex);
+			raw_spin_unlock(&vs->lock);
 			return 0;
 		}
 	}
-	mutex_unlock(&vs->mutex);
+	raw_spin_unlock(&vs->lock);
 
 	dev_err(dpu->dev, "Invalid source for VScaler%d\n", vs->id);
 
@@ -129,12 +129,12 @@ void vscaler_pixengcfg_clken(struct dpu_vscaler *vs, pixengcfg_clken_t clken)
 {
 	u32 val;
 
-	mutex_lock(&vs->mutex);
+	raw_spin_lock(&vs->lock);
 	val = dpu_pec_vs_read(vs, PIXENGCFG_DYNAMIC);
 	val &= ~CLKEN_MASK;
 	val |= clken << CLKEN_MASK_SHIFT;
 	dpu_pec_vs_write(vs, PIXENGCFG_DYNAMIC, val);
-	mutex_unlock(&vs->mutex);
+	raw_spin_unlock(&vs->lock);
 }
 EXPORT_SYMBOL_GPL(vscaler_pixengcfg_clken);
 
@@ -142,14 +142,14 @@ void vscaler_shden(struct dpu_vscaler *vs, bool enable)
 {
 	u32 val;
 
-	mutex_lock(&vs->mutex);
+	raw_spin_lock(&vs->lock);
 	val = dpu_vs_read(vs, STATICCONTROL);
 	if (enable)
 		val |= SHDEN;
 	else
 		val &= ~SHDEN;
 	dpu_vs_write(vs, STATICCONTROL, val);
-	mutex_unlock(&vs->mutex);
+	raw_spin_unlock(&vs->lock);
 }
 EXPORT_SYMBOL_GPL(vscaler_shden);
 
@@ -178,9 +178,9 @@ void vscaler_setup1(struct dpu_vscaler *vs, u32 src, u32 dst, bool deinterlace)
 
 	WARN_ON(scale_factor > 0x80000);
 
-	mutex_lock(&vs->mutex);
+	raw_spin_lock(&vs->lock);
 	dpu_vs_write(vs, SETUP1, SCALE_FACTOR(scale_factor));
-	mutex_unlock(&vs->mutex);
+	raw_spin_unlock(&vs->lock);
 
 	dev_dbg(dpu->dev, "Vscaler%d scale factor 0x%08x\n",
 						vs->id, scale_factor);
@@ -192,9 +192,9 @@ void vscaler_setup2(struct dpu_vscaler *vs, bool deinterlace)
 	/* 0x20000: +0.25 phase offset for deinterlace */
 	u32 phase_offset = deinterlace ? 0x20000 : 0;
 
-	mutex_lock(&vs->mutex);
+	raw_spin_lock(&vs->lock);
 	dpu_vs_write(vs, SETUP2, PHASE_OFFSET(phase_offset));
-	mutex_unlock(&vs->mutex);
+	raw_spin_unlock(&vs->lock);
 }
 EXPORT_SYMBOL_GPL(vscaler_setup2);
 
@@ -203,25 +203,25 @@ void vscaler_setup3(struct dpu_vscaler *vs, bool deinterlace)
 	/* 0x1e0000: -0.25 phase offset for deinterlace */
 	u32 phase_offset = deinterlace ? 0x1e0000 : 0;
 
-	mutex_lock(&vs->mutex);
+	raw_spin_lock(&vs->lock);
 	dpu_vs_write(vs, SETUP3, PHASE_OFFSET(phase_offset));
-	mutex_unlock(&vs->mutex);
+	raw_spin_unlock(&vs->lock);
 }
 EXPORT_SYMBOL_GPL(vscaler_setup3);
 
 void vscaler_setup4(struct dpu_vscaler *vs, u32 phase_offset)
 {
-	mutex_lock(&vs->mutex);
+	raw_spin_lock(&vs->lock);
 	dpu_vs_write(vs, SETUP4, PHASE_OFFSET(phase_offset));
-	mutex_unlock(&vs->mutex);
+	raw_spin_unlock(&vs->lock);
 }
 EXPORT_SYMBOL_GPL(vscaler_setup4);
 
 void vscaler_setup5(struct dpu_vscaler *vs, u32 phase_offset)
 {
-	mutex_lock(&vs->mutex);
+	raw_spin_lock(&vs->lock);
 	dpu_vs_write(vs, SETUP5, PHASE_OFFSET(phase_offset));
-	mutex_unlock(&vs->mutex);
+	raw_spin_unlock(&vs->lock);
 }
 EXPORT_SYMBOL_GPL(vscaler_setup5);
 
@@ -229,12 +229,12 @@ void vscaler_output_size(struct dpu_vscaler *vs, u32 line_num)
 {
 	u32 val;
 
-	mutex_lock(&vs->mutex);
+	raw_spin_lock(&vs->lock);
 	val = dpu_vs_read(vs, CONTROL);
 	val &= ~OUTPUT_SIZE_MASK;
 	val |= OUTPUT_SIZE(line_num);
 	dpu_vs_write(vs, CONTROL, val);
-	mutex_unlock(&vs->mutex);
+	raw_spin_unlock(&vs->lock);
 }
 EXPORT_SYMBOL_GPL(vscaler_output_size);
 
@@ -242,12 +242,12 @@ void vscaler_field_mode(struct dpu_vscaler *vs, scaler_field_mode_t m)
 {
 	u32 val;
 
-	mutex_lock(&vs->mutex);
+	raw_spin_lock(&vs->lock);
 	val = dpu_vs_read(vs, CONTROL);
 	val &= ~FIELD_MODE;
 	val |= m;
 	dpu_vs_write(vs, CONTROL, val);
-	mutex_unlock(&vs->mutex);
+	raw_spin_unlock(&vs->lock);
 }
 EXPORT_SYMBOL_GPL(vscaler_field_mode);
 
@@ -255,12 +255,12 @@ void vscaler_filter_mode(struct dpu_vscaler *vs, scaler_filter_mode_t m)
 {
 	u32 val;
 
-	mutex_lock(&vs->mutex);
+	raw_spin_lock(&vs->lock);
 	val = dpu_vs_read(vs, CONTROL);
 	val &= ~FILTER_MODE;
 	val |= m;
 	dpu_vs_write(vs, CONTROL, val);
-	mutex_unlock(&vs->mutex);
+	raw_spin_unlock(&vs->lock);
 }
 EXPORT_SYMBOL_GPL(vscaler_filter_mode);
 
@@ -268,12 +268,12 @@ void vscaler_scale_mode(struct dpu_vscaler *vs, scaler_scale_mode_t m)
 {
 	u32 val;
 
-	mutex_lock(&vs->mutex);
+	raw_spin_lock(&vs->lock);
 	val = dpu_vs_read(vs, CONTROL);
 	val &= ~SCALE_MODE;
 	val |= m;
 	dpu_vs_write(vs, CONTROL, val);
-	mutex_unlock(&vs->mutex);
+	raw_spin_unlock(&vs->lock);
 }
 EXPORT_SYMBOL_GPL(vscaler_scale_mode);
 
@@ -281,12 +281,12 @@ void vscaler_mode(struct dpu_vscaler *vs, scaler_mode_t m)
 {
 	u32 val;
 
-	mutex_lock(&vs->mutex);
+	raw_spin_lock(&vs->lock);
 	val = dpu_vs_read(vs, CONTROL);
 	val &= ~MODE;
 	val |= m;
 	dpu_vs_write(vs, CONTROL, val);
-	mutex_unlock(&vs->mutex);
+	raw_spin_unlock(&vs->lock);
 }
 EXPORT_SYMBOL_GPL(vscaler_mode);
 
@@ -294,9 +294,9 @@ bool vscaler_is_enabled(struct dpu_vscaler *vs)
 {
 	u32 val;
 
-	mutex_lock(&vs->mutex);
+	raw_spin_lock(&vs->lock);
 	val = dpu_vs_read(vs, CONTROL);
-	mutex_unlock(&vs->mutex);
+	raw_spin_unlock(&vs->lock);
 
 	return (val & MODE) == SCALER_ACTIVE;
 }
@@ -353,16 +353,16 @@ struct dpu_vscaler *dpu_vs_get(struct dpu_soc *dpu, int id)
 
 	vs = dpu->vs_priv[i];
 
-	mutex_lock(&vs->mutex);
+	raw_spin_lock(&vs->lock);
 
 	if (vs->inuse) {
-		mutex_unlock(&vs->mutex);
+		raw_spin_unlock(&vs->lock);
 		return ERR_PTR(-EBUSY);
 	}
 
 	vs->inuse = true;
 
-	mutex_unlock(&vs->mutex);
+	raw_spin_unlock(&vs->lock);
 
 	return vs;
 }
@@ -370,11 +370,11 @@ EXPORT_SYMBOL_GPL(dpu_vs_get);
 
 void dpu_vs_put(struct dpu_vscaler *vs)
 {
-	mutex_lock(&vs->mutex);
+	raw_spin_lock(&vs->lock);
 
 	vs->inuse = false;
 
-	mutex_unlock(&vs->mutex);
+	raw_spin_unlock(&vs->lock);
 }
 EXPORT_SYMBOL_GPL(dpu_vs_put);
 
@@ -430,7 +430,7 @@ int dpu_vs_init(struct dpu_soc *dpu, unsigned int id,
 	vs->dpu = dpu;
 	vs->id = id;
 
-	mutex_init(&vs->mutex);
+	raw_spin_lock_init(&vs->lock);
 
 	_dpu_vs_init(dpu, id);
 
