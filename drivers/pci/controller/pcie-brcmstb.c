@@ -1584,6 +1584,8 @@ static void brcm_config_clkreq(struct brcm_pcie *pcie)
 		mode = "safe";
 	}
 
+	clkreq_cntl = readl(pcie->base + HARD_DEBUG(pcie));
+
 	if (strcmp(mode, "no-l1ss") == 0) {
 		/*
 		 * "no-l1ss" -- Provides Clock Power Management, L0s, and
