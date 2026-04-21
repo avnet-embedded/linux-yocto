@@ -4,6 +4,7 @@
  */
 
 #include <linux/console.h>
+#include <linux/kgdb.h>
 #include <linux/mailbox_client.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -149,6 +150,15 @@ static void tegra_tcu_console_write(struct console *cons, const char *s,
 				    unsigned int count)
 {
 	struct tegra_tcu *tcu = container_of(cons, struct tegra_tcu, console);
+
+	/*
+	 * The mailbox framework acquires a regular spinlock (chan->lock)
+	 * which is incompatible with the raw spinlocks held in kgdb/kdb
+	 * debug context, causing an invalid wait context BUG. Skip
+	 * console output when we are in the kgdb debug master context.
+	 */
+	if (in_dbg_master())
+		return;
 
 	tegra_tcu_write(tcu, s, count);
 }
