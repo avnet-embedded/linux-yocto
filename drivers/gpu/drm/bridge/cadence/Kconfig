@@ -57,6 +57,7 @@ config DRM_CDNS_MHDP
 	select DRM_DISPLAY_HDMI_HELPER
 	select DRM_KMS_HELPER
 	select DRM_PANEL_BRIDGE
+	select DRM_CDNS_HDMI_CEC
 	depends on OF
 	help
 	  Support Cadence MHDP API library.

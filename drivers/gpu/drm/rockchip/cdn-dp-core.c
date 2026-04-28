@@ -255,7 +255,7 @@ cdn_dp_bridge_edid_read(struct drm_bridge *bridge, struct drm_connector *connect
 	const struct drm_edid *drm_edid;
 
 	mutex_lock(&dp->lock);
-	drm_edid = drm_edid_read_custom(connector, cdn_dp_get_edid_block, dp);
+	drm_edid = drm_edid_read_custom(connector, cdns_mhdp_get_edid_block, dp);
 	mutex_unlock(&dp->lock);
 
 	return drm_edid;
@@ -349,10 +349,10 @@ static int cdn_dp_get_sink_capability(struct cdn_dp_device *dp)
 	if (!cdn_dp_check_sink_connection(dp))
 		return -ENODEV;
 
-	ret = drm_dp_dpcd_read(&mhdp->dp.aux, DP_DPCD_REV, mhdp->dp.dpcd,
+	ret = drm_dp_dpcd_read(&dp->mhdp.dp.aux, DP_DPCD_REV, dp->mhdp.dp.dpcd,
 			       DP_RECEIVER_CAP_SIZE);
 	if (ret) {
-		DRM_DEV_ERROR(mhdp->dev, "Failed to get caps %d\n", ret);
+		DRM_DEV_ERROR(dp->mhdp.dev, "Failed to get caps %d\n", ret);
 		return ret;
 	}
 
@@ -465,8 +465,8 @@ static int cdn_dp_disable(struct cdn_dp_device *dp)
 	cdns_mhdp_set_firmware_active(&dp->mhdp, false);
 	cdn_dp_clk_disable(dp);
 	dp->active = false;
-	dp->max_lanes = 0;
-	dp->max_rate = 0;
+	dp->mhdp.dp.num_lanes = 0;
+	dp->mhdp.dp.rate = 0;
 
 	return 0;
 }
@@ -526,7 +526,7 @@ static void cdn_dp_bridge_mode_set(struct drm_bridge *bridge,
 				   const struct drm_display_mode *adjusted)
 {
 	struct cdn_dp_device *dp = bridge_to_dp(bridge);
-	struct video_info *video = &dp->video_info;
+	struct video_info *video = &dp->mhdp.video_info;
 
 	video->color_fmt = PXL_RGB;
 	video->v_sync_polarity = !!(mode->flags & DRM_MODE_FLAG_NVSYNC);
@@ -557,7 +557,7 @@ static bool cdn_dp_check_link_status(struct cdn_dp_device *dp)
 static void cdn_dp_display_info_update(struct cdn_dp_device *dp,
 				       struct drm_display_info *display_info)
 {
-	struct video_info *video = &dp->video_info;
+	struct video_info *video = &dp->mhdp.video_info;
 
 	switch (display_info->bpc) {
 	case 10:
@@ -584,13 +584,13 @@ static void cdn_dp_bridge_atomic_enable(struct drm_bridge *bridge, struct drm_at
 
 	cdn_dp_display_info_update(dp, &connector->display_info);
 
-	ret = drm_of_encoder_active_endpoint_id(dp->dev->of_node, &dp->encoder.encoder);
+	ret = drm_of_encoder_active_endpoint_id(dp->mhdp.dev->of_node, &dp->encoder.encoder);
 	if (ret < 0) {
-		DRM_DEV_ERROR(dev, "Could not get vop id, %d", ret);
+		DRM_DEV_ERROR(dp->mhdp.dev, "Could not get vop id, %d", ret);
 		return;
 	}
 
-	DRM_DEV_DEBUG_KMS(dev, "vop %s output to cdn-dp\n",
+	DRM_DEV_DEBUG_KMS(dp->mhdp.dev, "vop %s output to cdn-dp\n",
 			  (ret) ? "LIT" : "BIG");
 	if (ret)
 		val = DP_SEL_VOP_LIT | (DP_SEL_VOP_LIT << 16);
@@ -605,33 +605,33 @@ static void cdn_dp_bridge_atomic_enable(struct drm_bridge *bridge, struct drm_at
 
 	ret = cdn_dp_enable(dp);
 	if (ret) {
-		DRM_DEV_ERROR(dp->dev, "Failed to enable bridge %d\n",
+		DRM_DEV_ERROR(dp->mhdp.dev, "Failed to enable bridge %d\n",
 			      ret);
 		goto out;
 	}
 	if (!cdn_dp_check_link_status(dp)) {
 		ret = cdns_mhdp_train_link(&dp->mhdp);
 		if (ret) {
-			DRM_DEV_ERROR(dev, "Failed link train %d\n", ret);
+			DRM_DEV_ERROR(dp->mhdp.dev, "Failed link train %d\n", ret);
 			goto out;
 		}
 	}
 
 	ret = cdns_mhdp_set_video_status(&dp->mhdp, CONTROL_VIDEO_IDLE);
 	if (ret) {
-		DRM_DEV_ERROR(dev, "Failed to idle video %d\n", ret);
+		DRM_DEV_ERROR(dp->mhdp.dev, "Failed to idle video %d\n", ret);
 		goto out;
 	}
 
 	ret = cdns_mhdp_config_video(&dp->mhdp);
 	if (ret) {
-		DRM_DEV_ERROR(dev, "Failed to config video %d\n", ret);
+		DRM_DEV_ERROR(dp->mhdp.dev, "Failed to config video %d\n", ret);
 		goto out;
 	}
 
 	ret = cdns_mhdp_set_video_status(&dp->mhdp, CONTROL_VIDEO_VALID);
 	if (ret) {
-		DRM_DEV_ERROR(dev, "Failed to valid video %d\n", ret);
+		DRM_DEV_ERROR(dp->mhdp.dev, "Failed to valid video %d\n", ret);
 		goto out;
 	}
 
@@ -649,7 +649,7 @@ static void cdn_dp_bridge_atomic_disable(struct drm_bridge *bridge, struct drm_a
 	if (dp->active) {
 		ret = cdn_dp_disable(dp);
 		if (ret) {
-			DRM_DEV_ERROR(dp->dev, "Failed to disable bridge %d\n",
+			DRM_DEV_ERROR(dp->mhdp.dev, "Failed to disable bridge %d\n",
 				      ret);
 		}
 	}
@@ -1015,9 +1015,9 @@ static int cdn_dp_bind(struct device *dev, struct device *master, void *data)
 			DRM_BRIDGE_OP_EDID |
 			DRM_BRIDGE_OP_HPD |
 			DRM_BRIDGE_OP_DP_AUDIO;
-	dp->bridge.of_node = dp->dev->of_node;
+	dp->bridge.of_node = dp->mhdp.dev->of_node;
 	dp->bridge.type = DRM_MODE_CONNECTOR_DisplayPort;
-	dp->bridge.hdmi_audio_dev = dp->dev;
+	dp->bridge.hdmi_audio_dev = dp->mhdp.dev;
 	dp->bridge.hdmi_audio_max_i2s_playback_channels = 8;
 	dp->bridge.hdmi_audio_spdif_playback = 1;
 	dp->bridge.hdmi_audio_dai_port = -1;
@@ -1033,7 +1033,7 @@ static int cdn_dp_bind(struct device *dev, struct device *master, void *data)
 	connector = drm_bridge_connector_init(drm_dev, encoder);
 	if (IS_ERR(connector)) {
 		ret = PTR_ERR(connector);
-		dev_err(dp->dev, "failed to init bridge connector: %d\n", ret);
+		dev_err(dp->mhdp.dev, "failed to init bridge connector: %d\n", ret);
 		return ret;
 	}
 
@@ -1121,7 +1121,7 @@ static int cdn_dp_probe(struct platform_device *pdev)
 				   &cdn_dp_bridge_funcs);
 	if (IS_ERR(dp))
 		return PTR_ERR(dp);
-	dp->dev = dev;
+	dp->mhdp.dev = dev;
 
 	match = of_match_node(cdn_dp_dt_ids, pdev->dev.of_node);
 	dp_data = (struct cdn_dp_data *)match->data;
