@@ -1492,7 +1492,7 @@ static int vc4_fkms_connector_get_modes(struct drm_connector *connector)
 
 		drm_connector_update_edid_property(connector, edid);
 		num_modes = drm_add_edid_modes(connector, (struct edid *)edid);
-		kfree(drm_edid);
+		drm_edid_free(drm_edid);
 	}
 
 	return num_modes;
