@@ -10,8 +10,18 @@
 	compatible = "microchip,mpfs-icicle-prod-reference-rtl-v2507",
 		     "microchip,mpfs-icicle-kit-prod",
 		     "microchip,mpfs-icicle-kit",
-		     "microchip,mpfs-prod",
+			 "microchip,mpfs-prod",
 		     "microchip,mpfs";
+};
+
+&i2c0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c0_fabric>;
+};
+
+&i2c1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c1_mssio>;
 };
 
 &syscontroller {

@@ -69,6 +69,7 @@ Hardware Monitoring Kernel Drivers
    ds1621
    ds620
    emc1403
+   emc1812
    emc2103
    emc2305
    emc6w201
@@ -171,6 +172,7 @@ Hardware Monitoring Kernel Drivers
    mc33xs2410_hwmon
    mc34vr500
    mcp3021
+   mcp9982
    menf21bmc
    mlxreg-fan
    mp2856

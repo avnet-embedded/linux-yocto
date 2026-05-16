@@ -13,6 +13,7 @@ obj-y += atmel/
 obj-y += broadcom/
 obj-y += cadence/
 obj-y += chips-media/
+obj-y += dwc/
 obj-y += imagination/
 obj-y += intel/
 obj-y += marvell/
@@ -39,3 +40,4 @@ obj-y += xilinx/
 # (e. g. LC_ALL=C sort Makefile)
 obj-$(CONFIG_VIDEO_MEM2MEM_DEINTERLACE)	+= m2m-deinterlace.o
 obj-$(CONFIG_VIDEO_MUX)			+= video-mux.o
+
