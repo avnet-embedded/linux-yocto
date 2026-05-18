@@ -941,7 +941,8 @@ static int macb_mii_probe(struct net_device *dev)
 
 	bp->phylink_config.dev = &dev->dev;
 	bp->phylink_config.type = PHYLINK_NETDEV;
-	bp->phylink_config.mac_managed_pm = true;
+	if (!of_phy_is_fixed_link(bp->pdev->dev.of_node))
+		bp->phylink_config.mac_managed_pm = true;
 
 	if (bp->phy_interface == PHY_INTERFACE_MODE_SGMII) {
 		bp->phylink_config.poll_fixed_state = true;
@@ -5429,6 +5430,7 @@ static const struct macb_config zynq_config = {
 
 static const struct macb_config mpfs_config = {
 	.caps = MACB_CAPS_GIGABIT_MODE_AVAILABLE |
+		MACB_CAPS_USRIO_DISABLED |
 		MACB_CAPS_JUMBO |
 		MACB_CAPS_GEM_HAS_PTP,
 	.dma_burst_length = 16,
@@ -5437,6 +5439,16 @@ static const struct macb_config mpfs_config = {
 	.usrio = &macb_default_usrio,
 	.max_tx_length = 4040, /* Cadence Erratum 1686 */
 	.jumbo_max_len = 4040,
+};
+
+static const struct macb_config sam9x7_gem_config = {
+	.caps = MACB_CAPS_GIGABIT_MODE_AVAILABLE | MACB_CAPS_CLK_HW_CHG |
+		MACB_CAPS_USRIO_DEFAULT_IS_MII_GMII | MACB_CAPS_USRIO_HAS_CLKEN |
+		MACB_CAPS_MIIONRGMII | MACB_CAPS_GEM_HAS_PTP,
+	.dma_burst_length = 16,
+	.clk_init = macb_clk_init,
+	.init = macb_init,
+	.usrio = &sama7g5_usrio,
 };
 
 static const struct macb_config sama7g5_gem_config = {
@@ -5500,6 +5512,7 @@ static const struct of_device_id macb_dt_ids[] = {
 	{ .compatible = "cdns,zynq-gem", .data = &zynq_config }, /* deprecated */
 	{ .compatible = "sifive,fu540-c000-gem", .data = &fu540_c000_config },
 	{ .compatible = "microchip,mpfs-macb", .data = &mpfs_config },
+	{ .compatible = "microchip,sam9x7-gem", .data = &sam9x7_gem_config },
 	{ .compatible = "microchip,sama7g5-gem", .data = &sama7g5_gem_config },
 	{ .compatible = "microchip,sama7g5-emac", .data = &sama7g5_emac_config },
 	{ .compatible = "raspberrypi,rp1-gem", .data = &raspberrypi_rp1_config },
@@ -5989,6 +6002,8 @@ static int __maybe_unused macb_resume(struct device *dev)
 	macb_restore_features(bp);
 	rtnl_lock();
 
+	if (!of_phy_is_fixed_link(bp->pdev->dev.of_node))
+		phylink_init_phydev(bp->phylink);
 	phylink_start(bp->phylink);
 	rtnl_unlock();
 
