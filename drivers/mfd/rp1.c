@@ -209,6 +209,7 @@ static int rp1_irq_activate(struct irq_domain *d, struct irq_data *irqd,
 
 	pcie_irqd = rp1->pcie_irqds[irqd->hwirq];
 	msix_cfg_set(rp1, (unsigned int)irqd->hwirq, MSIX_CFG_ENABLE);
+	msix_cfg_set(rp1, (unsigned int)irqd->hwirq, MSIX_CFG_IACK);
 	return irq_domain_activate_irq(pcie_irqd, reserve);
 }
 
