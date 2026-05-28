@@ -84,7 +84,7 @@ static int zynqmp_efuse_access(void *context, unsigned int offset,
 		if ((offset == EFUSE_PUF_START_OFFSET ||
 		     offset == EFUSE_PUF_MID_OFFSET) &&
 		    value & P_USER_0_64_UPPER_MASK) {
-			dev_err(dev, "Only lower 4 bytes are allowed to be programmed in P_USER_0 & P_USER_64\n");
+			dev_err(dev, "Only lower 2 bytes are allowed to be programmed in P_USER_0 & P_USER_64\n");
 			return -EOPNOTSUPP;
 		}
 
@@ -95,31 +95,32 @@ static int zynqmp_efuse_access(void *context, unsigned int offset,
 		}
 	}
 
-	efuse = dma_alloc_coherent(dev, sizeof(struct xilinx_efuse),
-				   &dma_addr, GFP_KERNEL);
+	efuse = kmalloc(sizeof(*efuse) + bytes, GFP_KERNEL);
 	if (!efuse)
 		return -ENOMEM;
-
-	data = dma_alloc_coherent(dev, bytes,
-				  &dma_buf, GFP_KERNEL);
-	if (!data) {
-		ret = -ENOMEM;
-		goto efuse_data_fail;
+	dma_addr = dma_map_single(dev, efuse, sizeof(*efuse) + bytes,
+				  DMA_BIDIRECTIONAL);
+	if (dma_mapping_error(dev, dma_addr)) {
+		kfree(efuse);
+		return -EIO;
 	}
-
+	data = (char *)efuse + sizeof(*efuse);
 	if (flag == EFUSE_WRITE) {
 		memcpy(data, val, bytes);
 		efuse->flag = EFUSE_WRITE;
 	} else {
 		efuse->flag = EFUSE_READ;
 	}
-
+	dma_buf = dma_addr + sizeof(*efuse);
 	efuse->src = dma_buf;
 	efuse->size = words;
 	efuse->offset = offset;
 	efuse->pufuserfuse = pufflag;
-
+	dma_sync_single_for_device(dev, dma_addr, sizeof(*efuse) + bytes,
+				   DMA_BIDIRECTIONAL);
 	zynqmp_pm_efuse_access(dma_addr, (u32 *)&ret);
+	dma_unmap_single(dev, dma_addr, sizeof(*efuse) + bytes,
+			 DMA_BIDIRECTIONAL);
 	if (ret != 0) {
 		if (ret == EFUSE_NOT_ENABLED) {
 			dev_err(dev, "efuse access is not enabled\n");
@@ -136,10 +137,8 @@ static int zynqmp_efuse_access(void *context, unsigned int offset,
 efuse_access_err:
 	dma_free_coherent(dev, bytes,
 			  data, dma_buf);
-efuse_data_fail:
-	dma_free_coherent(dev, sizeof(struct xilinx_efuse),
-			  efuse, dma_addr);
 
+	kfree(efuse);
 	return ret;
 }
 
@@ -214,7 +213,6 @@ static int zynqmp_nvmem_probe(struct platform_device *pdev)
 	econfig.size = ZYNQMP_NVMEM_SIZE;
 	econfig.dev = dev;
 	econfig.priv = dev;
-	econfig.add_legacy_fixed_of_cells = true;
 	econfig.reg_read = zynqmp_nvmem_read;
 	econfig.reg_write = zynqmp_nvmem_write;
 

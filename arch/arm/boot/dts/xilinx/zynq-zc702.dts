@@ -17,6 +17,7 @@
 		serial0 = &uart1;
 		spi0 = &qspi;
 		mmc0 = &sdhci0;
+		usb0 = &usb0;
 		nvmem0 = &eeprom;
 		rtc0 = &rtc;
 	};
@@ -60,9 +61,12 @@
 		};
 	};
 
-	usb_phy0: phy0 {
-		compatible = "usb-nop-xceiv";
+	usb_phy0: phy0@e0002000 {
+		compatible = "ulpi-phy";
 		#phy-cells = <0>;
+		reg = <0xe0002000 0x1000>;
+		view-port = <0x0170>;
+		drv-vbus;
 	};
 };
 
@@ -82,6 +86,8 @@
 	phy-handle = <&ethernet_phy>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_gem0_default>;
+	phy-reset-gpio = <&gpio0 11 0>;
+	phy-reset-active-low;
 
 	ethernet_phy: ethernet-phy@7 {
 		reg = <7>;

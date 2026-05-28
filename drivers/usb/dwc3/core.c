@@ -85,16 +85,19 @@ static int dwc3_get_dr_mode(struct dwc3 *dwc)
 		else if (IS_ENABLED(CONFIG_USB_DWC3_GADGET))
 			mode = USB_DR_MODE_PERIPHERAL;
 
+		if (!IS_ENABLED(CONFIG_USB_DWC3_OTG)) {
 		/*
 		 * DWC_usb31 and DWC_usb3 v3.30a and higher do not support OTG
 		 * mode. If the controller supports DRD but the dr_mode is not
 		 * specified or set to OTG, then set the mode to peripheral.
 		 */
-		if (mode == USB_DR_MODE_OTG && !dwc->edev &&
-		    (!IS_ENABLED(CONFIG_USB_ROLE_SWITCH) ||
-		     !device_property_read_bool(dwc->dev, "usb-role-switch")) &&
-		    !DWC3_VER_IS_PRIOR(DWC3, 330A))
-			mode = USB_DR_MODE_PERIPHERAL;
+			if (mode == USB_DR_MODE_OTG && !dwc->edev &&
+			    (!IS_ENABLED(CONFIG_USB_ROLE_SWITCH) ||
+			     !device_property_read_bool(dwc->dev,
+			     "usb-role-switch")) &&
+			     !DWC3_VER_IS_PRIOR(DWC3, 330A))
+				mode = USB_DR_MODE_PERIPHERAL;
+		}
 	}
 
 	if (mode != dwc->dr_mode) {
@@ -514,7 +517,7 @@ static struct dwc3_event_buffer *dwc3_alloc_one_event_buffer(struct dwc3 *dwc,
  * dwc3_free_event_buffers - frees all allocated event buffers
  * @dwc: Pointer to our controller context structure
  */
-static void dwc3_free_event_buffers(struct dwc3 *dwc)
+void dwc3_free_event_buffers(struct dwc3 *dwc)
 {
 	struct dwc3_event_buffer	*evt;
 
@@ -564,6 +567,9 @@ int dwc3_event_buffers_setup(struct dwc3 *dwc)
 	u32				reg;
 
 	if (!dwc->ev_buf)
+		return 0;
+
+	if (dwc->dr_mode == USB_DR_MODE_HOST)
 		return 0;
 
 	evt = dwc->ev_buf;
@@ -644,6 +650,24 @@ static void dwc3_config_soc_bus(struct dwc3 *dwc)
 		reg &= ~DWC3_GSBUSCFG0_REQINFO(~0);
 		reg |= DWC3_GSBUSCFG0_REQINFO(dwc->gsbuscfg0_reqinfo);
 		dwc3_writel(dwc, DWC3_GSBUSCFG0, reg);
+	}
+
+	if (dwc->csr_tx_deemph_field_1 != DWC3_LCSR_TX_DEEMPH_UNSPECIFIED) {
+		u32 reg;
+
+		reg = dwc3_readl(dwc, DWC3_LCSR_TX_DEEMPH);
+		reg &= ~DWC3_LCSR_TX_DEEMPH_MASK(~0);
+		reg |= DWC3_LCSR_TX_DEEMPH_MASK(dwc->csr_tx_deemph_field_1);
+		dwc3_writel(dwc, DWC3_LCSR_TX_DEEMPH, reg);
+	}
+
+	if (dwc->dis_axi_storder_en) {
+		u32 reg;
+
+		reg = dwc3_readl(dwc, DWC3_GBMUCTL);
+		reg &= ~DWC3_GBMUCTL_DIS_AXI_STORDER_EN_MASK;
+		dwc3_writel(dwc, DWC3_GBMUCTL, reg);
+		dev_info(dwc->dev, "Disable GBMUCTL axi_storder_en\n");
 	}
 }
 
@@ -1413,6 +1437,25 @@ static int dwc3_core_init(struct dwc3 *dwc)
 		dwc3_writel(dwc, DWC3_GUCTL2, reg);
 	}
 
+	/* SNPS controller when configured in HOST mode maintains Inter Packet
+	 * Delay (IPD) of ~380ns which works with most of the super-speed hubs
+	 * except VIA-LAB hubs. When IPD is ~380ns HOST controller fails to
+	 * enumerate FS/LS devices when connected behind VIA-LAB hubs.
+	 * Enabling bit 9 of GUCTL1 enables the workaround in HW to reduce the
+	 * ULPI clock latency by 1 cycle, thus reducing the IPD (~360ns) and
+	 * making controller enumerate FS/LS devices connected behind VIA-LAB.
+	 */
+	if (dwc->dev->of_node) {
+		struct device_node *parent = of_get_parent(dwc->dev->of_node);
+
+		if (of_device_is_compatible(parent, "xlnx,zynqmp-dwc3")) {
+			reg = dwc3_readl(dwc, DWC3_GUCTL1);
+			reg |= DWC3_GUCTL1_IPD_QUIRK;
+			dwc3_writel(dwc, DWC3_GUCTL1, reg);
+		}
+		of_node_put(parent);
+	}
+
 	/*
 	 * STAR 9001285599: This issue affects DWC_usb3 version 3.20a
 	 * only. If the PM TIMER ECM is enabled through GUCTL2[19], the
@@ -1472,8 +1515,9 @@ static int dwc3_core_init(struct dwc3 *dwc)
 			reg |= DWC3_GUCTL1_PARKMODE_DISABLE_HS;
 
 		if (DWC3_VER_IS_WITHIN(DWC3, 290A, ANY)) {
-			if (dwc->maximum_speed == USB_SPEED_FULL ||
-			    dwc->maximum_speed == USB_SPEED_HIGH)
+			if (dwc->dr_mode == USB_DR_MODE_PERIPHERAL &&
+			    (dwc->maximum_speed == USB_SPEED_FULL ||
+			    dwc->maximum_speed == USB_SPEED_HIGH))
 				reg |= DWC3_GUCTL1_DEV_FORCE_20_CLK_FOR_30_CLK;
 			else
 				reg &= ~DWC3_GUCTL1_DEV_FORCE_20_CLK_FOR_30_CLK;
@@ -1639,6 +1683,11 @@ static int dwc3_core_init_mode(struct dwc3 *dwc)
 		ret = dwc3_drd_init(dwc);
 		if (ret)
 			return dev_err_probe(dev, ret, "failed to initialize dual-role\n");
+
+#if IS_ENABLED(CONFIG_USB_DWC3_OTG)
+		dwc->current_dr_role = 0;
+		dwc3_set_mode(dwc, DWC3_GCTL_PRTCAP_OTG);
+#endif
 		break;
 	default:
 		dev_err(dev, "Unsupported mode of operation %d\n", dwc->dr_mode);
@@ -1671,11 +1720,13 @@ static void dwc3_core_exit_mode(struct dwc3 *dwc)
 
 static void dwc3_get_software_properties(struct dwc3 *dwc)
 {
+	u32 csr_tx_deemph_field_1;
 	struct device *tmpdev;
 	u16 gsbuscfg0_reqinfo;
 	int ret;
 
 	dwc->gsbuscfg0_reqinfo = DWC3_GSBUSCFG0_REQINFO_UNSPECIFIED;
+	dwc->csr_tx_deemph_field_1 = DWC3_LCSR_TX_DEEMPH_UNSPECIFIED;
 
 	/*
 	 * Iterate over all parent nodes for finding swnode properties
@@ -1687,6 +1738,15 @@ static void dwc3_get_software_properties(struct dwc3 *dwc)
 					       &gsbuscfg0_reqinfo);
 		if (!ret)
 			dwc->gsbuscfg0_reqinfo = gsbuscfg0_reqinfo;
+
+		ret = device_property_read_u32(tmpdev,
+					       "snps,lcsr_tx_deemph",
+					       &csr_tx_deemph_field_1);
+		if (!ret)
+			dwc->csr_tx_deemph_field_1 = csr_tx_deemph_field_1;
+
+		if (device_property_read_bool(tmpdev, "snps,dis_axi_storder_en"))
+			dwc->dis_axi_storder_en = true;
 	}
 }
 
@@ -1985,6 +2045,9 @@ static struct extcon_dev *dwc3_get_extcon(struct dwc3 *dwc)
 	struct extcon_dev *edev = NULL;
 	const char *name;
 
+	if (dwc->dr_mode == USB_DR_MODE_HOST)
+		return NULL;
+
 	if (device_property_present(dev, "extcon"))
 		return extcon_get_edev_by_phandle(dev, 0);
 
@@ -2226,6 +2289,20 @@ int dwc3_core_probe(const struct dwc3_probe_data *data)
 
 	dwc3_get_software_properties(dwc);
 
+	/*
+	 * DWC3 controller has a Power Management Unit(PMU) module
+	 * which requests the power controller for entering into
+	 * D3/D0 state. Try getting the regulator.
+	 */
+	dwc->dwc3_pmu = devm_regulator_get(dev, dev->parent->of_node->full_name);
+	if (!IS_ERR(dwc->dwc3_pmu)) {
+		ret = regulator_enable(dwc->dwc3_pmu);
+		if (ret) {
+			dev_err(dev, "Failed to enable dwc3_pmu supply\n");
+			return ret;
+		}
+	}
+
 	dwc->usb_psy = dwc3_get_usb_power_supply(dwc);
 	if (IS_ERR(dwc->usb_psy))
 		return dev_err_probe(dev, PTR_ERR(dwc->usb_psy), "couldn't get usb power supply\n");
@@ -2333,6 +2410,7 @@ err_exit_debugfs:
 	dwc3_phy_power_off(dwc);
 	dwc3_phy_exit(dwc);
 	dwc3_ulpi_exit(dwc);
+
 err_free_event_buffers:
 	dwc3_free_event_buffers(dwc);
 err_allow_rpm:
@@ -2380,6 +2458,9 @@ static int dwc3_probe(struct platform_device *pdev)
 
 void dwc3_core_remove(struct dwc3 *dwc)
 {
+	u32 reg;
+	int i;
+
 	pm_runtime_get_sync(dwc->dev);
 
 	dwc3_core_exit_mode(dwc);
@@ -2389,6 +2470,22 @@ void dwc3_core_remove(struct dwc3 *dwc)
 	dwc3_ulpi_exit(dwc);
 
 	pm_runtime_allow(dwc->dev);
+
+	/* Let controller to suspend HSPHY before PHY driver suspends */
+	if (dwc->dis_u2_susphy_quirk || dwc->dis_enblslpm_quirk) {
+		for (i = 0; i < dwc->num_usb2_ports; i++) {
+			reg = dwc3_readl(dwc, DWC3_GUSB2PHYCFG(i));
+			reg |= DWC3_GUSB2PHYCFG_ENBLSLPM | DWC3_GUSB2PHYCFG_SUSPHY;
+			dwc3_writel(dwc, DWC3_GUSB2PHYCFG(i), reg);
+		}
+
+		/* Give some time for USB2 PHY to suspend */
+		usleep_range(5000, 6000);
+	}
+
+	if (dwc->dwc3_pmu)
+		regulator_disable(dwc->dwc3_pmu);
+
 	pm_runtime_disable(dwc->dev);
 	pm_runtime_dont_use_autosuspend(dwc->dev);
 	pm_runtime_put_noidle(dwc->dev);
@@ -2470,6 +2567,11 @@ static int dwc3_suspend_common(struct dwc3 *dwc, pm_message_t msg)
 		dwc3_core_exit(dwc);
 		break;
 	case DWC3_GCTL_PRTCAP_HOST:
+		if (IS_ENABLED(CONFIG_USB_DWC3_ULPI) &&
+		    !device_wakeup_path(dwc->dev) && dwc->ulpi)
+			ulpi_write(dwc->ulpi, ULPI_OTG_CTRL_CLEAR,
+				   OTG_CTRL_DRVVBUS_OFFSET);
+
 		if (!PMSG_IS_AUTO(msg) && !device_may_wakeup(dwc->dev)) {
 			dwc3_core_exit(dwc);
 			break;
@@ -2514,6 +2616,18 @@ static int dwc3_suspend_common(struct dwc3 *dwc, pm_message_t msg)
 		break;
 	}
 
+	/* Put the core into D3 state */
+	if (dwc->dwc3_pmu) {
+		int ret;
+
+		ret = regulator_disable(dwc->dwc3_pmu);
+		if (ret) {
+			dev_err(dwc->dev,
+				"Failed to disable dwc3_pmu supply\n");
+			return ret;
+		}
+	}
+
 	return 0;
 }
 
@@ -2522,6 +2636,15 @@ static int dwc3_resume_common(struct dwc3 *dwc, pm_message_t msg)
 	int		ret;
 	u32		reg;
 	int		i;
+
+	/* Bring core to D0 state */
+	if (dwc->dwc3_pmu) {
+		ret = regulator_enable(dwc->dwc3_pmu);
+		if (ret) {
+			dev_err(dwc->dev, "Failed to enable dwc3_pmu supply\n");
+			return ret;
+		}
+	}
 
 	switch (dwc->current_dr_role) {
 	case DWC3_GCTL_PRTCAP_DEVICE:
@@ -2533,6 +2656,11 @@ static int dwc3_resume_common(struct dwc3 *dwc, pm_message_t msg)
 		dwc3_gadget_resume(dwc);
 		break;
 	case DWC3_GCTL_PRTCAP_HOST:
+		if (IS_ENABLED(CONFIG_USB_DWC3_ULPI) &&
+		    !device_wakeup_path(dwc->dev) && dwc->ulpi)
+			ulpi_write(dwc->ulpi, ULPI_OTG_CTRL_SET,
+				   OTG_CTRL_DRVVBUS_OFFSET);
+
 		if (!PMSG_IS_AUTO(msg) && !device_may_wakeup(dwc->dev)) {
 			ret = dwc3_core_init_for_resume(dwc);
 			if (ret)

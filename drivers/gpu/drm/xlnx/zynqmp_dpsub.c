@@ -39,15 +39,21 @@ static int __maybe_unused zynqmp_dpsub_suspend(struct device *dev)
 	if (!dpsub->drm)
 		return 0;
 
+	zynqmp_dp_phy_exit(dpsub->dp);
 	return drm_mode_config_helper_suspend(&dpsub->drm->dev);
 }
 
 static int __maybe_unused zynqmp_dpsub_resume(struct device *dev)
 {
 	struct zynqmp_dpsub *dpsub = dev_get_drvdata(dev);
+	int ret;
 
 	if (!dpsub->drm)
 		return 0;
+
+	ret = zynqmp_dp_phy_init(dpsub->dp);
+	if (ret)
+		return ret;
 
 	return drm_mode_config_helper_resume(&dpsub->drm->dev);
 }
@@ -196,7 +202,7 @@ static int zynqmp_dpsub_probe(struct platform_device *pdev)
 	dpsub->dev = &pdev->dev;
 	platform_set_drvdata(pdev, dpsub);
 
-	ret = dma_set_mask(dpsub->dev, DMA_BIT_MASK(ZYNQMP_DISP_MAX_DMA_BIT));
+	ret = dma_set_mask_and_coherent(dpsub->dev, DMA_BIT_MASK(ZYNQMP_DISP_MAX_DMA_BIT));
 	if (ret)
 		return ret;
 

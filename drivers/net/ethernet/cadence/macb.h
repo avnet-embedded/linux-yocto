@@ -83,9 +83,11 @@
 #define GEM_NCFGR		0x0004 /* Network Config */
 #define GEM_USRIO		0x000c /* User IO */
 #define GEM_DMACFG		0x0010 /* DMA Configuration */
+#define GEM_TXPAUSE		0x003C /* Transmit Pause Quantum */
 #define GEM_PBUFRXCUT		0x0044 /* RX Partial Store and Forward */
 #define GEM_JML			0x0048 /* Jumbo Max Length */
 #define GEM_HS_MAC_CONFIG	0x0050 /* GEM high speed config */
+#define GEM_RXWMARK		0x007C /* RXFIFO Watermark Levels for Pause Frames */
 #define GEM_HRB			0x0080 /* Hash Bottom */
 #define GEM_HRT			0x0084 /* Hash Top */
 #define GEM_SA1B		0x0088 /* Specific1 Bottom */
@@ -184,12 +186,9 @@
 #define GEM_DCFG8		0x029C /* Design Config 8 */
 #define GEM_DCFG10		0x02A4 /* Design Config 10 */
 #define GEM_DCFG12		0x02AC /* Design Config 12 */
-#define GEM_ENST_START_TIME_Q0	0x0800 /* ENST Q0 start time */
-#define GEM_ENST_START_TIME_Q1	0x0804 /* ENST Q1 start time */
-#define GEM_ENST_ON_TIME_Q0	0x0820 /* ENST Q0 on time */
-#define GEM_ENST_ON_TIME_Q1	0x0824 /* ENST Q1 on time */
-#define GEM_ENST_OFF_TIME_Q0	0x0840 /* ENST Q0 off time */
-#define GEM_ENST_OFF_TIME_Q1	0x0844 /* ENST Q1 off time */
+#define GEM_CBS_CONTROL		0x04BC /* CBS Control Register */
+#define GEM_CBS_IDLESLOPE_Q_A	0x04C0 /* CBS IdleSlope Queue A */
+#define GEM_CBS_IDLESLOPE_Q_B	0x04C4 /* CBS IdleSlope Queue B */
 #define GEM_ENST_CONTROL	0x0880 /* ENST control register */
 #define GEM_USX_CONTROL		0x0A80 /* High speed PCS control register */
 #define GEM_USX_STATUS		0x0A88 /* High speed PCS status register */
@@ -229,6 +228,12 @@
 #define GEM_ENST_START_TIME(hw_q)	(0x0800 + ((hw_q) << 2))
 #define GEM_ENST_ON_TIME(hw_q)		(0x0820 + ((hw_q) << 2))
 #define GEM_ENST_OFF_TIME(hw_q)		(0x0840 + ((hw_q) << 2))
+
+/* Bitfields in CBS_CONTROL */
+#define GEM_CBS_ENABLE_QUEUE_A_OFFSET	0
+#define GEM_CBS_ENABLE_QUEUE_A_SIZE	1
+#define GEM_CBS_ENABLE_QUEUE_B_OFFSET	1
+#define GEM_CBS_ENABLE_QUEUE_B_SIZE	1
 
 /* Bitfields in ENST_CONTROL */
 #define GEM_ENST_DISABLE_QUEUE_OFFSET	16
@@ -311,6 +316,8 @@
 /* GEM specific NCR bitfields. */
 #define GEM_ENABLE_HS_MAC_OFFSET	31
 #define GEM_ENABLE_HS_MAC_SIZE		1
+#define GEM_2PT5_G_OFFSET	29
+#define GEM_2PT5_G_SIZE		1
 
 /* GEM specific NCFGR bitfields. */
 #define GEM_FD_OFFSET		1 /* Full duplex */
@@ -319,12 +326,14 @@
 #define GEM_GBE_SIZE		1
 #define GEM_PCSSEL_OFFSET	11
 #define GEM_PCSSEL_SIZE		1
-#define GEM_PAE_OFFSET		13 /* Pause enable */
+#define GEM_PAE_OFFSET		13 /* Pause Frame Reception enable */
 #define GEM_PAE_SIZE		1
 #define GEM_CLK_OFFSET		18 /* MDC clock division */
 #define GEM_CLK_SIZE		3
 #define GEM_DBW_OFFSET		21 /* Data bus width */
 #define GEM_DBW_SIZE		2
+#define GEM_DCPF_OFFSET		23 /* Disable Copy of Pause Frames to Memory */
+#define GEM_DCPF_SIZE		1
 #define GEM_RXCOEN_OFFSET	24
 #define GEM_RXCOEN_SIZE		1
 #define GEM_SGMIIEN_OFFSET	27
@@ -491,6 +500,15 @@
 #define MACB_CLKEN_OFFSET			1
 #define MACB_CLKEN_SIZE				1
 
+/* Bitfields in RXWMARK */
+#define GEM_RXWMARK_HIGH_OFFSET			0
+#define GEM_RXWMARK_HIGH_SIZE			16
+#define GEM_RXWMARK_LOW_OFFSET			16
+#define GEM_RXWMARK_LOW_SIZE			16
+
+/* Default Transmit Pause Quantum value */
+#define GEM_TXPAUSEQUANTUM_DEFAULT		0xFFFF
+
 /* Bitfields in WOL */
 #define MACB_IP_OFFSET				0
 #define MACB_IP_SIZE				16
@@ -592,10 +610,20 @@
 #define GEM_RX_SCR_BYPASS_SIZE			1
 #define GEM_TX_SCR_BYPASS_OFFSET		8
 #define GEM_TX_SCR_BYPASS_SIZE			1
+#define GEM_RX_SYNC_RESET_OFFSET		2
+#define GEM_RX_SYNC_RESET_SIZE			1
 #define GEM_TX_EN_OFFSET			1
 #define GEM_TX_EN_SIZE				1
 #define GEM_SIGNAL_OK_OFFSET			0
 #define GEM_SIGNAL_OK_SIZE			1
+
+/* Constants for USX_CONTROL */
+#define HS_SPEED_10000M				4
+#define HS_SPEED_5000M				3
+#define HS_SPEED_2500M				2
+#define HS_SPEED_1000M				1
+#define MACB_SERDES_RATE_10G			1
+#define MACB_SERDES_RATE_5G_2G5_1G		0
 
 /* Bitfields in USX_STATUS. */
 #define GEM_USX_BLOCK_LOCK_OFFSET		0
@@ -768,7 +796,8 @@
 #define MACB_CAPS_MIIONRGMII			0x00000200
 #define MACB_CAPS_NEED_TSUCLK			0x00000400
 #define MACB_CAPS_QUEUE_DISABLE			0x00000800
-#define MACB_CAPS_QBV				0x00001000
+#define MACB_CAPS_TC				0x00001000
+#define MACB_CAPS_GEM_HAS_RXWMARK		0x00002000
 #define MACB_CAPS_PCS				0x01000000
 #define MACB_CAPS_HIGH_SPEED			0x02000000
 #define MACB_CAPS_CLK_HW_CHG			0x04000000
@@ -843,6 +872,7 @@
 	})
 
 #define MACB_READ_NSR(bp)	macb_readl(bp, NSR)
+#define MACB_READ_USX_STATUS(bp)	gem_readl(bp, USX_STATUS)
 
 /* struct macb_dma_desc - Hardware DMA descriptor
  * @addr: DMA address of data buffer
@@ -1228,6 +1258,9 @@ struct macb_config {
 	unsigned int		max_tx_length;
 	int	jumbo_max_len;
 	const struct macb_usrio_config *usrio;
+	u16	txpause_quantum;
+	u16	rx_watermark_high_percent;
+	u16	rx_watermark_low_percent;
 };
 
 struct tsu_incr {
@@ -1373,6 +1406,9 @@ struct macb {
 
 	struct macb_pm_data pm_data;
 	const struct macb_usrio_config *usrio;
+	u16	rx_watermark_low;
+	u16	rx_watermark_high;
+	u16	pause_quantum;
 };
 
 #ifdef CONFIG_MACB_USE_HWSTAMP
@@ -1433,14 +1469,22 @@ static inline bool gem_has_ptp(struct macb *bp)
 /* ENST Helper functions */
 static inline u64 enst_ns_to_hw_units(size_t ns, u32 speed_mbps)
 {
+	if (likely(speed_mbps >= 1000))
+		return DIV_ROUND_UP(ns, ENST_TIME_GRANULARITY_NS);
+
 	return DIV_ROUND_UP((ns) * (speed_mbps),
 			    (ENST_TIME_GRANULARITY_NS * 1000));
 }
 
 static inline u64 enst_max_hw_interval(u32 speed_mbps)
 {
-	return DIV_ROUND_UP(GENMASK(GEM_ON_TIME_SIZE - 1, 0) *
-			    ENST_TIME_GRANULARITY_NS * 1000, (speed_mbps));
+	size_t base = (size_t)GENMASK(GEM_ON_TIME_SIZE - 1, 0) *
+			      ENST_TIME_GRANULARITY_NS;
+
+	if (likely(speed_mbps >= 1000))
+		return base;
+
+	return DIV_ROUND_UP(base * 1000, speed_mbps);
 }
 
 /**
@@ -1458,7 +1502,6 @@ struct macb_platform_data {
  * @start_time_mask:  Bitmask representing the start time for the queue
  * @on_time_bytes:    "on" time nsec expressed in bytes
  * @off_time_bytes:   "off" time nsec expressed in bytes
- * @queue_id:         Identifier for the queue
  *
  * This structure holds the configuration parameters for an ENST queue,
  * used to control time-based transmission scheduling in the MACB driver.
@@ -1467,7 +1510,6 @@ struct macb_queue_enst_config {
 	u32 start_time_mask;
 	u32 on_time_bytes;
 	u32 off_time_bytes;
-	u8 queue_id;
 };
 
 #endif /* _MACB_H */

@@ -3,7 +3,7 @@
  * dts file for Xilinx Versal Net VNX board revA
  *
  * (C) Copyright 2022, Xilinx, Inc.
- * (C) Copyright 2022 - 2025, Advanced Micro Devices, Inc.
+ * (C) Copyright 2022 - 2026, Advanced Micro Devices, Inc.
  *
  * Michal Simek <michal.simek@amd.com>
  */
@@ -11,8 +11,9 @@
 /dts-v1/;
 
 #include "versal-net.dtsi"
-#include "versal-net-clk.dtsi"
+#include "versal-net-clk-ccf.dtsi"
 #include <dt-bindings/gpio/gpio.h>
+#include "xlnx-versal-net-power.h"
 
 / {
 	compatible = "xlnx,versal-net-vnx-revA", "xlnx,versal-net-vnx", "xlnx,versal-net";
@@ -39,10 +40,32 @@
 		stdout-path = "serial1:115200n8";
 	};
 
+	cdx {
+		compatible = "xlnx,versal-net-cdx";
+		status = "okay";
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+		dma-ranges = <0 0 0 0 0x10000 0>;
+		iommu-map = <0x0 &smmu 0x0 0xfffff>;
+		msi-map = <0x0 &its 0x0 0xffff>;
+		xlnx,rproc = <&remoteproc_r52>;
+	};
+
 	reserved-memory {
 		#address-cells = <2>;
 		#size-cells = <2>;
 		ranges;
+
+		cma: linux,cma {
+			compatible = "shared-dma-pool";
+			reusable;
+			size = <0x0 0x20000000>;
+			alignment = <0x0 0x20000000>;
+			alloc-ranges = <0x0 0x0 0x0 0x80000000>;
+			linux,cma-default;
+		};
+
 		rsc_tbl_carveout: rproc@bbf14000 {
 			reg = <0 0xbbf14000 0 0x1000>;
 			no-map;
@@ -72,6 +95,44 @@
 			no-map;
 		};
 	};
+
+	zynqmp-ipi1-nobuf@eb3b0000 {
+		compatible = "xlnx,versal-ipi-mailbox";
+		reg = <0x00 0xeb3b0000 0x00 0x1ff>;
+		reg-names = "ctrl";
+		status = "okay";
+		interrupts = <0 64 4>;
+		xlnx,ipi-id = <10>;
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+		ipi_mailbox_rpu0: mailbox@eb3b1000 {
+			compatible = "xlnx,versal-ipi-dest-mailbox";
+			#mbox-cells = <1>;
+			xlnx,ipi-id = <11>;
+			reg = <0 0xeb3b1000 0 0x1000>;
+			reg-names = "ctrl";
+		};
+	};
+
+	r52ss@ff9a0000 {
+		compatible = "xlnx,versal-net-r52-remoteproc";
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+		reg = <0 0xff9a0000 0 0x10000>;
+		xlnx,cluster-mode = <1>;
+
+		remoteproc_r52: r52-0 {
+			compatible = "xilinx,r52";
+			memory-region = <&rsc_tbl_carveout>, <&rpu0vdev0buffer>,
+					<&rpu0vdev0vring0>, <&rpu0vdev0vring1>;
+			power-domain = <&versal_net_firmware PM_DEV_RPU_A_0>;
+			mboxes = <&ipi_mailbox_rpu0 0>, <&ipi_mailbox_rpu0 1>;
+			mbox-names = "tx", "rx";
+			xlnx,rsc-tbl = <&rsc_tbl_carveout 0xbbf14000>;
+		};
+	};
 };
 
 &gem1 {
@@ -93,6 +154,65 @@
 	iommus = <&smmu 0x245>;
 	#address-cells = <1>;
 	#size-cells = <0>;
+	reset-names = "qspi";
+	mt35xu02g0: flash@0 {
+		compatible = "micron,m25p80", "jedec,spi-nor";
+		reg = <0>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		cdns,read-delay = <0>;
+		cdns,tshsl-ns = <0>;
+		cdns,tsd2d-ns = <0>;
+		cdns,tchsh-ns = <1>;
+		cdns,tslch-ns = <1>;
+		spi-tx-bus-width = <8>;
+		spi-rx-bus-width = <8>;
+		spi-max-frequency = <20000000>;
+		reset-gpios = <&gpio1 0xc GPIO_ACTIVE_LOW>;
+
+		partitions {
+			#size-cells = <1>;
+			#address-cells = <1>;
+			compatible = "fixed-partitions";
+
+			ospi_flash0: partition@0 {
+				reg = <0x0 0x8000000>; /* 128MB */
+				label = "ospi-flash0";
+				part-concat-next = <&ospi_flash1>;
+			};
+		};
+	};
+
+	mt35xu02g1: flash@1 {
+		compatible = "micron,m25p80", "jedec,spi-nor";
+		reg = <1>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		cdns,read-delay = <0>;
+		cdns,tshsl-ns = <0>;
+		cdns,tsd2d-ns = <0>;
+		cdns,tchsh-ns = <1>;
+		cdns,tslch-ns = <1>;
+		spi-tx-bus-width = <8>;
+		spi-rx-bus-width = <8>;
+		spi-max-frequency = <20000000>;
+		reset-gpios = <&gpio1 0xc GPIO_ACTIVE_LOW>;
+
+		partitions {
+			#size-cells = <1>;
+			#address-cells = <1>;
+			compatible = "fixed-partitions";
+
+			ospi_flash1: partition@0 {
+				reg = <0x0 0x8000000>; /* 128MB */
+				label = "ospi-flash1";
+			};
+		};
+	};
+};
+
+&usb1 {
+	iommus = <&smmu 0x232>;
 };
 
 &sdhci1 {
@@ -109,8 +229,13 @@
 
 &serial1 {
 	status = "okay";
+	skip-init;
 };
 
 &smmu {
 	status = "okay";
+};
+
+&versal_fpga {
+	dma-noncoherent;
 };

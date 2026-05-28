@@ -287,6 +287,15 @@ static int phylink_interface_max_speed(phy_interface_t interface)
 	case PHY_INTERFACE_MODE_100GBASEP:
 		return SPEED_100000;
 
+	case PHY_INTERFACE_MODE_100GBASER:
+		return SPEED_100000;
+
+	case PHY_INTERFACE_MODE_200GBASER:
+		return SPEED_200000;
+
+	case PHY_INTERFACE_MODE_400GBASER:
+		return SPEED_400000;
+
 	case PHY_INTERFACE_MODE_INTERNAL:
 	case PHY_INTERFACE_MODE_NA:
 	case PHY_INTERFACE_MODE_MAX:
@@ -820,6 +829,7 @@ static int phylink_parse_mode(struct phylink *pl,
 		case PHY_INTERFACE_MODE_50GBASER:
 		case PHY_INTERFACE_MODE_LAUI:
 		case PHY_INTERFACE_MODE_100GBASEP:
+		case PHY_INTERFACE_MODE_INTERNAL:
 			caps = ~(MAC_SYM_PAUSE | MAC_ASYM_PAUSE);
 			caps = phylink_get_capabilities(pl->link_config.interface, caps,
 							RATE_MATCH_NONE);
@@ -1047,11 +1057,14 @@ static enum inband_type phylink_get_inband_type(phy_interface_t interface)
 
 	case PHY_INTERFACE_MODE_1000BASEX:
 	case PHY_INTERFACE_MODE_2500BASEX:
+	case PHY_INTERFACE_MODE_INTERNAL:
 		/* 1000base-X is designed for use media-side for Fibre
 		 * connections, and thus the Autoneg bit needs to be
 		 * taken into account. We also do this for 2500base-X
 		 * as well, but drivers may not support this, so may
 		 * need to override this.
+		 * For Internal, neg mode to be determined based
+		 * on Autoneg bit.
 		 */
 		return INBAND_BASEX;
 
@@ -2947,8 +2960,17 @@ int phylink_ethtool_ksettings_set(struct phylink *pl,
 			return 0;
 		}
 
-		config.speed = c->speed;
-		config.duplex = c->duplex;
+		/* Allow speed/duplex change in in-band mode with autoneg off */
+		if (pl->req_link_an_mode == MLO_AN_INBAND &&
+		    (c->speed != pl->link_config.speed ||
+		    c->duplex != pl->link_config.duplex)) {
+			config.speed = c->speed;
+			config.duplex = c->duplex;
+		/* Mark for reconfiguration below */
+		} else {
+			config.speed = c->speed;
+			config.duplex = c->duplex;
+		}
 		break;
 
 	case AUTONEG_ENABLE:
@@ -3021,6 +3043,15 @@ int phylink_ethtool_ksettings_set(struct phylink *pl,
 	if (!phylink_validate_pcs_inband_autoneg(pl, config.interface,
 						 config.advertising))
 		return -EINVAL;
+	/* If speed/duplex changed in in-band mode with autoneg off, reconfigure MAC/PCS */
+	if (pl->req_link_an_mode == MLO_AN_INBAND &&
+	    !linkmode_test_bit(ETHTOOL_LINK_MODE_Autoneg_BIT, config.advertising) &&
+	    (pl->link_config.speed != config.speed ||
+	    pl->link_config.duplex != config.duplex)) {
+		pl->link_config.speed = config.speed;
+		pl->link_config.duplex = config.duplex;
+		phylink_mac_initial_config(pl, false);
+	}
 
 	mutex_lock(&pl->state_mutex);
 	pl->link_config.speed = config.speed;

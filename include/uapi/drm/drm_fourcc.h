@@ -259,10 +259,12 @@ extern "C" {
 #define DRM_FORMAT_VYUY		fourcc_code('V', 'Y', 'U', 'Y') /* [31:0] Y1:Cb0:Y0:Cr0 8:8:8:8 little endian */
 
 #define DRM_FORMAT_AYUV		fourcc_code('A', 'Y', 'U', 'V') /* [31:0] A:Y:Cb:Cr 8:8:8:8 little endian */
+#define DRM_FORMAT_AVUY		fourcc_code('A', 'V', 'U', 'Y') /* [31:0] A:Cr:Cb:Y 8:8:8:8 little endian */
 #define DRM_FORMAT_AVUY8888	fourcc_code('A', 'V', 'U', 'Y') /* [31:0] A:Cr:Cb:Y 8:8:8:8 little endian */
 #define DRM_FORMAT_XYUV8888	fourcc_code('X', 'Y', 'U', 'V') /* [31:0] X:Y:Cb:Cr 8:8:8:8 little endian */
 #define DRM_FORMAT_XVUY8888	fourcc_code('X', 'V', 'U', 'Y') /* [31:0] X:Cr:Cb:Y 8:8:8:8 little endian */
 #define DRM_FORMAT_VUY888	fourcc_code('V', 'U', '2', '4') /* [23:0] Cr:Cb:Y 8:8:8 little endian */
+#define DRM_FORMAT_XVUY2101010	fourcc_code('X', 'V', '3', '0') /* [31:0] x:Cr:Cb:Y 2:10:10:10 little endian */
 #define DRM_FORMAT_VUY101010	fourcc_code('V', 'U', '3', '0') /* Y followed by U then V, 10:10:10. Non-linear modifier only */
 
 /*
@@ -308,6 +310,10 @@ extern "C" {
 #define DRM_FORMAT_YUV420_8BIT	fourcc_code('Y', 'U', '0', '8')
 #define DRM_FORMAT_YUV420_10BIT	fourcc_code('Y', 'U', '1', '0')
 
+/* Grey scale */
+#define DRM_FORMAT_Y8		fourcc_code('G', 'R', 'E', 'Y') /* 8  Greyscale	*/
+#define DRM_FORMAT_Y10		fourcc_code('Y', '1', '0', ' ') /* 10 Greyscale */
+
 /*
  * 2 plane RGB + A
  * index 0 = RGB plane, same format as the corresponding non _A8 format has
@@ -321,6 +327,14 @@ extern "C" {
 #define DRM_FORMAT_BGR888_A8	fourcc_code('B', '8', 'A', '8')
 #define DRM_FORMAT_RGB565_A8	fourcc_code('R', '5', 'A', '8')
 #define DRM_FORMAT_BGR565_A8	fourcc_code('B', '5', 'A', '8')
+
+/*
+ * 2 plane 10 bit per component YCrCb
+ * index 0 = Y plane, [31:0] x:Y2:Y1:Y0 2:10:10:10 little endian
+ * index 1 = Cb:Cr plane, [63:0] x:Cr2:Cb2:Cr1:x:Cb1:Cr0:Cb0 2:10:10:10:2:10:10:10 little endian
+ */
+#define DRM_FORMAT_XV15		fourcc_code('X', 'V', '1', '5') /* 2x2 subsampled Cr:Cb plane 2:10:10:10 */
+#define DRM_FORMAT_XV20		fourcc_code('X', 'V', '2', '0') /* 2x1 subsampled Cr:Cb plane 2:10:10:10 */
 
 /*
  * 2 plane YCbCr
@@ -395,6 +409,14 @@ extern "C" {
  */
 #define DRM_FORMAT_Q401		fourcc_code('Q', '4', '0', '1')
 
+/* 3 plane non-subsampled (444) YCbCr
+ * 10 bpc, 30 bits per sample image data in a single contiguous buffer.
+ * index 0: Y plane, [31:0] x:Y2:Y1:Y0 [2:10:10:10] little endian
+ * index 1: Cb plane, [31:0] x:Cb2:Cb1:Cb0 [2:10:10:10] little endian
+ * index 2: Cr plane, [31:0] x:Cr2:Cr1:Cr0 [2:10:10:10] little endian
+ */
+#define DRM_FORMAT_X403		fourcc_code('X', '4', '0', '3') /* non-subsampled Cb:Cr plane, 10 bit per channel */
+
 /*
  * 3 plane YCbCr LSB aligned
  * In order to use these formats in a similar fashion to MSB aligned ones
@@ -432,6 +454,77 @@ extern "C" {
 #define DRM_FORMAT_S416	fourcc_code('S', '4', '1', '6') /* non-subsampled Cb (1) and Cr (2) planes 16 bits per channel */
 
 /*
+ * 3 plane non-subsampled (444) YCbCr
+ * 12 bits per component, 24 bits contains 2 pixels
+ * index 0: Y plane, [23:12] Y1 [11:0] Y0
+ * index 1: Cb plane, [23:12] Cb1 [11:0] Cb0
+ * index 2: Cr plane, [23:12] Cr1 [11:0] Cr0
+ */
+#define DRM_FORMAT_X423 fourcc_code('X', '4', '2', '3')
+
+/* tile formats */
+#define DRM_FORMAT_T5M8  fourcc_code('T', '5', 'M', '8') /* Y/CbCr 4:0:0 8-bit 32x4 tiles */
+#define DRM_FORMAT_T5MA  fourcc_code('T', '5', 'M', 'A') /* Y/CbCr 4:0:0 10-bit 32x4 tiles */
+#define DRM_FORMAT_T5MC  fourcc_code('T', '5', 'M', 'C') /* Y/CbCr 4:0:0 12-bit 32x4 tiles */
+#define DRM_FORMAT_T6M8  fourcc_code('T', '6', 'M', '8') /* Y/CbCr 4:0:0 8-bit 64x4 tiles */
+#define DRM_FORMAT_T6MA  fourcc_code('T', '6', 'M', 'A') /* Y/CbCr 4:0:0 10-bit 64x4 tiles */
+#define DRM_FORMAT_T6MC  fourcc_code('T', '6', 'M', 'C') /* Y/CbCr 4:0:0 12-bit 64x4 tiles */
+#define DRM_FORMAT_T508  fourcc_code('T', '5', '0', '8') /* Y/CbCr 4:2:0 8-bit 32x4 tiles */
+#define DRM_FORMAT_T50A  fourcc_code('T', '5', '0', 'A') /* Y/CbCr 4:2:0 10-bit 32x4 tiles */
+#define DRM_FORMAT_T50C  fourcc_code('T', '5', '0', 'C') /* Y/CbCr 4:2:0 12-bit 32x4 tiles */
+#define DRM_FORMAT_T608  fourcc_code('T', '6', '0', '8') /* Y/CbCr 4:2:0 8-bit 64x4 tiles */
+#define DRM_FORMAT_T60A  fourcc_code('T', '6', '0', 'A') /* Y/CbCr 4:2:0 10-bit 64x4 tiles */
+#define DRM_FORMAT_T60C  fourcc_code('T', '6', '0', 'C') /* Y/CbCr 4:2:0 12-bit 64x4 tiles */
+#define DRM_FORMAT_T528  fourcc_code('T', '5', '2', '8') /* Y/CbCr 4:2:2 8-bit 32x4 tiles */
+#define DRM_FORMAT_T52A  fourcc_code('T', '5', '2', 'A') /* Y/CbCr 4:2:2 10-bit 32x4 tiles */
+#define DRM_FORMAT_T52C  fourcc_code('T', '5', '2', 'C') /* Y/CbCr 4:2:2 12-bit 32x4 tiles */
+#define DRM_FORMAT_T628  fourcc_code('T', '6', '2', '8') /* Y/CbCr 4:2:2 8-bit 64x4 tiles */
+#define DRM_FORMAT_T62A  fourcc_code('T', '6', '2', 'A') /* Y/CbCr 4:2:2 10-bit 64x4 tiles */
+#define DRM_FORMAT_T62C  fourcc_code('T', '6', '2', 'C') /* Y/CbCr 4:2:2 12-bit 64x4 tiles */
+#define DRM_FORMAT_T548  fourcc_code('T', '5', '4', '8') /* Y/CbCr 4:4:4 8-bit 32x4 tiles */
+#define DRM_FORMAT_T54A  fourcc_code('T', '5', '4', 'A') /* Y/CbCr 4:4:4 10-bit 32x4 tiles */
+#define DRM_FORMAT_T54C  fourcc_code('T', '5', '4', 'C') /* Y/CbCr 4:4:4 12-bit 32x4 tiles */
+#define DRM_FORMAT_T648  fourcc_code('T', '6', '4', '8') /* Y/CbCr 4:4:4 8-bit 64x4 tiles */
+#define DRM_FORMAT_T64A  fourcc_code('T', '6', '4', 'A') /* Y/CbCr 4:4:4 10-bit 64x4 tiles */
+#define DRM_FORMAT_T64C  fourcc_code('T', '6', '4', 'C') /* Y/CbCr 4:4:4 12-bit 64x4 tiles */
+
+/*
+ * 3 plane YCbCr LSB aligned
+ * In order to use these formats in a similar fashion to MSB aligned ones
+ * implementation can multiply the values by 2^6=64. For that reason the padding
+ * must only contain zeros.
+ * index 0 = Y plane, [15:0] z:Y [6:10] little endian
+ * index 1 = Cr plane, [15:0] z:Cr [6:10] little endian
+ * index 2 = Cb plane, [15:0] z:Cb [6:10] little endian
+ */
+#define DRM_FORMAT_S010	fourcc_code('S', '0', '1', '0') /* 2x2 subsampled Cb (1) and Cr (2) planes 10 bits per channel */
+#define DRM_FORMAT_S210	fourcc_code('S', '2', '1', '0') /* 2x1 subsampled Cb (1) and Cr (2) planes 10 bits per channel */
+#define DRM_FORMAT_S410	fourcc_code('S', '4', '1', '0') /* non-subsampled Cb (1) and Cr (2) planes 10 bits per channel */
+
+/*
+ * 3 plane YCbCr LSB aligned
+ * In order to use these formats in a similar fashion to MSB aligned ones
+ * implementation can multiply the values by 2^4=16. For that reason the padding
+ * must only contain zeros.
+ * index 0 = Y plane, [15:0] z:Y [4:12] little endian
+ * index 1 = Cr plane, [15:0] z:Cr [4:12] little endian
+ * index 2 = Cb plane, [15:0] z:Cb [4:12] little endian
+ */
+#define DRM_FORMAT_S012	fourcc_code('S', '0', '1', '2') /* 2x2 subsampled Cb (1) and Cr (2) planes 12 bits per channel */
+#define DRM_FORMAT_S212	fourcc_code('S', '2', '1', '2') /* 2x1 subsampled Cb (1) and Cr (2) planes 12 bits per channel */
+#define DRM_FORMAT_S412	fourcc_code('S', '4', '1', '2') /* non-subsampled Cb (1) and Cr (2) planes 12 bits per channel */
+
+/*
+ * 3 plane YCbCr
+ * index 0 = Y plane, [15:0] Y little endian
+ * index 1 = Cr plane, [15:0] Cr little endian
+ * index 2 = Cb plane, [15:0] Cb little endian
+ */
+#define DRM_FORMAT_S016	fourcc_code('S', '0', '1', '6') /* 2x2 subsampled Cb (1) and Cr (2) planes 16 bits per channel */
+#define DRM_FORMAT_S216	fourcc_code('S', '2', '1', '6') /* 2x1 subsampled Cb (1) and Cr (2) planes 16 bits per channel */
+#define DRM_FORMAT_S416	fourcc_code('S', '4', '1', '6') /* non-subsampled Cb (1) and Cr (2) planes 16 bits per channel */
+
+/*
  * 3 plane YCbCr
  * index 0: Y plane, [7:0] Y
  * index 1: Cb plane, [7:0] Cb
@@ -451,6 +544,10 @@ extern "C" {
 #define DRM_FORMAT_YUV444	fourcc_code('Y', 'U', '2', '4') /* non-subsampled Cb (1) and Cr (2) planes */
 #define DRM_FORMAT_YVU444	fourcc_code('Y', 'V', '2', '4') /* non-subsampled Cr (1) and Cb (2) planes */
 
+/* Greyscale formats */
+
+#define DRM_FORMAT_Y8		fourcc_code('G', 'R', 'E', 'Y')  /* 8-bit Y-only */
+#define DRM_FORMAT_Y10_LE32	fourcc_code('Y', '1', '0', 'P')  /* [31:0] x:Y2:Y1:Y0 2:10:10:10 little endian */
 
 /*
  * Format Modifiers:

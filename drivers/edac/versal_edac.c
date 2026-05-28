@@ -13,6 +13,7 @@
 #include <linux/platform_device.h>
 #include <linux/sizes.h>
 #include <linux/firmware/xlnx-zynqmp.h>
+#include <linux/firmware/xlnx-versal-error-events.h>
 #include <linux/firmware/xlnx-event-manager.h>
 
 #include "edac_module.h"
@@ -144,6 +145,8 @@
 #define XILINX_DRAM_SIZE_16G			4
 #define XILINX_DRAM_SIZE_32G			5
 #define NUM_UE_BITPOS				2
+#define NUM_ECC_BITS				72
+#define DATA_BITS				64
 
 /**
  * struct ecc_error_info - ECC error log information.
@@ -245,6 +248,72 @@ struct edac_priv {
 #endif
 };
 
+static int rowa[] = { 0x7, 0xB, 0x13, 0x23, 0x43, 0x83, 0xD, 0x15,
+		      0x25, 0x45, 0x85, 0x19, 0x29, 0x49, 0x89, 0x31,
+		      0x51, 0x91, 0x61, 0xa1, 0xc1, 0x0e, 0x16, 0x26,
+		      0x46, 0x86, 0x1a, 0x2a, 0x4a, 0x8a, 0x32, 0x52,
+		      0x92, 0x62, 0xa2, 0xc2, 0x1c, 0x2c, 0x4c, 0x8c,
+		      0x34, 0x54, 0x94, 0x64, 0xa4, 0xc4, 0x38, 0x58,
+		      0x98, 0x68, 0xa8, 0xc8, 0x70, 0xB0, 0xD0, 0xE0,
+		      0x1f, 0x2f, 0x4f, 0x8f, 0x37, 0x57, 0x97, 0x67,
+		      0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80 };
+
+/*
+ * Report the bit that was corrupted in the CE errors
+ *
+ * The function takes the data and the parity as inputs.
+ * It derive the corrupted bit from a fixed H Matrix and the data
+ * and parity.
+ *
+ */
+static void calculate_ce_bit_value(u32 eccr0_corr_err_data_hi, u32 regval, u32 parity)
+{
+	u8 rows[NUM_ECC_BITS] = {0};
+	u8 bit, xor[BITS_PER_BYTE], match = 0;
+	bool field, prev;
+	u64 data;
+	int i, j;
+
+	data = (u64)eccr0_corr_err_data_hi << 32;
+	data |= regval;
+
+	for (i = 0 ; i < DATA_BITS; i++) {
+		if (data & BIT(i))
+			rows[i] = rowa[i];
+	}
+
+	for (i = DATA_BITS ; i < NUM_ECC_BITS; i++) {
+		j = i - DATA_BITS;
+		if (parity & BIT(j))
+			rows[i] = rowa[i];
+	}
+
+	for (j = 0 ; j < BITS_PER_BYTE; j++) {
+		bit = rows[0] & BIT(j);
+		prev = !!bit;
+
+		for (i = 1 ; i < NUM_ECC_BITS; i++) {
+			bit = rows[i] & BIT(j);
+			field = !!bit;
+			if (field != prev)
+				prev = true;
+			else
+				prev = false;
+		}
+		xor[j] = prev;
+	}
+
+	for (j = 0 ; j < BITS_PER_BYTE; j++)
+		match |= xor[j] << j;
+
+	for (i = 0 ; i < NUM_ECC_BITS; i++) {
+		if (match == rowa[i]) {
+			edac_dbg(2, "bit found is  0x%08X\n", i);
+			return;
+		}
+	}
+}
+
 static void get_ce_error_info(struct edac_priv *priv)
 {
 	void __iomem *ddrmc_base;
@@ -270,6 +339,15 @@ static void get_ce_error_info(struct edac_priv *priv)
 	reghi = readl(ddrmc_base + ECCR1_CE_ADDR_HI_OFFSET);
 	p->ceinfo[1].i = regval | reghi << 32;
 	regval = readl(ddrmc_base + ECCR1_CE_ADDR_HI_OFFSET);
+
+	if (IS_ENABLED(CONFIG_EDAC_DEBUG)) {
+		u32 eccr0_corr_err_data_hi, par;
+
+		par = readl(ddrmc_base + ECCR0_CE_DATA_PAR_OFFSET);
+		regval = readl(ddrmc_base + ECCR0_CE_DATA_LO_OFFSET);
+		eccr0_corr_err_data_hi =  readl(ddrmc_base + ECCR0_CE_DATA_HI_OFFSET);
+		calculate_ce_bit_value(eccr0_corr_err_data_hi, regval, par);
+	}
 
 	edac_dbg(2, "ERR DATA: 0x%08X%08X ERR DATA PARITY: 0x%08X\n",
 		 readl(ddrmc_base + ECCR1_CE_DATA_LO_OFFSET),
@@ -464,9 +542,9 @@ static void err_callback(const u32 *payload, void *data)
 
 	regval = readl(priv->ddrmc_baseaddr + XDDR_ISR_OFFSET);
 
-	if (payload[EVENT] == XPM_EVENT_ERROR_MASK_DDRMC_CR)
+	if (payload[EVENT] == XPM_VERSAL_EVENT_ERROR_MASK_DDRMC_CR)
 		p->error_type = XDDR_ERR_TYPE_CE;
-	if (payload[EVENT] == XPM_EVENT_ERROR_MASK_DDRMC_NCR)
+	if (payload[EVENT] == XPM_VERSAL_EVENT_ERROR_MASK_DDRMC_NCR)
 		p->error_type = XDDR_ERR_TYPE_UE;
 
 	if (get_error_info(priv))
@@ -741,13 +819,13 @@ static void xddr_inject_data_ce_store(struct mem_ctl_info *mci, u8 ce_bitpos)
 	u32 ecc0_flip0, ecc1_flip0, ecc0_flip1, ecc1_flip1;
 	struct edac_priv *priv = mci->pvt_info;
 
-	if (ce_bitpos < ECCW0_FLIP0_BITS) {
+	if (ce_bitpos <= ECCW0_FLIP0_BITS) {
 		ecc0_flip0 = BIT(ce_bitpos);
 		ecc1_flip0 = BIT(ce_bitpos);
 		ecc0_flip1 = 0;
 		ecc1_flip1 = 0;
 	} else {
-		ce_bitpos = ce_bitpos - ECCW0_FLIP0_BITS;
+		ce_bitpos = ce_bitpos - ECCW0_FLIP0_BITS - 1;
 		ecc0_flip1 = BIT(ce_bitpos);
 		ecc1_flip1 = BIT(ce_bitpos);
 		ecc0_flip0 = 0;
@@ -876,17 +954,17 @@ static ssize_t inject_data_ue_store(struct file *file, const char __user *data,
 	if (ret)
 		return ret;
 
-	if (ue0 < ECCW0_FLIP0_BITS) {
+	if (ue0 <= ECCW0_FLIP0_BITS) {
 		val0 = BIT(ue0);
 	} else {
-		ue0 = ue0 - ECCW0_FLIP0_BITS;
+		ue0 = ue0 - ECCW0_FLIP0_BITS - 1;
 		val1 = BIT(ue0);
 	}
 
-	if (ue1 < ECCW0_FLIP0_BITS) {
+	if (ue1 <= ECCW0_FLIP0_BITS) {
 		val0 |= BIT(ue1);
 	} else {
-		ue1 = ue1 - ECCW0_FLIP0_BITS;
+		ue1 = ue1 - ECCW0_FLIP0_BITS - 1;
 		val1 |= BIT(ue1);
 	}
 
@@ -1138,7 +1216,8 @@ static int mc_probe(struct platform_device *pdev)
 	}
 
 	rc = xlnx_register_event(PM_NOTIFY_CB, VERSAL_EVENT_ERROR_PMC_ERR1,
-				 XPM_EVENT_ERROR_MASK_DDRMC_CR | XPM_EVENT_ERROR_MASK_DDRMC_NCR,
+				 XPM_VERSAL_EVENT_ERROR_MASK_DDRMC_CR |
+				 XPM_VERSAL_EVENT_ERROR_MASK_DDRMC_NCR,
 				 false, err_callback, mci);
 	if (rc) {
 		if (rc == -EACCES)
@@ -1174,8 +1253,8 @@ static void mc_remove(struct platform_device *pdev)
 #endif
 
 	xlnx_unregister_event(PM_NOTIFY_CB, VERSAL_EVENT_ERROR_PMC_ERR1,
-			      XPM_EVENT_ERROR_MASK_DDRMC_CR |
-			      XPM_EVENT_ERROR_MASK_DDRMC_NCR, err_callback, mci);
+			      XPM_VERSAL_EVENT_ERROR_MASK_DDRMC_CR |
+			      XPM_VERSAL_EVENT_ERROR_MASK_DDRMC_NCR, err_callback, mci);
 	edac_mc_del_mc(&pdev->dev);
 	edac_mc_free(mci);
 }
