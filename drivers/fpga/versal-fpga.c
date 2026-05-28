@@ -19,19 +19,57 @@ static int versal_fpga_ops_write_init(struct fpga_manager *mgr,
 	return 0;
 }
 
+static int versal_fpga_ops_write_sg(struct fpga_manager *mgr,
+				    struct sg_table *sgt)
+{
+	dma_addr_t dma_addr;
+	u32 pm_family_code = 0U;
+	u64 swapped_address = 0U;
+	int ret = 0;
+
+	dma_addr = sg_dma_address(sgt->sgl);
+
+	ret = zynqmp_pm_get_family_info(&pm_family_code);
+	if (ret < 0)
+		return ret;
+
+	if (pm_family_code == PM_VERSAL2_FAMILY_CODE)
+		swapped_address = ((u64)dma_addr << 32) | ((u64)dma_addr >> 32);
+	else
+		swapped_address = dma_addr;
+
+	ret = zynqmp_pm_load_pdi(PDI_SRC_DDR, swapped_address);
+
+	return ret;
+}
+
 static int versal_fpga_ops_write(struct fpga_manager *mgr,
 				 const char *buf, size_t size)
 {
 	dma_addr_t dma_addr = 0;
 	char *kbuf;
-	int ret;
+	int ret = 0;
+	u32 pm_family_code = 0U;
+	u64 swapped_address = 0U;
 
 	kbuf = dma_alloc_coherent(mgr->dev.parent, size, &dma_addr, GFP_KERNEL);
 	if (!kbuf)
 		return -ENOMEM;
 
 	memcpy(kbuf, buf, size);
-	ret = zynqmp_pm_load_pdi(PDI_SRC_DDR, dma_addr);
+
+	ret = zynqmp_pm_get_family_info(&pm_family_code);
+	if (ret < 0) {
+		dma_free_coherent(mgr->dev.parent, size, kbuf, dma_addr);
+		return ret;
+	}
+
+	if (pm_family_code == PM_VERSAL2_FAMILY_CODE)
+		swapped_address = ((u64)dma_addr << 32) | ((u64)dma_addr >> 32);
+	else
+		swapped_address = dma_addr;
+
+	ret = zynqmp_pm_load_pdi(PDI_SRC_DDR, swapped_address);
 	dma_free_coherent(mgr->dev.parent, size, kbuf, dma_addr);
 
 	return ret;
@@ -40,6 +78,7 @@ static int versal_fpga_ops_write(struct fpga_manager *mgr,
 static const struct fpga_manager_ops versal_fpga_ops = {
 	.write_init = versal_fpga_ops_write_init,
 	.write = versal_fpga_ops_write,
+	.write_sg = versal_fpga_ops_write_sg,
 };
 
 static int versal_fpga_probe(struct platform_device *pdev)

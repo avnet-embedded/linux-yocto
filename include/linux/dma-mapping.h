@@ -80,6 +80,19 @@
 #define DMA_ATTR_MMIO		(1UL << 10)
 
 /*
+ * DMA_ATTR_INVALIDATE_LINEAR_MAP: Invalidate the cacheable linear map alias
+ * after allocation and restore it before freeing. Use for non-coherent devices
+ * on platforms with invisible cache behavior (e.g., ARM A78 + CMN-600AE) to
+ * prevent stale cache returns via snoop filter back-snoops.
+ *
+ * Requires page-granular linear map (rodata=full on arm64) so that
+ * set_direct_map_invalid_noflush() can manipulate individual PTEs.
+ *
+ * TODO: Update Documentation/core-api/dma-attributes.rst with this attribute.
+ */
+#define DMA_ATTR_INVALIDATE_LINEAR_MAP	(1UL << 11)
+
+/*
  * DMA_ATTR_CPU_CACHE_CLEAN: Indicates the CPU will not dirty any cacheline
  * overlapping this buffer while it is mapped for DMA. All mappings sharing
  * a cacheline must have this attribute for this to be considered safe.

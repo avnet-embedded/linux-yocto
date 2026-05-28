@@ -2,7 +2,8 @@
 /*
  * ZynqMP pin controller
  *
- * Copyright (C) 2020, 2021 Xilinx, Inc.
+ * Copyright (C), 2020 - 2022 Xilinx, Inc.
+ * Copyright (C), 2022 - 2025 Advanced Micro Devices, Inc.
  *
  * Sai Krishna Potthuri <lakshmi.sai.krishna.potthuri@xilinx.com>
  * Rajan Vaja <rajan.vaja@xilinx.com>
@@ -50,6 +51,10 @@
 
 #define VERSAL_PINCTRL_ATTR_NODETYPE_MASK	GENMASK(19, 14)
 #define VERSAL_PINCTRL_NODETYPE_LPD_MIO		BIT(0)
+
+#define VERSAL_LPD_MIO_BASE_ID		0x14104001
+#define VERSAL_PMC_MIO_BASE_ID		0x1410801B
+#define VERSAL_LPD_MIO_END_PIN		25
 
 /**
  * struct zynqmp_pmux_function - a pinmux function
@@ -100,7 +105,6 @@ struct zynqmp_pctrl_group {
 
 static struct pinctrl_desc zynqmp_desc;
 static u32 family_code;
-static u32 sub_family_code;
 
 static int zynqmp_pctrl_get_groups_count(struct pinctrl_dev *pctldev)
 {
@@ -605,7 +609,7 @@ static int zynqmp_pinctrl_prepare_func_groups(struct device *dev, u32 fid,
 				return -ENOMEM;
 
 			for (pin = 0; pin < groups[resp[i]].npins; pin++) {
-				if (family_code == ZYNQMP_FAMILY_CODE)
+				if (family_code == PM_ZYNQMP_FAMILY_CODE)
 					__set_bit(groups[resp[i]].pins[pin], used_pins);
 				else
 					__set_bit((u8)groups[resp[i]].pins[pin] - 1, used_pins);
@@ -903,6 +907,43 @@ static int versal_pinctrl_get_attributes(u32 pin_idx, u32 *response)
 	return 0;
 }
 
+static int versal_pinctrl_prepare_pin_desc_nopm(struct device *dev,
+						const struct pinctrl_pin_desc **zynqmp_pins,
+						unsigned int *npins)
+{
+	struct pinctrl_pin_desc *pins, *pin;
+	int ret;
+	int i;
+
+	ret = zynqmp_pinctrl_get_num_pins(npins);
+	if (ret)
+		return ret;
+
+	pins = devm_kzalloc(dev, sizeof(*pins) * *npins, GFP_KERNEL);
+	if (!pins)
+		return -ENOMEM;
+
+	for (i = 0; i < *npins; i++) {
+		pin = &pins[i];
+		if (i <= VERSAL_LPD_MIO_END_PIN) {
+			pin->number = VERSAL_LPD_MIO_BASE_ID + i;
+			pin->name = devm_kasprintf(dev, GFP_KERNEL, "%s%d",
+						   VERSAL_LPD_PIN_PREFIX, i);
+		} else {
+			pin->number = VERSAL_PMC_MIO_BASE_ID + (i - (VERSAL_LPD_MIO_END_PIN + 1));
+			pin->name = devm_kasprintf(dev, GFP_KERNEL, "%s%d", VERSAL_PMC_PIN_PREFIX,
+						   (i - VERSAL_LPD_MIO_END_PIN) - 1);
+		}
+
+		if (!pin->name)
+			return -ENOMEM;
+	}
+
+	*zynqmp_pins = pins;
+
+	return 0;
+}
+
 static int versal_pinctrl_prepare_pin_desc(struct device *dev,
 					   const struct pinctrl_pin_desc **zynqmp_pins,
 					   unsigned int *npins)
@@ -912,8 +953,10 @@ static int versal_pinctrl_prepare_pin_desc(struct device *dev,
 	int ret, i;
 
 	ret = zynqmp_pm_is_function_supported(PM_QUERY_DATA, PM_QID_PINCTRL_GET_ATTRIBUTES);
-	if (ret)
-		return ret;
+	if (ret) {
+		dev_info(dev, "This solution will be deprecated in 2026.1, use latest Versal PLM");
+		return versal_pinctrl_prepare_pin_desc_nopm(dev, zynqmp_pins, npins);
+	}
 
 	ret = zynqmp_pinctrl_get_num_pins(npins);
 	if (ret)
@@ -958,11 +1001,11 @@ static int zynqmp_pinctrl_probe(struct platform_device *pdev)
 	if (!pctrl)
 		return -ENOMEM;
 
-	ret = zynqmp_pm_get_family_info(&family_code, &sub_family_code);
+	ret = zynqmp_pm_get_family_info(&family_code);
 	if (ret < 0)
 		return ret;
 
-	if (family_code == ZYNQMP_FAMILY_CODE) {
+	if (family_code == PM_ZYNQMP_FAMILY_CODE) {
 		ret = zynqmp_pinctrl_prepare_pin_desc(&pdev->dev, &zynqmp_desc.pins,
 						      &zynqmp_desc.npins);
 	} else {

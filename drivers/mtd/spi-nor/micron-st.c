@@ -5,11 +5,9 @@
  */
 
 #include <linux/mtd/spi-nor.h>
+#include <linux/of.h>
 
 #include "core.h"
-
-/* flash_info mfr_flag. Used to read proprietary FSR register. */
-#define USE_FSR		BIT(0)
 
 #define SPINOR_OP_MT_DIE_ERASE	0xc4	/* Chip (die) erase opcode */
 #define SPINOR_OP_RDFSR		0x70	/* Read flag status register */
@@ -48,6 +46,36 @@
 		   SPI_MEM_OP_NO_DUMMY,					\
 		   SPI_MEM_OP_NO_DATA)
 
+static int micron_st_nor_phy_enable(struct spi_nor *nor)
+{
+	struct spi_mem_op op;
+	u8 *buf = nor->bouncebuf;
+	int ret;
+
+	buf[0] = SPINOR_MT_EXSPI;
+	op = (struct spi_mem_op)
+		MICRON_ST_NOR_WR_ANY_REG_OP(nor->addr_nbytes,
+					    SPINOR_REG_MT_CFR0V, 1, buf);
+	ret = spi_nor_write_any_volatile_reg(nor, &op, SNOR_PROTO_1_1_1);
+	if (ret)
+		goto ret;
+
+	nor->spimem->spi->controller->flags |= SPI_CONTROLLER_SDR_PHY;
+	/* Read flash ID to make sure the switch was successful. */
+	ret = spi_nor_read_id(nor, 0, 0, buf, SNOR_PROTO_1_1_1);
+	if (ret) {
+		dev_dbg(nor->dev, "error %d reading JEDEC ID after disabling 1D-1D-1D mode\n", ret);
+		goto ret;
+	}
+
+	if (memcmp(buf, nor->info->id->bytes, nor->info->id->len))
+		goto ret;
+
+	return 0;
+ret:
+	nor->spimem->spi->controller->flags &= ~SPI_CONTROLLER_SDR_PHY;
+	return 0;
+}
 static int micron_st_nor_octal_dtr_en(struct spi_nor *nor)
 {
 	struct spi_mem_op op;
@@ -129,7 +157,10 @@ static int micron_st_nor_set_octal_dtr(struct spi_nor *nor, bool enable)
 
 static void mt35xu512aba_default_init(struct spi_nor *nor)
 {
-	nor->params->set_octal_dtr = micron_st_nor_set_octal_dtr;
+	struct spi_nor_flash_parameter *params = nor->params;
+
+	params->set_octal_dtr = micron_st_nor_set_octal_dtr;
+	params->phy_enable = micron_st_nor_phy_enable;
 }
 
 static int mt35xu512aba_post_sfdp_fixup(struct spi_nor *nor)
@@ -159,28 +190,6 @@ static const struct spi_nor_fixups mt35xu512aba_fixups = {
 	.post_sfdp = mt35xu512aba_post_sfdp_fixup,
 };
 
-static const struct flash_info micron_nor_parts[] = {
-	{
-		.id = SNOR_ID(0x2c, 0x5b, 0x1a),
-		.name = "mt35xu512aba",
-		.sector_size = SZ_128K,
-		.size = SZ_64M,
-		.no_sfdp_flags = SECT_4K | SPI_NOR_OCTAL_READ |
-				 SPI_NOR_OCTAL_DTR_READ | SPI_NOR_OCTAL_DTR_PP,
-		.mfr_flags = USE_FSR,
-		.fixup_flags = SPI_NOR_4B_OPCODES | SPI_NOR_IO_MODE_EN_VOLATILE,
-		.fixups = &mt35xu512aba_fixups,
-	}, {
-		.id = SNOR_ID(0x2c, 0x5b, 0x1c),
-		.name = "mt35xu02g",
-		.sector_size = SZ_128K,
-		.size = SZ_256M,
-		.no_sfdp_flags = SECT_4K | SPI_NOR_OCTAL_READ,
-		.mfr_flags = USE_FSR,
-		.fixup_flags = SPI_NOR_4B_OPCODES,
-	},
-};
-
 static int mt25qu512a_post_bfpt_fixup(struct spi_nor *nor,
 				      const struct sfdp_parameter_header *bfpt_header,
 				      const struct sfdp_bfpt *bfpt)
@@ -193,6 +202,28 @@ static const struct spi_nor_fixups mt25qu512a_fixups = {
 	.post_bfpt = mt25qu512a_post_bfpt_fixup,
 };
 
+/*
+ * Pick the cs_index_mask used by the late_init hooks for EN4B. In
+ * parallel-memories configurations EN4B must reach every flash, so
+ * build a mask from the parallel-memories count. nor->num_flash and
+ * SNOR_F_HAS_PARALLEL are not yet populated at this point, so parse
+ * the device tree directly.
+ */
+static u32 st_nor_get_init_cs_mask(struct spi_nor *nor)
+{
+	struct device_node *np = spi_nor_get_flash_node(nor);
+	int count;
+
+	count = of_property_count_u64_elems(np, "parallel-memories");
+	if (count <= 0)
+		return SPI_NOR_ENABLE_CS0;
+
+	if (count > SPI_DEVICE_CS_CNT_MAX)
+		count = SPI_DEVICE_CS_CNT_MAX;
+
+	return GENMASK(count - 1, 0);
+}
+
 static int st_nor_four_die_late_init(struct spi_nor *nor)
 {
 	struct spi_nor_flash_parameter *params = nor->params;
@@ -200,6 +231,7 @@ static int st_nor_four_die_late_init(struct spi_nor *nor)
 	params->die_erase_opcode = SPINOR_OP_MT_DIE_ERASE;
 	params->n_dice = 4;
 
+	nor->spimem->spi->cs_index_mask = st_nor_get_init_cs_mask(nor);
 	/*
 	 * Unfortunately the die erase opcode does not have a 4-byte opcode
 	 * correspondent for these flashes. The SFDP 4BAIT table fails to
@@ -216,6 +248,7 @@ static int st_nor_two_die_late_init(struct spi_nor *nor)
 	params->die_erase_opcode = SPINOR_OP_MT_DIE_ERASE;
 	params->n_dice = 2;
 
+	nor->spimem->spi->cs_index_mask = st_nor_get_init_cs_mask(nor);
 	/*
 	 * Unfortunately the die erase opcode does not have a 4-byte opcode
 	 * correspondent for these flashes. The SFDP 4BAIT table fails to
@@ -226,15 +259,65 @@ static int st_nor_two_die_late_init(struct spi_nor *nor)
 }
 
 static const struct spi_nor_fixups n25q00_fixups = {
+	.post_bfpt = mt25qu512a_post_bfpt_fixup,
 	.late_init = st_nor_four_die_late_init,
 };
 
 static const struct spi_nor_fixups mt25q01_fixups = {
+	.default_init = mt35xu512aba_default_init,
+	.post_sfdp = mt35xu512aba_post_sfdp_fixup,
 	.late_init = st_nor_two_die_late_init,
 };
 
 static const struct spi_nor_fixups mt25q02_fixups = {
+	.default_init = mt35xu512aba_default_init,
+	.post_sfdp = mt35xu512aba_post_sfdp_fixup,
 	.late_init = st_nor_four_die_late_init,
+};
+
+static const struct spi_nor_fixups st_nor_two_die_fixups = {
+	.post_bfpt = mt25qu512a_post_bfpt_fixup,
+	.late_init = st_nor_two_die_late_init,
+};
+
+static const struct flash_info micron_nor_parts[] = {
+	{
+		.id = SNOR_ID(0x2c, 0x5b, 0x1a),
+		.name = "mt35xu512aba",
+		.sector_size = SZ_128K,
+		.size = SZ_64M,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
+				SPI_NOR_BP3_SR_BIT6,
+		.no_sfdp_flags = SECT_4K | SPI_NOR_OCTAL_READ |
+				 SPI_NOR_OCTAL_DTR_READ | SPI_NOR_OCTAL_DTR_PP,
+		.mfr_flags = USE_FSR,
+		.fixup_flags = SPI_NOR_4B_OPCODES | SPI_NOR_IO_MODE_EN_VOLATILE,
+		.fixups = &mt35xu512aba_fixups,
+	}, {
+		.id = SNOR_ID(0x2c, 0x5b, 0x1b),
+		.name = "mt35xu01g",
+		.sector_size = SZ_128K,
+		.size = SZ_128M,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
+				SPI_NOR_BP3_SR_BIT6,
+		.no_sfdp_flags = SECT_4K | SPI_NOR_OCTAL_READ |
+			SPI_NOR_OCTAL_DTR_READ | SPI_NOR_OCTAL_DTR_PP,
+		.mfr_flags = USE_FSR,
+		.fixup_flags = SPI_NOR_4B_OPCODES | SPI_NOR_IO_MODE_EN_VOLATILE,
+		.fixups = &mt25q01_fixups
+	}, {
+		.id = SNOR_ID(0x2c, 0x5b, 0x1c),
+		.name = "mt35xu02g",
+		.sector_size = SZ_128K,
+		.size = SZ_256M,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
+				SPI_NOR_BP3_SR_BIT6,
+		.no_sfdp_flags = SECT_4K | SPI_NOR_OCTAL_READ |
+				SPI_NOR_OCTAL_DTR_READ | SPI_NOR_OCTAL_DTR_PP,
+		.mfr_flags = USE_FSR,
+		.fixup_flags = SPI_NOR_4B_OPCODES | SPI_NOR_IO_MODE_EN_VOLATILE,
+		.fixups = &mt25q02_fixups
+	},
 };
 
 static const struct flash_info st_nor_parts[] = {
@@ -375,53 +458,66 @@ static const struct flash_info st_nor_parts[] = {
 		.name = "n25q128a13",
 		.size = SZ_16M,
 		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
-			 SPI_NOR_BP3_SR_BIT6,
+			 SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_QUAD_READ,
 		.mfr_flags = USE_FSR,
+		.fixups = &mt25qu512a_fixups,
 	}, {
 		.id = SNOR_ID(0x20, 0xba, 0x19, 0x10, 0x44, 0x00),
 		.name = "mt25ql256a",
 		.size = SZ_32M,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
+			 SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,
 		.fixup_flags = SPI_NOR_4B_OPCODES,
 		.mfr_flags = USE_FSR,
+		.fixups = &mt25qu512a_fixups,
 	}, {
 		.id = SNOR_ID(0x20, 0xba, 0x19),
 		.name = "n25q256a",
 		.size = SZ_32M,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
+			 SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,
 		.mfr_flags = USE_FSR,
+		.fixups = &mt25qu512a_fixups
 	}, {
 		.id = SNOR_ID(0x20, 0xba, 0x20, 0x10, 0x44, 0x00),
 		.name = "mt25ql512a",
 		.size = SZ_64M,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
+			 SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,
 		.fixup_flags = SPI_NOR_4B_OPCODES,
 		.mfr_flags = USE_FSR,
+		.fixups = &st_nor_two_die_fixups
 	}, {
 		.id = SNOR_ID(0x20, 0xba, 0x20),
 		.name = "n25q512ax3",
 		.size = SZ_64M,
 		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
-			 SPI_NOR_BP3_SR_BIT6,
+			 SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_QUAD_READ,
 		.mfr_flags = USE_FSR,
+		.fixups = &st_nor_two_die_fixups
 	}, {
 		.id = SNOR_ID(0x20, 0xba, 0x21),
 		.name = "n25q00",
 		.size = SZ_128M,
 		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
-			 SPI_NOR_BP3_SR_BIT6,
+			 SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_QUAD_READ,
 		.mfr_flags = USE_FSR,
-		.fixups = &n25q00_fixups,
+		.fixups = &n25q00_fixups
 	}, {
 		.id = SNOR_ID(0x20, 0xba, 0x22),
 		.name = "mt25ql02g",
 		.size = SZ_256M,
+		.flags = NO_CHIP_ERASE | SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB |
+		      SPI_NOR_4BIT_BP | SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_QUAD_READ,
 		.mfr_flags = USE_FSR,
-		.fixups = &mt25q02_fixups,
+		.fixups = &n25q00_fixups
 	}, {
 		.id = SNOR_ID(0x20, 0xbb, 0x15),
 		.name = "n25q016a",
@@ -437,65 +533,82 @@ static const struct flash_info st_nor_parts[] = {
 		.name = "n25q064a",
 		.size = SZ_8M,
 		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
-			 SPI_NOR_BP3_SR_BIT6,
+			 SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_QUAD_READ,
+		.fixups = &mt25qu512a_fixups
 	}, {
 		.id = SNOR_ID(0x20, 0xbb, 0x18),
 		.name = "n25q128a11",
 		.size = SZ_16M,
 		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
-			 SPI_NOR_BP3_SR_BIT6,
+			 SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_QUAD_READ,
 		.mfr_flags = USE_FSR,
+		.fixups = &mt25qu512a_fixups
 	}, {
 		.id = SNOR_ID(0x20, 0xbb, 0x19, 0x10, 0x44, 0x00),
 		.name = "mt25qu256a",
 		.size = SZ_32M,
 		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
-			 SPI_NOR_BP3_SR_BIT6,
+			 SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,
 		.fixup_flags = SPI_NOR_4B_OPCODES,
 		.mfr_flags = USE_FSR,
+		.fixups = &mt25qu512a_fixups
 	}, {
 		.id = SNOR_ID(0x20, 0xbb, 0x19),
 		.name = "n25q256ax1",
 		.size = SZ_32M,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
+			 SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_QUAD_READ,
 		.mfr_flags = USE_FSR,
+		.fixups = &mt25qu512a_fixups
 	}, {
 		.id = SNOR_ID(0x20, 0xbb, 0x20, 0x10, 0x44, 0x00),
 		.name = "mt25qu512a",
+		.size = SZ_64M,
 		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
-			 SPI_NOR_BP3_SR_BIT6,
+			 SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE,
+		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,
 		.mfr_flags = USE_FSR,
-		.fixups = &mt25qu512a_fixups,
+		.fixups = &st_nor_two_die_fixups
 	}, {
 		.id = SNOR_ID(0x20, 0xbb, 0x20),
 		.name = "n25q512a",
 		.size = SZ_64M,
 		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
-			 SPI_NOR_BP3_SR_BIT6,
+			 SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_QUAD_READ,
 		.mfr_flags = USE_FSR,
+		.fixups = &st_nor_two_die_fixups
 	}, {
 		.id = SNOR_ID(0x20, 0xbb, 0x21, 0x10, 0x44, 0x00),
 		.name = "mt25qu01g",
+		.size = SZ_128M,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
+			 SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE,
+		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,
 		.mfr_flags = USE_FSR,
-		.fixups = &mt25q01_fixups,
+		.fixups = &st_nor_two_die_fixups
 	}, {
 		.id = SNOR_ID(0x20, 0xbb, 0x21),
 		.name = "n25q00a",
 		.size = SZ_128M,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
+		      SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_QUAD_READ,
 		.mfr_flags = USE_FSR,
-		.fixups = &n25q00_fixups,
+		.fixups = &n25q00_fixups
 	}, {
 		.id = SNOR_ID(0x20, 0xbb, 0x22),
 		.name = "mt25qu02g",
 		.size = SZ_256M,
+		.flags = SPI_NOR_HAS_LOCK | SPI_NOR_HAS_TB | SPI_NOR_4BIT_BP |
+		      SPI_NOR_BP3_SR_BIT6 | NO_CHIP_ERASE,
 		.no_sfdp_flags = SECT_4K | SPI_NOR_DUAL_READ | SPI_NOR_QUAD_READ,
 		.mfr_flags = USE_FSR,
-		.fixups = &mt25q02_fixups,
+		.fixups = &n25q00_fixups
 	}
 };
 
@@ -525,6 +638,9 @@ static int micron_st_nor_read_fsr(struct spi_nor *nor, u8 *fsr)
 			op.data.nbytes = 2;
 		}
 
+		if (nor->flags & SNOR_F_HAS_PARALLEL)
+			op.data.nbytes = 2;
+
 		spi_nor_spimem_setup_op(nor, &op, nor->reg_proto);
 
 		ret = spi_mem_exec_op(nor->spimem, &op);
@@ -536,6 +652,8 @@ static int micron_st_nor_read_fsr(struct spi_nor *nor, u8 *fsr)
 	if (ret)
 		dev_dbg(nor->dev, "error %d reading FSR\n", ret);
 
+	if (nor->flags & SNOR_F_HAS_PARALLEL)
+		fsr[0] &= fsr[1];
 	return ret;
 }
 

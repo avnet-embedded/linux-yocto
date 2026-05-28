@@ -16,6 +16,7 @@
 #include <linux/of.h>
 #include <linux/of_irq.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/v4l2-subdev.h>
 #include <media/media-entity.h>
 #include <media/mipi-csi2.h>
@@ -49,6 +50,7 @@
 
 #define XCSI_ISR_FR		BIT(31)
 #define XCSI_ISR_VCXFE		BIT(30)
+#define XCSI_ISR_YUV420		BIT(28)
 #define XCSI_ISR_WCC		BIT(22)
 #define XCSI_ISR_ILC		BIT(21)
 #define XCSI_ISR_SPFIFOF	BIT(20)
@@ -70,7 +72,7 @@
 #define XCSI_ISR_VC0FSYNCERR	BIT(1)
 #define XCSI_ISR_VC0FLVLERR	BIT(0)
 
-#define XCSI_ISR_ALLINTR_MASK	(0xc07e3fff)
+#define XCSI_ISR_ALLINTR_MASK	(0xd07e3fff)
 
 /*
  * Removed VCXFE mask as it doesn't exist in IER
@@ -97,7 +99,6 @@
 #define XCSI_DLXINFR_STOP	BIT(5)
 #define XCSI_DLXINFR_SOTERR	BIT(1)
 #define XCSI_DLXINFR_SOTSYNCERR	BIT(0)
-#define XCSI_MAXDL_COUNT	0x4
 
 #define XCSI_VCXINF1R_OFFSET		0x60
 #define XCSI_VCXINF1R_LINECOUNT		GENMASK(31, 16)
@@ -122,6 +123,26 @@
 
 #define XCSI_NEXTREG_OFFSET	4
 
+#define XCSI_PHY_MODE_CPHY	0
+#define XCSI_PHY_MODE_DPHY	1
+
+/* Feature flags */
+#define XCSI_HAS_PHY_MODE	BIT(0)
+
+/**
+ * struct xcsi2rxss_feature - IP version feature configuration
+ * @flags: Bitmask of features enabled in this IP version
+ */
+struct xcsi2rxss_feature {
+	u32 flags;
+};
+
+static const struct xcsi2rxss_feature xcsi2rxss_cfg_v50 = { };
+
+static const struct xcsi2rxss_feature xcsi2rxss_cfg_v60 = {
+	.flags = XCSI_HAS_PHY_MODE,
+};
+
 /* There are 2 events frame sync and frame level error per VC */
 #define XCSI_VCX_NUM_EVENTS	((XCSI_MAX_VCX - XCSI_MAX_VC) * 2)
 
@@ -138,6 +159,7 @@ struct xcsi2rxss_event {
 static const struct xcsi2rxss_event xcsi2rxss_events[] = {
 	{ XCSI_ISR_FR, "Frame Received" },
 	{ XCSI_ISR_VCXFE, "VCX Frame Errors" },
+	{ XCSI_ISR_YUV420, "YUV 420 Word Count Errors" },
 	{ XCSI_ISR_WCC, "Word Count Errors" },
 	{ XCSI_ISR_ILC, "Invalid Lane Count Error" },
 	{ XCSI_ISR_SPFIFOF, "Short Packet FIFO OverFlow Error" },
@@ -167,6 +189,7 @@ static const struct xcsi2rxss_event xcsi2rxss_events[] = {
  * and media bus formats
  */
 static const u32 xcsi2dt_mbus_lut[][2] = {
+	{ MIPI_CSI2_DT_YUV420_8B, MEDIA_BUS_FMT_VYYUYY8_1X24 },
 	{ MIPI_CSI2_DT_YUV422_8B, MEDIA_BUS_FMT_UYVY8_1X16 },
 	{ MIPI_CSI2_DT_YUV422_10B, MEDIA_BUS_FMT_UYVY10_1X20 },
 	{ MIPI_CSI2_DT_RGB444, 0 },
@@ -174,16 +197,21 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
 	{ MIPI_CSI2_DT_RGB565, 0 },
 	{ MIPI_CSI2_DT_RGB666, 0 },
 	{ MIPI_CSI2_DT_RGB888, MEDIA_BUS_FMT_RBG888_1X24 },
+	{ MIPI_CSI2_DT_RGB888, MEDIA_BUS_FMT_GBR888_1X24 },
+	{ MIPI_CSI2_DT_RGB888, MEDIA_BUS_FMT_RGB888_1X24 },
+	{ MIPI_CSI2_DT_RGB888, MEDIA_BUS_FMT_BGR888_1X24 },
 	{ MIPI_CSI2_DT_RAW6, 0 },
 	{ MIPI_CSI2_DT_RAW7, 0 },
 	{ MIPI_CSI2_DT_RAW8, MEDIA_BUS_FMT_SRGGB8_1X8 },
 	{ MIPI_CSI2_DT_RAW8, MEDIA_BUS_FMT_SBGGR8_1X8 },
 	{ MIPI_CSI2_DT_RAW8, MEDIA_BUS_FMT_SGBRG8_1X8 },
 	{ MIPI_CSI2_DT_RAW8, MEDIA_BUS_FMT_SGRBG8_1X8 },
+	{ MIPI_CSI2_DT_RAW8, MEDIA_BUS_FMT_Y8_1X8 },
 	{ MIPI_CSI2_DT_RAW10, MEDIA_BUS_FMT_SRGGB10_1X10 },
 	{ MIPI_CSI2_DT_RAW10, MEDIA_BUS_FMT_SBGGR10_1X10 },
 	{ MIPI_CSI2_DT_RAW10, MEDIA_BUS_FMT_SGBRG10_1X10 },
 	{ MIPI_CSI2_DT_RAW10, MEDIA_BUS_FMT_SGRBG10_1X10 },
+	{ MIPI_CSI2_DT_RAW10, MEDIA_BUS_FMT_Y10_1X10 },
 	{ MIPI_CSI2_DT_RAW12, MEDIA_BUS_FMT_SRGGB12_1X12 },
 	{ MIPI_CSI2_DT_RAW12, MEDIA_BUS_FMT_SBGGR12_1X12 },
 	{ MIPI_CSI2_DT_RAW12, MEDIA_BUS_FMT_SGBRG12_1X12 },
@@ -193,6 +221,7 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
 	{ MIPI_CSI2_DT_RAW16, MEDIA_BUS_FMT_SBGGR16_1X16 },
 	{ MIPI_CSI2_DT_RAW16, MEDIA_BUS_FMT_SGBRG16_1X16 },
 	{ MIPI_CSI2_DT_RAW16, MEDIA_BUS_FMT_SGRBG16_1X16 },
+	{ MIPI_CSI2_DT_RAW16, MEDIA_BUS_FMT_Y16_1X16 },
 	{ MIPI_CSI2_DT_RAW20, 0 },
 };
 
@@ -215,12 +244,14 @@ static const u32 xcsi2dt_mbus_lut[][2] = {
  * @streaming: Flag for storing streaming state
  * @enable_active_lanes: If number of active lanes can be modified
  * @en_vcx: If more than 4 VC are enabled
+ * @is_cphy: true if C-PHY mode, false if D-PHY mode
+ * @cfg: Pointer to IP version feature config struct
  *
  * This structure contains the device driver related parameters
  */
 struct xcsi2rxss_state {
 	struct v4l2_subdev subdev;
-	struct v4l2_mbus_framefmt format;
+	struct v4l2_mbus_framefmt format[XCSI_MEDIA_PADS];
 	struct v4l2_mbus_framefmt default_format;
 	u32 events[XCSI_NUM_EVENTS];
 	u32 vcx_events[XCSI_VCX_NUM_EVENTS];
@@ -237,6 +268,8 @@ struct xcsi2rxss_state {
 	bool streaming;
 	bool enable_active_lanes;
 	bool en_vcx;
+	bool is_cphy;
+	const struct xcsi2rxss_feature *cfg;
 };
 
 static const struct clk_bulk_data xcsi2rxss_clks[] = {
@@ -408,16 +441,20 @@ static int xcsi2rxss_log_status(struct v4l2_subdev *sd)
 	dev_info(dev, "Soft reset/Core disable in progress = %s\n",
 		 data & XCSI_CSR_RIPCD ? "true" : "false");
 
-	/* Clk & Lane Info  */
-	dev_info(dev, "******** Clock Lane Info *********\n");
-	data = xcsi2rxss_read(xcsi2rxss, XCSI_CLKINFR_OFFSET);
-	dev_info(dev, "Clock Lane in Stop State = %s\n",
-		 data & XCSI_CLKINFR_STOP ? "true" : "false");
+	if (!xcsi2rxss->is_cphy) {
+		dev_info(dev, "******** Clock Lane Info *********\n");
+		data = xcsi2rxss_read(xcsi2rxss, XCSI_CLKINFR_OFFSET);
+		dev_info(dev, "Clock Lane in Stop State = %s\n",
+			 data & XCSI_CLKINFR_STOP ? "true" : "false");
+	}
 
-	dev_info(dev, "******** Data Lane Info *********\n");
-	dev_info(dev, "Lane\tSoT Error\tSoT Sync Error\tStop State\n");
+	dev_info(dev, "******** Data %s Info *********\n",
+		 xcsi2rxss->is_cphy ? "Trio" : "Lane");
+	dev_info(dev, "%s\tSoT Error\tSoT Sync Error\tStop State\n",
+		 xcsi2rxss->is_cphy ? "Trio" : "Lane");
+
 	reg = XCSI_DLXINFR_OFFSET;
-	for (i = 0; i < XCSI_MAXDL_COUNT; i++) {
+	for (i = 0; i < xcsi2rxss->max_num_lanes; i++) {
 		data = xcsi2rxss_read(xcsi2rxss, reg);
 
 		dev_info(dev, "%d\t%s\t\t%s\t\t%s\n", i,
@@ -466,12 +503,15 @@ static int xcsi2rxss_log_status(struct v4l2_subdev *sd)
 static struct v4l2_subdev *xcsi2rxss_get_remote_subdev(struct media_pad *local)
 {
 	struct media_pad *remote;
+	struct v4l2_subdev *sd;
 
 	remote = media_pad_remote_pad_first(local);
 	if (!remote || !is_media_entity_v4l2_subdev(remote->entity))
-		return NULL;
+		sd = NULL;
+	else
+		sd = media_entity_to_v4l2_subdev(remote->entity);
 
-	return media_entity_to_v4l2_subdev(remote->entity);
+	return sd;
 }
 
 static int xcsi2rxss_start_stream(struct xcsi2rxss_state *state)
@@ -497,7 +537,12 @@ static int xcsi2rxss_start_stream(struct xcsi2rxss_state *state)
 	state->rsubdev =
 		xcsi2rxss_get_remote_subdev(&state->pads[XVIP_PAD_SINK]);
 
-	ret = v4l2_subdev_call(state->rsubdev, video, s_stream, 1);
+	if (!state->rsubdev) {
+		ret = -ENODEV;
+		goto exit_start_stream;
+	}
+
+exit_start_stream:
 	if (ret) {
 		/* disable interrupts */
 		xcsi2rxss_clr(state, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
@@ -513,8 +558,6 @@ static int xcsi2rxss_start_stream(struct xcsi2rxss_state *state)
 
 static void xcsi2rxss_stop_stream(struct xcsi2rxss_state *state)
 {
-	v4l2_subdev_call(state->rsubdev, video, s_stream, 0);
-
 	/* disable interrupts */
 	xcsi2rxss_clr(state, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
 	xcsi2rxss_clr(state, XCSI_GIER_OFFSET, XCSI_GIER_GIE);
@@ -572,8 +615,11 @@ static irqreturn_t xcsi2rxss_irq_handler(int irq, void *data)
 	 * Stream line buffer full
 	 * This means there is a backpressure from downstream IP
 	 */
-	if (status & XCSI_ISR_SLBF) {
-		dev_alert_ratelimited(dev, "Stream Line Buffer Full!\n");
+	if (status & (XCSI_ISR_SLBF | XCSI_ISR_YUV420)) {
+		if (status & XCSI_ISR_SLBF)
+			dev_alert_ratelimited(dev, "Stream Line Buffer Full!\n");
+		if (status & XCSI_ISR_YUV420)
+			dev_alert_ratelimited(dev, "YUV 420 Word count error!\n");
 
 		/* disable interrupts */
 		xcsi2rxss_clr(state, XCSI_IER_OFFSET, XCSI_IER_INTR_MASK);
@@ -651,16 +697,33 @@ __xcsi2rxss_get_pad_format(struct xcsi2rxss_state *xcsi2rxss,
 			   struct v4l2_subdev_state *sd_state,
 			   unsigned int pad, u32 which)
 {
+	struct v4l2_mbus_framefmt *get_fmt;
+
 	switch (which) {
 	case V4L2_SUBDEV_FORMAT_TRY:
-		return v4l2_subdev_state_get_format(sd_state, pad);
+		get_fmt = v4l2_subdev_state_get_format(sd_state, pad);
+		break;
 	case V4L2_SUBDEV_FORMAT_ACTIVE:
-		return &xcsi2rxss->format;
+		get_fmt = &xcsi2rxss->format[pad];
+		break;
 	default:
-		return NULL;
+		get_fmt = NULL;
+		break;
 	}
+
+	return get_fmt;
 }
 
+/**
+ * xcsi2rxss_init_state - Initialise the pad format config to default
+ * @sd: Pointer to V4L2 Sub device structure
+ * @sd_state: Pointer to sub device state structure
+ *
+ * This function is used to initialize the pad format with the default
+ * values.
+ *
+ * Return: 0 on success
+ */
 static int xcsi2rxss_init_state(struct v4l2_subdev *sd,
 				struct v4l2_subdev_state *sd_state)
 {
@@ -678,21 +741,54 @@ static int xcsi2rxss_init_state(struct v4l2_subdev *sd,
 	return 0;
 }
 
+/**
+ * xcsi2rxss_get_format - Get the pad format
+ * @sd: Pointer to V4L2 Sub device structure
+ * @sd_state: Pointer to sub device state structure
+ * @fmt: Pointer to pad level media bus format
+ *
+ * This function is used to get the pad format information.
+ *
+ * Return: 0 on success
+ */
 static int xcsi2rxss_get_format(struct v4l2_subdev *sd,
 				struct v4l2_subdev_state *sd_state,
 				struct v4l2_subdev_format *fmt)
 {
 	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
+	struct v4l2_mbus_framefmt *get_fmt;
+	int ret = 0;
 
 	mutex_lock(&xcsi2rxss->lock);
-	fmt->format = *__xcsi2rxss_get_pad_format(xcsi2rxss, sd_state,
-						  fmt->pad,
-						  fmt->which);
+
+	get_fmt = __xcsi2rxss_get_pad_format(xcsi2rxss, sd_state, fmt->pad,
+					     fmt->which);
+	if (!get_fmt) {
+		ret = -EINVAL;
+		goto unlock_get_format;
+	}
+
+	fmt->format = *get_fmt;
+
+unlock_get_format:
 	mutex_unlock(&xcsi2rxss->lock);
 
-	return 0;
+	return ret;
 }
 
+/**
+ * xcsi2rxss_set_format - This is used to set the pad format
+ * @sd: Pointer to V4L2 Sub device structure
+ * @sd_state: Pointer to sub device state structure
+ * @fmt: Pointer to pad level media bus format
+ *
+ * This function is used to set the pad format for the CSI-2 Rx subsystem.
+ * The source pad format is fixed in hardware and cannot be modified on run time.
+ * For the sink pad, the function validates the requested format code against the
+ * hardware's configured datatype and applies the requested format.
+ *
+ * Return: 0 on success
+ */
 static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 				struct v4l2_subdev_state *sd_state,
 				struct v4l2_subdev_format *fmt)
@@ -700,6 +796,7 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 	struct xcsi2rxss_state *xcsi2rxss = to_xcsi2rxssstate(sd);
 	struct v4l2_mbus_framefmt *__format;
 	u32 dt;
+	int ret = 0;
 
 	mutex_lock(&xcsi2rxss->lock);
 
@@ -710,12 +807,15 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 	 */
 	__format = __xcsi2rxss_get_pad_format(xcsi2rxss, sd_state,
 					      fmt->pad, fmt->which);
+	if (!__format) {
+		ret = -EINVAL;
+		goto unlock_set_format;
+	}
 
 	/* only sink pad format can be updated */
 	if (fmt->pad == XVIP_PAD_SOURCE) {
 		fmt->format = *__format;
-		mutex_unlock(&xcsi2rxss->lock);
-		return 0;
+		goto unlock_set_format;
 	}
 
 	/*
@@ -732,11 +832,29 @@ static int xcsi2rxss_set_format(struct v4l2_subdev *sd,
 	}
 
 	*__format = fmt->format;
+
+	/* Propagate resolution from sink to source pad */
+	__format = __xcsi2rxss_get_pad_format(xcsi2rxss, sd_state,
+					      XVIP_PAD_SOURCE, fmt->which);
+	if (__format) {
+		__format->width = fmt->format.width;
+		__format->height = fmt->format.height;
+	}
+
+unlock_set_format:
 	mutex_unlock(&xcsi2rxss->lock);
 
-	return 0;
+	return ret;
 }
 
+/**
+ * xcsi2rxss_enum_mbus_code - Handle pixel format enumeration
+ * @sd: pointer to v4l2 subdev structure
+ * @sd_state: V4L2 subdev pad configuration
+ * @code: pointer to v4l2_subdev_mbus_code_enum structure
+ *
+ * Return: -EINVAL or zero on success
+ */
 static int xcsi2rxss_enum_mbus_code(struct v4l2_subdev *sd,
 				    struct v4l2_subdev_state *sd_state,
 				    struct v4l2_subdev_mbus_code_enum *code)
@@ -800,13 +918,34 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
 {
 	struct device *dev = xcsi2rxss->dev;
 	struct device_node *node = dev->of_node;
-
+	struct v4l2_fwnode_endpoint vep = { };
 	struct fwnode_handle *ep;
-	struct v4l2_fwnode_endpoint vep = {
-		.bus_type = V4L2_MBUS_CSI2_DPHY
-	};
 	bool en_csi_v20, vfb;
+	u32 phy_mode;
 	int ret;
+
+	if (xcsi2rxss->cfg->flags & XCSI_HAS_PHY_MODE) {
+		ret = device_property_read_u32(dev, "xlnx,mipi-rx-phy-mode",
+					       &phy_mode);
+		if (ret < 0)
+			return dev_err_probe(dev, ret,
+					     "missing xlnx,mipi-rx-phy-mode property\n");
+
+		if (phy_mode == XCSI_PHY_MODE_CPHY) {
+			xcsi2rxss->is_cphy = true;
+			vep.bus_type = V4L2_MBUS_CSI2_CPHY;
+		} else if (phy_mode == XCSI_PHY_MODE_DPHY) {
+			xcsi2rxss->is_cphy = false;
+			vep.bus_type = V4L2_MBUS_CSI2_DPHY;
+		} else {
+			return dev_err_probe(dev, -EINVAL,
+					     "invalid xlnx,mipi-rx-phy-mode %u\n",
+					     phy_mode);
+		}
+	} else {
+		xcsi2rxss->is_cphy = false;
+		vep.bus_type = V4L2_MBUS_CSI2_DPHY;
+	}
 
 	en_csi_v20 = of_property_read_bool(node, "xlnx,en-csi-v2-0");
 	if (en_csi_v20)
@@ -823,6 +962,7 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
 	}
 
 	switch (xcsi2rxss->datatype) {
+	case MIPI_CSI2_DT_YUV420_8B:
 	case MIPI_CSI2_DT_YUV422_8B:
 	case MIPI_CSI2_DT_RGB444:
 	case MIPI_CSI2_DT_RGB555:
@@ -873,7 +1013,8 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
 		return ret;
 	}
 
-	dev_dbg(dev, "mipi number lanes = %d\n",
+	dev_dbg(dev, "mipi number %s = %d\n",
+		xcsi2rxss->is_cphy ? "trios" : "lanes",
 		vep.bus.mipi_csi2.num_data_lanes);
 
 	xcsi2rxss->max_num_lanes = vep.bus.mipi_csi2.num_data_lanes;
@@ -888,9 +1029,11 @@ static int xcsi2rxss_parse_of(struct xcsi2rxss_state *xcsi2rxss)
 
 	fwnode_handle_put(ep);
 
-	dev_dbg(dev, "vcx %s, %u data lanes (%s), data type 0x%02x\n",
+	dev_dbg(dev, "phy mode %s, vcx %s, %u data %s (%s), data type 0x%02x\n",
+		xcsi2rxss->is_cphy ? "C-PHY" : "D-PHY",
 		xcsi2rxss->en_vcx ? "enabled" : "disabled",
 		xcsi2rxss->max_num_lanes,
+		xcsi2rxss->is_cphy ? "trios" : "lanes",
 		xcsi2rxss->enable_active_lanes ? "dynamic" : "static",
 		xcsi2rxss->datatype);
 
@@ -922,6 +1065,10 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 	if (IS_ERR(xcsi2rxss->rst_gpio))
 		return dev_err_probe(dev, PTR_ERR(xcsi2rxss->rst_gpio),
 				     "Video Reset GPIO not setup in DT\n");
+
+	xcsi2rxss->cfg = device_get_match_data(dev);
+	if (!xcsi2rxss->cfg)
+		return dev_err_probe(dev, -ENODEV, "no match data found\n");
 
 	ret = xcsi2rxss_parse_of(xcsi2rxss);
 	if (ret < 0)
@@ -968,7 +1115,8 @@ static int xcsi2rxss_probe(struct platform_device *pdev)
 	xcsi2rxss->default_format.colorspace = V4L2_COLORSPACE_SRGB;
 	xcsi2rxss->default_format.width = XCSI_DEFAULT_WIDTH;
 	xcsi2rxss->default_format.height = XCSI_DEFAULT_HEIGHT;
-	xcsi2rxss->format = xcsi2rxss->default_format;
+	xcsi2rxss->format[XVIP_PAD_SINK] = xcsi2rxss->default_format;
+	xcsi2rxss->format[XVIP_PAD_SOURCE] = xcsi2rxss->default_format;
 
 	/* Initialize V4L2 subdevice and media entity */
 	subdev = &xcsi2rxss->subdev;
@@ -1017,7 +1165,10 @@ static void xcsi2rxss_remove(struct platform_device *pdev)
 }
 
 static const struct of_device_id xcsi2rxss_of_id_table[] = {
-	{ .compatible = "xlnx,mipi-csi2-rx-subsystem-5.0", },
+	{ .compatible = "xlnx,mipi-csi2-rx-subsystem-6.0",
+	  .data = &xcsi2rxss_cfg_v60 },
+	{ .compatible = "xlnx,mipi-csi2-rx-subsystem-5.0",
+	  .data = &xcsi2rxss_cfg_v50 },
 	{ }
 };
 MODULE_DEVICE_TABLE(of, xcsi2rxss_of_id_table);

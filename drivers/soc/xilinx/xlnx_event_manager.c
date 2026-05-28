@@ -3,12 +3,15 @@
  * Xilinx Event Management Driver
  *
  *  Copyright (C) 2021 Xilinx, Inc.
- *  Copyright (C) 2024 Advanced Micro Devices, Inc.
+ *  Copyright (C) 2024-2025 Advanced Micro Devices, Inc.
  *
  *  Abhyuday Godhasara <abhyuday.godhasara@xilinx.com>
  */
 
 #include <linux/cpuhotplug.h>
+#include <linux/firmware/xlnx-versal-error-events.h>
+#include <linux/firmware/xlnx-versal-net-error-events.h>
+#include <linux/firmware/amd-versal2-error-events.h>
 #include <linux/firmware/xlnx-event-manager.h>
 #include <linux/firmware/xlnx-zynqmp.h>
 #include <linux/hashtable.h>
@@ -77,24 +80,36 @@ struct registered_event_data {
 
 static bool xlnx_is_error_event(const u32 node_id)
 {
-	u32 pm_family_code, pm_sub_family_code;
+	u32 pm_family_code;
 
-	zynqmp_pm_get_family_info(&pm_family_code, &pm_sub_family_code);
+	zynqmp_pm_get_family_info(&pm_family_code);
 
-	if (pm_sub_family_code == VERSAL_SUB_FAMILY_CODE) {
+	if (pm_family_code == PM_VERSAL_FAMILY_CODE) {
 		if (node_id == VERSAL_EVENT_ERROR_PMC_ERR1 ||
 		    node_id == VERSAL_EVENT_ERROR_PMC_ERR2 ||
 		    node_id == VERSAL_EVENT_ERROR_PSM_ERR1 ||
-		    node_id == VERSAL_EVENT_ERROR_PSM_ERR2)
+		    node_id == VERSAL_EVENT_ERROR_PSM_ERR2 ||
+		    node_id == VERSAL_EVENT_ERROR_SW_ERR)
 			return true;
-	} else {
+	} else if (pm_family_code == PM_VERSAL_NET_FAMILY_CODE) {
 		if (node_id == VERSAL_NET_EVENT_ERROR_PMC_ERR1 ||
 		    node_id == VERSAL_NET_EVENT_ERROR_PMC_ERR2 ||
 		    node_id == VERSAL_NET_EVENT_ERROR_PMC_ERR3 ||
 		    node_id == VERSAL_NET_EVENT_ERROR_PSM_ERR1 ||
 		    node_id == VERSAL_NET_EVENT_ERROR_PSM_ERR2 ||
 		    node_id == VERSAL_NET_EVENT_ERROR_PSM_ERR3 ||
-		    node_id == VERSAL_NET_EVENT_ERROR_PSM_ERR4)
+		    node_id == VERSAL_NET_EVENT_ERROR_PSM_ERR4 ||
+		    node_id == VERSAL_NET_EVENT_ERROR_SW_ERR)
+			return true;
+	} else if (pm_family_code == PM_VERSAL2_FAMILY_CODE) {
+		if (node_id == VERSAL2_EVENT_ERROR_PMC_ERR1 ||
+		    node_id == VERSAL2_EVENT_ERROR_PMC_ERR2 ||
+		    node_id == VERSAL2_EVENT_ERROR_PMC_ERR3 ||
+		    node_id == VERSAL2_EVENT_ERROR_LPDSLCR_ERR1 ||
+		    node_id == VERSAL2_EVENT_ERROR_LPDSLCR_ERR2 ||
+		    node_id == VERSAL2_EVENT_ERROR_LPDSLCR_ERR3 ||
+		    node_id == VERSAL2_EVENT_ERROR_LPDSLCR_ERR4 ||
+		    node_id == VERSAL2_EVENT_ERROR_SW_ERR)
 			return true;
 	}
 

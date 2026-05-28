@@ -1,0 +1,744 @@
+// SPDX-License-Identifier: GPL-2.0
+/*
+ * Xilinx AI Engine device memory implementation
+ *
+ * Copyright (C) 2020 Xilinx, Inc.
+ */
+
+#include <linux/dma-buf.h>
+#include <linux/slab.h>
+#include <linux/types.h>
+#include <linux/uaccess.h>
+#include <linux/fdtable.h>
+#include <linux/xlnx-ai-engine.h>
+
+#include "ai-engine-internal.h"
+#include "ai-engine-trace.h"
+
+#define aie_cal_reg_goffset(adev, loc, regoff) ({ \
+	struct aie_device *_adev = (adev); \
+	struct aie_location *_loc = &(loc); \
+	(_loc->col << _adev->col_shift) + \
+	(_loc->row << _adev->row_shift) + (regoff); \
+	})
+
+#define aie_cal_reg_pa(aperture, rloc, regoff) ({ \
+	struct aie_aperture *__aperture = (aperture); \
+	__aperture->res.start + aie_cal_reg_goffset(__aperture->adev, rloc, \
+						    regoff); \
+	})
+
+static struct sg_table *
+aie_mem_map_dma_buf_xa(struct dma_buf_attachment *attachment, enum dma_data_direction direction)
+{
+	struct dma_buf *dmabuf = attachment->dmabuf;
+	struct aie_dmabuf_xa *dma_buf_xa;
+	struct scatterlist *slist;
+	struct sg_table *sgt;
+	void *vaddr;
+	int ret;
+
+	dma_buf_xa = (struct aie_dmabuf_xa *)dmabuf->priv;
+	vaddr = dma_buf_xa->vaddr;
+
+	if (dma_buf_xa->sgt) {
+		dev_dbg(&dma_buf_xa->apart->dev,
+			"dma_buf_xa->sgt already exists.");
+		return ERR_PTR(-EEXIST);
+	}
+	sgt = kmalloc(sizeof(*sgt), GFP_KERNEL);
+	if (!sgt)
+		return ERR_PTR(-ENOMEM);
+
+	ret = sg_alloc_table(sgt, 1, GFP_KERNEL);
+
+	if (ret < 0)
+		goto err;
+
+	slist = sgt->sgl;
+
+	sg_init_one(slist, vaddr, dma_buf_xa->size);
+
+	/*
+	 * Since memory is allocated using dma_alloc_coherent which stores the
+	 * dma address for the virtual address returned dma_map_sgtable is not
+	 * needed for converting virtual address to dma-able address.
+	 */
+	slist->dma_address = dma_buf_xa->dma_addr;
+	dma_buf_xa->sgt = sgt;
+
+	return sgt;
+err:
+	kfree(sgt);
+	return ERR_PTR(ret);
+}
+
+static struct sg_table *
+aie_mem_map_dma_buf(struct dma_buf_attachment *attachment,
+		    enum dma_data_direction direction)
+{
+	return ERR_PTR(-EOPNOTSUPP);
+}
+
+static void aie_mem_unmap_dma_buf_xa(struct dma_buf_attachment *attachment,
+				     struct sg_table *sgt,
+				     enum dma_data_direction direction)
+{
+	struct aie_dmabuf_xa *dma_buf_xa = (struct aie_dmabuf_xa *)attachment->dmabuf->priv;
+
+	trace_aie_mem_unmap_dma_buf_xa(dma_buf_xa->apart, dma_buf_xa->size,
+				       dma_buf_xa->fd);
+
+	sg_free_table(sgt);
+	kfree(sgt);
+	dma_buf_xa->sgt = NULL;
+}
+
+static void aie_mem_unmap_dma_buf(struct dma_buf_attachment *attachment,
+				  struct sg_table *table,
+				  enum dma_data_direction direction)
+{
+}
+
+static int aie_mem_mmap_xa(struct dma_buf *dmabuf, struct vm_area_struct *vma)
+{
+	struct aie_dmabuf_xa *dma_buf_xa = (struct aie_dmabuf_xa *)dmabuf->priv;
+	struct aie_partition *apart = dma_buf_xa->apart;
+	unsigned long addr = vma->vm_start;
+	unsigned long offset = vma->vm_pgoff * PAGE_SIZE;
+	int ret;
+
+	trace_aie_mem_mmap_xa(apart, dma_buf_xa->fd, dma_buf_xa->size,
+			      dma_buf_xa->dma_addr, vma->vm_start,
+			      vma->vm_end);
+
+	if (dma_buf_xa->size != (vma->vm_end - vma->vm_start)) {
+		dev_dbg(&apart->dev, "mmap size mismatch, requested 0x%lx, actual %lu.\n",
+			vma->vm_end - vma->vm_start, dma_buf_xa->size);
+		return -EINVAL;
+	}
+	dma_buf_xa->vm_start = vma->vm_start;
+	dma_buf_xa->vm_end = vma->vm_end;
+
+	if (offset) {
+		dev_dbg(&apart->dev, "mmap offset is not zero, offset: 0x%lx.\n", offset);
+		return -EINVAL;
+	}
+
+	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+	ret = remap_pfn_range(vma, addr, PFN_DOWN(dma_buf_xa->dma_addr),
+			      dma_buf_xa->size, vma->vm_page_prot);
+	if (!ret) {
+		dev_dbg(&apart->dev, "mmap dma buffer of size %lu failed: %d",
+			dma_buf_xa->size, ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+static int aie_mem_mmap(struct dma_buf *dmabuf, struct vm_area_struct *vma)
+{
+	struct aie_part_mem *pmem = dmabuf->priv;
+	struct aie_mem *mem = &pmem->mem;
+	struct aie_partition *apart = pmem->apart;
+	struct aie_aperture *aperture = apart->aperture;
+	struct aie_location rloc;
+	unsigned long addr = vma->vm_start;
+	unsigned long offset = vma->vm_pgoff * PAGE_SIZE, moffset = 0;
+	unsigned long remainder = vma->vm_end - addr;
+	size_t msize = mem->size;
+	u32 rstart_col = mem->range.start.col - aperture->range.start.col;
+	int ret;
+
+	trace_aie_mem_mmap(apart, vma->vm_start, vma->vm_end, offset,
+			   pmem->size);
+
+	if (remainder + offset > pmem->size)
+		return -EINVAL;
+
+	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
+	if (pmem->mem.range.size.row == 0) {
+		return -EINVAL;
+	} else {
+		for (rloc.col = rstart_col;
+		     rloc.col < rstart_col + mem->range.size.col; rloc.col++) {
+			for (rloc.row = mem->range.start.row;
+			     rloc.row < mem->range.start.row + mem->range.size.row;
+			     rloc.row++) {
+				unsigned long toffset, len;
+				phys_addr_t mempa;
+
+				remainder = vma->vm_end - addr;
+				if (!remainder)
+					return 0;
+
+				if (moffset + msize < offset) {
+					moffset += msize;
+					continue;
+				}
+				/*
+				 * calculate offset within the tile memory.
+				 * offset is the offset to vma->start.
+				 * moffset is the tile memory start offset to
+				 * vma->start.
+				 */
+				toffset = offset - moffset;
+				len = msize - toffset;
+				if (len > remainder)
+					len = remainder;
+				mempa = aie_cal_reg_pa(apart->aperture, rloc,
+						       toffset + mem->offset);
+
+				ret = remap_pfn_range(vma, addr, mempa >> PAGE_SHIFT,
+						      len, vma->vm_page_prot);
+				if (ret) {
+					dev_err(&apart->dev,
+						"failed to mmap (%u,%u)memory, remap failed, 0x%pa, 0x%lx.\n",
+						(rloc.col + aperture->range.start.col),
+						rloc.row, &mempa, len);
+					return ret;
+				}
+				addr += len;
+				offset += len;
+				moffset += msize;
+			}
+		}
+	}
+	return 0;
+}
+
+static void aie_mem_dmabuf_release_xa(struct dma_buf *dmabuf)
+{
+	struct aie_dmabuf_xa *dma_buf_xa = (struct aie_dmabuf_xa *)dmabuf->priv;
+	struct aie_partition *apart = dma_buf_xa->apart;
+
+	trace_aie_mem_dmabuf_release_xa(apart, dma_buf_xa->size,
+					dma_buf_xa->dma_addr,
+					dma_buf_xa->vaddr, dma_buf_xa->fd);
+
+	mutex_lock(&apart->mlock);
+	xa_erase(&apart->dbuf_xa, dma_buf_xa->fd);
+	mutex_unlock(&apart->mlock);
+	if (dma_buf_xa->attach && dma_buf_xa->sgt)
+		dma_buf_unmap_attachment(dma_buf_xa->attach, dma_buf_xa->sgt, DMA_BIDIRECTIONAL);
+	if (dma_buf_xa->attach)
+		dma_buf_detach(dma_buf_xa->dmabuf, dma_buf_xa->attach);
+	dma_free_coherent(&apart->dev, dma_buf_xa->size, dma_buf_xa->vaddr,
+			  dma_buf_xa->dma_addr);
+	kfree(dma_buf_xa);
+	put_device(&apart->dev);
+}
+
+static void aie_mem_dmabuf_release(struct dma_buf *dmabuf)
+{
+}
+
+static const struct dma_buf_ops aie_mem_dma_buf_ops = {
+	.map_dma_buf = aie_mem_map_dma_buf,
+	.unmap_dma_buf = aie_mem_unmap_dma_buf,
+	.mmap = aie_mem_mmap,
+	.release = aie_mem_dmabuf_release,
+};
+
+/**
+ * aie_mem_create_dmabuf() - creates DMA buffer for AI engine partition
+ *			     memories
+ * @apart: AI engine partition
+ * @pmem: pointer to the partition memory information
+ * @mem: pointer to where it store the memory information and DMA buf file
+ *	 descriptor for user.
+ * @return: 0 for success, negative value for failure
+ *
+ * This function will create DMA buffer for the AI engine partition memory
+ * and will store the DMA buffer file descriptor and memory information in
+ * @mem.
+ */
+static int aie_mem_create_dmabuf(struct aie_partition *apart,
+				 struct aie_part_mem *pmem,
+				 struct aie_mem *mem)
+{
+	struct dma_buf *dmabuf;
+	int ret;
+
+	if (!PAGE_ALIGNED(pmem->mem.size)) {
+		dev_warn(&apart->dev,
+			 "no dmabuf for mem(0x%zx, 0x%zx), not aligned with page size.\n",
+			 pmem->mem.offset, pmem->mem.size);
+		return -EINVAL;
+	}
+
+	dmabuf = pmem->dbuf;
+	if (!dmabuf) {
+		DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
+
+		exp_info.ops = &aie_mem_dma_buf_ops;
+		exp_info.size = pmem->size;
+		exp_info.flags = O_RDWR;
+		exp_info.priv = pmem;
+
+		dmabuf = dma_buf_export(&exp_info);
+		if (IS_ERR(dmabuf))
+			return PTR_ERR(dmabuf);
+
+		pmem->dbuf = dmabuf;
+	}
+
+	ret = dma_buf_fd(dmabuf, O_CLOEXEC);
+	if (ret < 0) {
+		dev_err(&apart->dev,
+			"dmabuf creation failed, failed to get fd.\n");
+		return ret;
+	}
+	dma_buf_get(ret);
+	memcpy(mem, &pmem->mem, sizeof(*mem));
+	mem->fd = ret;
+
+	return 0;
+}
+
+static const struct dma_buf_ops aie_mem_dma_buf_ops_xa = {
+	.map_dma_buf = aie_mem_map_dma_buf_xa,
+	.unmap_dma_buf = aie_mem_unmap_dma_buf_xa,
+	.mmap = aie_mem_mmap_xa,
+	.begin_cpu_access = aie_dma_begin_cpu_access_xa,
+	.end_cpu_access = aie_dma_end_cpu_access_xa,
+	.release = aie_mem_dmabuf_release_xa,
+};
+
+int aie_dma_mem_attach_xa_from_user(struct aie_partition *apart, int fd)
+{
+	struct dma_buf_attachment *attach;
+	struct aie_dmabuf_xa *dma_mem_xa;
+	struct dma_buf *dmabuf;
+	struct sg_table *sgt;
+	int ret;
+
+	mutex_lock(&apart->mlock);
+	dma_mem_xa = xa_load(&apart->dbuf_xa, fd);
+	if (dma_mem_xa) {
+		struct dma_buf *source = dma_buf_get(fd);
+
+		if (IS_ERR(source)) {
+			dev_err(&apart->dev, "failed to get dma buf for fd %d\n", fd);
+			ret = -EINVAL;
+			goto unlock_mutex;
+		}
+		/* Legacy code calls MEM_ALLOC and MEM_ATTACH separately. For backward
+		 * compatibility, if the same fd is already attached, we will allow it and return
+		 * success.
+		 */
+		if (source->priv == dma_mem_xa) {
+			dma_buf_put(source);
+			ret = 0;
+			goto unlock_mutex;
+		}
+		dev_err(&apart->dev, "dma buf with fd %d already attached but not the same dma buf\n",
+			fd);
+		dma_buf_put(source);
+		ret = -EEXIST;
+		goto unlock_mutex;
+	}
+	dma_mem_xa = kzalloc(sizeof(*dma_mem_xa), GFP_KERNEL);
+	if (!dma_mem_xa) {
+		ret = -ENOMEM;
+		goto unlock_mutex;
+	}
+	dma_mem_xa->fd = fd;
+	dma_mem_xa->apart = apart;
+	dmabuf = dma_buf_get(fd);
+	if (IS_ERR(dmabuf)) {
+		dev_err(&apart->dev, "failed to get dma buf for fd %d\n", fd);
+		ret = PTR_ERR(dmabuf);
+		goto free_dma_mem_xa;
+	}
+	dma_mem_xa->dmabuf = dmabuf;
+	attach = dma_buf_attach(dmabuf, &apart->dev);
+	if (IS_ERR(attach)) {
+		dev_err(&apart->dev, "failed to attach dma buf for fd %d\n", fd);
+		ret = PTR_ERR(attach);
+		goto put_dmabuf;
+	}
+	dma_mem_xa->attach = attach;
+	sgt = dma_buf_map_attachment(dma_mem_xa->attach, DMA_BIDIRECTIONAL);
+	if (IS_ERR(sgt)) {
+		dev_err(&apart->dev, "failed to map dma buf attachment for fd %d\n", fd);
+		ret = PTR_ERR(sgt);
+		goto dma_buf_detach;
+	}
+	dma_mem_xa->sgt = sgt;
+	if (sgt->nents != 1) {
+		dma_addr_t next_sg_addr = sg_dma_address(sgt->sgl);
+		struct scatterlist *s;
+		unsigned int i;
+
+		for_each_sg(sgt->sgl, s, sgt->nents, i) {
+			if (sg_dma_address(s) != next_sg_addr) {
+				dev_err(&apart->dev, "dmabuf not contiguous\n");
+				ret = -EINVAL;
+				goto dma_unmap_attachment;
+			}
+			next_sg_addr = sg_dma_address(s) + sg_dma_len(s);
+			dma_mem_xa->size += sg_dma_len(s);
+		}
+	} else {
+		dma_mem_xa->size = sg_dma_len(sgt->sgl);
+	}
+	dma_mem_xa->dma_addr = sg_dma_address(sgt->sgl);
+
+	ret = xa_err(xa_store(&apart->dbuf_xa, dma_mem_xa->fd, dma_mem_xa, GFP_KERNEL));
+	if (ret) {
+		dev_err(&apart->dev, "failed to store dma buf in xa for fd %d\n", fd);
+		goto dma_unmap_attachment;
+	}
+
+	trace_aie_part_attach_external_dmabuf(apart, NULL, dma_mem_xa->dma_addr,
+					      dma_mem_xa->size, fd);
+
+	goto unlock_mutex;
+
+dma_unmap_attachment:
+	dma_buf_unmap_attachment(attach, sgt, DMA_BIDIRECTIONAL);
+dma_buf_detach:
+	dma_buf_detach(dmabuf, attach);
+put_dmabuf:
+	dma_buf_put(dmabuf);
+free_dma_mem_xa:
+	kfree(dma_mem_xa);
+unlock_mutex:
+	mutex_unlock(&apart->mlock);
+	return ret;
+}
+
+int aie_dma_mem_detach_xa_from_user(struct aie_partition *apart, int fd)
+{
+	struct aie_dmabuf_xa *dma_mem_xa;
+	struct dma_buf *source;
+
+	mutex_lock(&apart->mlock);
+	dma_mem_xa = xa_load(&apart->dbuf_xa, fd);
+	if (!dma_mem_xa) {
+		dev_err(&apart->dev, "failed to find dma buf in xa for fd %d\n", fd);
+		mutex_unlock(&apart->mlock);
+		return -ENOENT;
+	}
+
+	source = dma_buf_get(fd);
+	if (IS_ERR(source)) {
+		dev_err(&apart->dev, "failed to get dma buf for fd %d\n", fd);
+		mutex_unlock(&apart->mlock);
+		return -EINVAL;
+	}
+	/* Legacy code calls MEM_FREE and MEM_DETACH separately. For backward
+	 * compatibility, if the same fd is already attached, we will return, it will be detached
+	 * in MEM_FREE.
+	 */
+	if (source->priv == dma_mem_xa) {
+		dma_buf_put(source);
+		mutex_unlock(&apart->mlock);
+		return 0;
+	}
+	dma_buf_put(source);
+	xa_erase(&apart->dbuf_xa, fd);
+	mutex_unlock(&apart->mlock);
+	trace_aie_part_detach_external_dmabuf(apart, fd);
+	dma_buf_unmap_attachment(dma_mem_xa->attach, dma_mem_xa->sgt, DMA_BIDIRECTIONAL);
+	dma_buf_detach(dma_mem_xa->dmabuf, dma_mem_xa->attach);
+	dma_buf_put(dma_mem_xa->dmabuf);
+	kfree(dma_mem_xa);
+
+	return 0;
+}
+
+int aie_dma_mem_alloc_xa(struct aie_partition *apart, __kernel_size_t size)
+{
+	struct aie_dmabuf_xa *dma_mem_xa;
+	struct sg_table *sgt;
+	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
+	int err;
+
+	if (!PAGE_ALIGNED(size)) {
+		dev_dbg(&apart->dev, "dma memory size 0x%zx is not aligned with page size.",
+			size);
+		return -EINVAL;
+	}
+	dma_mem_xa = kzalloc(sizeof(*dma_mem_xa), GFP_KERNEL);
+	if (!dma_mem_xa)
+		return -ENOMEM;
+	/* make sure apart is not freed before all of its dma_buf.
+	 * dma_buf->release calls put_device(&apart->dev);
+	 */
+	get_device(&apart->dev);
+	dma_mem_xa->apart = apart;
+	dma_mem_xa->size = size;
+	dma_mem_xa->vaddr = dma_alloc_coherent(&apart->dev, size, &dma_mem_xa->dma_addr,
+					       GFP_KERNEL);
+	if (!dma_mem_xa->vaddr) {
+		err = -ENOMEM;
+		goto free_dma_mem_xa;
+	}
+
+	exp_info.ops = &aie_mem_dma_buf_ops_xa;
+	exp_info.size = size;
+	exp_info.flags = O_RDWR;
+	exp_info.priv = dma_mem_xa;
+
+	dma_mem_xa->dmabuf = dma_buf_export(&exp_info);
+	if (IS_ERR(dma_mem_xa->dmabuf)) {
+		dev_dbg(&apart->dev, "failed to export dma buf for size 0x%zx.", size);
+		err = PTR_ERR(dma_mem_xa->dmabuf);
+		goto free_dma_coherent;
+	}
+
+	dma_mem_xa->attach = dma_buf_attach(dma_mem_xa->dmabuf, &apart->dev);
+	if (IS_ERR(dma_mem_xa->attach)) {
+		dma_mem_xa->attach = NULL;
+		dev_dbg(&apart->dev, "failed to attach dma buf for size 0x%zx.", size);
+		err = PTR_ERR(dma_mem_xa->attach);
+		goto dma_buf_put;
+	}
+
+	sgt = dma_buf_map_attachment(dma_mem_xa->attach, DMA_BIDIRECTIONAL);
+	if (IS_ERR(sgt)) {
+		dev_dbg(&apart->dev, "failed to map dma buf attachment for size 0x%zx.", size);
+		err = PTR_ERR(sgt);
+		goto dma_buf_put;
+	}
+	/* Consumes dmabuf->file->f_count. Driver no longer holds the dmabuf */
+	dma_mem_xa->fd = dma_buf_fd(dma_mem_xa->dmabuf, O_CLOEXEC);
+	if (dma_mem_xa->fd < 0) {
+		dev_dbg(&apart->dev, "failed to get dma buf fd for size 0x%zx.", size);
+		err = dma_mem_xa->fd;
+		goto dma_buf_put;
+	}
+
+	err = xa_err(xa_store(&apart->dbuf_xa, dma_mem_xa->fd, dma_mem_xa, GFP_KERNEL));
+	if (err) {
+		dev_dbg(&apart->dev, "failed to store dma buf in xa for fd %d.", dma_mem_xa->fd);
+		goto close_fd;
+	}
+
+	trace_aie_dma_mem_alloc_xa(apart, size, dma_mem_xa->dma_addr,
+				   dma_mem_xa->vaddr, dma_mem_xa->fd);
+
+	return dma_mem_xa->fd;
+
+close_fd:
+	close_fd(dma_mem_xa->fd);
+	return -ENOMEM;
+dma_buf_put:
+	dma_buf_put(dma_mem_xa->dmabuf);
+	return -ENOMEM;
+free_dma_coherent:
+	dma_free_coherent(&apart->dev, size, dma_mem_xa->vaddr, dma_mem_xa->dma_addr);
+free_dma_mem_xa:
+	kfree(dma_mem_xa);
+	put_device(&apart->dev);
+	return err;
+}
+
+/**
+ * aie_part_detach_external_dmabuf() - detach an external DMA buffer from partition
+ * @dev: AI engine partition device
+ * @fd: file descriptor of the external DMA buffer to detach
+ *
+ * Remove the external DMA buffer tracking entry from the partition's xarray.
+ * This should be called when the external DMA buffer is no longer needed.
+ *
+ * Return: 0 on success, -ENOENT if the fd was not found in the xarray.
+ */
+int aie_part_detach_external_dmabuf(struct device *dev, int fd)
+{
+	struct aie_partition *apart = container_of(dev, struct aie_partition, dev);
+	struct aie_dmabuf_xa *dma_mem_xa;
+
+	mutex_lock(&apart->mlock);
+	dma_mem_xa = xa_load(&apart->dbuf_xa, fd);
+	/* dma_mem_xa->dmabuf is NULL for external buffer. dma_buf internally allocated by
+	 * aie_dma_mem_alloc_xa() or aie_dma_mem_attach_xa_from_user() always has a reference to
+	 * dma_buf.
+	 */
+	if (!dma_mem_xa || dma_mem_xa->dmabuf) {
+		dev_err(&apart->dev, "failed to find external dma buf in xa for fd %d\n", fd);
+		mutex_unlock(&apart->mlock);
+		return -ENOENT;
+	}
+	xa_erase(&apart->dbuf_xa, fd);
+	mutex_unlock(&apart->mlock);
+	kfree(dma_mem_xa);
+
+	trace_aie_part_detach_external_dmabuf(apart, fd);
+	put_device(&apart->dev);
+	return 0;
+}
+EXPORT_SYMBOL_GPL(aie_part_detach_external_dmabuf);
+
+/**
+ * aie_part_attach_external_dmabuf() - attach an external DMA buffer to partition
+ * @dev: AI engine partition device
+ * @vaddr: virtual address of the DMA buffer
+ * @dma_addr: DMA address of the buffer
+ * @size: size of the DMA buffer in bytes
+ * @fd: file descriptor associated with the external DMA buffer
+ *
+ * Register an external DMA buffer with the partition by storing its metadata
+ * in the partition's xarray. This allows the partition to track externally
+ * allocated DMA buffers for mmap operations. Takes a device reference on
+ * success which is released by aie_part_detach_external_dmabuf().
+ *
+ * Return: 0 on success, -EEXIST if a buffer is already attached for @fd,
+ * -ENOMEM if memory allocation fails, or other negative error code if xarray
+ * insertion fails.
+ */
+int aie_part_attach_external_dmabuf(struct device *dev, void *vaddr, dma_addr_t dma_addr,
+				    size_t size, int fd)
+{
+	struct aie_partition *apart = container_of(dev, struct aie_partition, dev);
+	struct aie_dmabuf_xa *dma_mem_xa;
+	int err;
+
+	mutex_lock(&apart->mlock);
+	dma_mem_xa = xa_load(&apart->dbuf_xa, fd);
+	if (dma_mem_xa) {
+		dev_err(&apart->dev, "dma buf already exists in xa for fd %d\n", fd);
+		err = -EEXIST;
+		goto unlock_ret;
+	}
+
+	dma_mem_xa = kzalloc(sizeof(*dma_mem_xa), GFP_KERNEL);
+	if (!dma_mem_xa) {
+		err = -ENOMEM;
+		goto unlock_ret;
+	}
+	dma_mem_xa->apart = apart;
+	dma_mem_xa->vaddr = vaddr;
+	dma_mem_xa->dma_addr = dma_addr;
+	dma_mem_xa->size = size;
+	dma_mem_xa->fd = fd;
+
+	err = xa_err(xa_store(&apart->dbuf_xa, dma_mem_xa->fd, dma_mem_xa, GFP_KERNEL));
+	if (err) {
+		dev_err(&apart->dev, "failed to store dma buf in xa for fd %d\n", dma_mem_xa->fd);
+		kfree(dma_mem_xa);
+		goto unlock_ret;
+	}
+
+	get_device(&apart->dev);
+	trace_aie_part_attach_external_dmabuf(apart, vaddr, dma_addr, size, fd);
+
+unlock_ret:
+	mutex_unlock(&apart->mlock);
+	return err;
+}
+EXPORT_SYMBOL_GPL(aie_part_attach_external_dmabuf);
+
+/**
+ * aie_mem_get_info() - get AI engine memories information
+ * @apart: AI engine partition
+ * @arg: argument from user to enquire AI engine partition memory information
+ * @return: 0 for success, and negative value for failure
+ *
+ * This function will get the memories information for the specified AI engine
+ * partition. It will create DMA buf file descriptors for the memories and
+ * return the DMA buf file descriptors to users.
+ * It will create a DMA buffer per type of memories.
+ * e.g. There will be a DMA buffer for all the tile program memories in the
+ * partition, and another DMA buffer for all the tile data memories in the
+ * partition.
+ * User can first pass num_mems as 0 in the @arg to enquire for how many types
+ * of memories in this AI engine partition. And then, user can allocate memory
+ * to keep the information for different types of memories, and then use the
+ * same enqury with non-zero num_mems and none NULL pointer to ask for the
+ * details of the information of all the types of memories in the AI engine
+ * partition.
+ */
+int aie_mem_get_info(struct aie_partition *apart, unsigned long arg)
+{
+	struct aie_mem_args margs;
+	struct aie_mem *mems;
+	unsigned int num_mems, i;
+	int ret;
+
+	if (copy_from_user(&margs, (void __user *)arg, sizeof(margs)))
+		return -EFAULT;
+
+	num_mems = apart->adev->ops->get_mem_info(apart->adev, &apart->range,
+						  NULL);
+	if (num_mems <= 0)
+		return -EINVAL;
+
+	if (!margs.num_mems) {
+		struct aie_mem_args __user *umargs_ptr = (void __user *)arg;
+
+		/* This enquiry is to get the number of types of memories. */
+		if (copy_to_user((void __user *)&umargs_ptr->num_mems,
+				 &num_mems, sizeof(num_mems)))
+			return -EFAULT;
+		return 0;
+	}
+
+	if (num_mems != margs.num_mems) {
+		dev_err(&apart->dev,
+			"failed to get mem info, invalid num of mems %d,%d.\n",
+			num_mems, margs.num_mems);
+		return -EINVAL;
+	}
+	if (!margs.mems) {
+		dev_err(&apart->dev,
+			"failed to get mem info, mems pointer is NULL.\n");
+		return -EINVAL;
+	}
+
+	mems = kcalloc(num_mems, sizeof(*mems), GFP_KERNEL);
+	if (!mems)
+		return -ENOMEM;
+
+	/*
+	 * Create DMA buffer for the memories.
+	 * Each type of memory in the partition has its own DMA buf.
+	 */
+	for (i = 0; i < num_mems; i++) {
+		ret = aie_mem_create_dmabuf(apart, &apart->pmems[i], &mems[i]);
+		if (ret)
+			break;
+	}
+	if (!ret) {
+		if (copy_to_user((void __user *)margs.mems, mems,
+				 num_mems * sizeof(mems[0])))
+			ret = -EFAULT;
+	}
+
+	if (ret) {
+		for (i = 0; i < num_mems; i++) {
+			if (mems[i].fd)
+				put_unused_fd(mems[i].fd);
+		}
+	}
+
+	kfree(mems);
+	return ret;
+}
+
+/**
+ * aie_part_has_mem_mmapped() - check if memories in the partition are mapped
+ * @apart: AI engine partition
+ * @return: return true if there are memories mmaped, false otherwise.
+ *
+ * This function checks if there are memories in the partition mmapped in the
+ * partition.
+ */
+bool aie_part_has_mem_mmapped(struct aie_partition *apart)
+{
+	unsigned int num_mems, i;
+
+	num_mems = apart->adev->ops->get_mem_info(apart->adev, &apart->range,
+			NULL);
+	if (!num_mems)
+		return false;
+
+	for (i = 0; i < num_mems; i++) {
+		if (apart->pmems[i].dbuf)
+			return true;
+	}
+	return false;
+}
