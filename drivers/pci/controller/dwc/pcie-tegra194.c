@@ -2504,17 +2504,6 @@ static int tegra_pcie_dw_suspend_late(struct device *dev)
 	struct tegra_pcie_dw *pcie = dev_get_drvdata(dev);
 	u32 val;
 
-	if (pcie->of_data->mode == DW_PCIE_EP_TYPE) {
-		disable_irq(pcie->pex_rst_irq);
-
-		if (pcie->ep_state == EP_STATE_ENABLED) {
-			dev_err(dev, "Tegra PCIe is in EP mode, suspend not allowed");
-			return -EPERM;
-		} else {
-			return 0;
-		}
-	}
-
 	if (!pcie->link_state)
 		return 0;
 
@@ -2618,6 +2607,7 @@ static void tegra_pcie_dw_shutdown(struct platform_device *pdev)
 			return;
 
 		debugfs_remove_recursive(pcie->debugfs);
+		disable_irq(pcie->prsnt_irq);
 		disable_irq(pcie->pci.pp.irq);
 		if (IS_ENABLED(CONFIG_PCI_MSI))
 			disable_irq(pcie->pci.pp.msi_irq[0]);
