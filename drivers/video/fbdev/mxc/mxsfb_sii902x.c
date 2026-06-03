@@ -433,7 +433,7 @@ static const struct lcd_ops sii902x_lcd_ops = {
 static int sii902x_probe(struct i2c_client *client)
 {
 	int i, dat, ret;
-	struct fb_info edid_fbi;
+	struct fb_info edid_fbi = {};
 	struct fb_info *init_fbi = sii902x.fbi;
 	struct lcd_device *lcd;
 
