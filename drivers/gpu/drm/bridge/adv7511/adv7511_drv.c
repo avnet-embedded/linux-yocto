@@ -1467,6 +1467,8 @@ err_of_node_put:
 		dev_warn(dev,
 			 "Probe failed. Remote port '%s' disabled\n",
 			 remote_node->full_name);
+
+	of_changeset_destroy(&ocs);
 #endif
 
 	return ret;
