@@ -2680,6 +2680,7 @@ static void mxc_hdmi_disp_deinit(struct mxc_dispdrv_handle *disp)
 
 	dev_dbg(&hdmi->pdev->dev, "%s\n", __func__);
 
+	fb_destroy_modelist(&hdmi->fbi->modelist);
 	device_remove_file(&hdmi->pdev->dev, &dev_attr_fb_name);
 	device_remove_file(&hdmi->pdev->dev, &dev_attr_cable_state);
 	device_remove_file(&hdmi->pdev->dev, &dev_attr_edid);
