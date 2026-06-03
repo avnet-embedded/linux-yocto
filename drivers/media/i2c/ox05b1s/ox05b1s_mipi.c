@@ -1217,7 +1217,7 @@ static int ox05b1s_apply_current_mode(struct ox05b1s *sensor)
 		goto out;
 
 	/* setup handler will write actual controls into sensor registers */
-	ret = __v4l2_ctrl_handler_setup(&sensor->ctrls.handler);
+	ret =  v4l2_ctrl_handler_setup(&sensor->ctrls.handler);
 
 out:
 	if (ret < 0)
