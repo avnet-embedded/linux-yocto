@@ -1617,7 +1617,9 @@ static int ox05b1s_probe(struct i2c_client *client)
 	v4l2_i2c_subdev_set_name(sd, client, sensor->model->name, NULL);
 
 	sensor->mode = &sensor->model->supported_modes[0];
+	mutex_lock(&sensor->lock);
 	ox05b1s_update_controls(sensor);
+	mutex_unlock(&sensor->lock);
 
 	/* Centrally managed subdev active state */
 	sd->state_lock = &sensor->lock;
