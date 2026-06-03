@@ -907,10 +907,17 @@ static int sdma_load_script(struct sdma_engine *sdma)
 	ram_code = (void *)header + header->ram_code_start;
 	sdma->ram_code_start = header->ram_code_start;
 
-	buf_virt = dma_alloc_coherent(sdma->dev, header->ram_code_size,
-				      &buf_phys, GFP_KERNEL);
+	buf_virt = kzalloc(header->ram_code_size, GFP_NOWAIT);
 	if (!buf_virt)
 		return -ENOMEM;
+
+	buf_phys = dma_map_single(sdma->dev, buf_virt,
+					header->ram_code_size,
+					DMA_TO_DEVICE);
+	if (dma_mapping_error(sdma->dev, buf_phys)) {
+		kfree(buf_virt);
+		return -ENOMEM;
+	}
 
 	spin_lock_irqsave(&sdma->channel_0_lock, flags);
 
@@ -926,7 +933,9 @@ static int sdma_load_script(struct sdma_engine *sdma)
 
 	spin_unlock_irqrestore(&sdma->channel_0_lock, flags);
 
-	dma_free_coherent(sdma->dev, header->ram_code_size, buf_virt, buf_phys);
+	dma_unmap_single(sdma->dev, buf_phys,
+				header->ram_code_size, DMA_TO_DEVICE);
+	kfree(buf_virt);
 
 	sdma_add_scripts(sdma, addr);
 
@@ -1591,29 +1600,11 @@ static int sdma_config_channel(struct dma_chan *chan)
 
 static int sdma_request_channel0(struct sdma_engine *sdma)
 {
-	int ret = -EBUSY;
-
-	if (sdma->iram_pool)
-		sdma->bd0 = gen_pool_dma_alloc(sdma->iram_pool,
-					sizeof(struct sdma_buffer_descriptor),
-					&sdma->bd0_phys);
-	else
-		sdma->bd0 = dma_alloc_coherent(sdma->dev,
-					sizeof(struct sdma_buffer_descriptor),
-					&sdma->bd0_phys, GFP_NOWAIT);
-	if (!sdma->bd0) {
-		ret = -ENOMEM;
-		goto out;
-	}
-
 	sdma->channel_control[0].base_bd_ptr = sdma->bd0_phys;
 	sdma->channel_control[0].current_bd_ptr = sdma->bd0_phys;
 
 	sdma_set_channel_priority(&sdma->channel[0], MXC_SDMA_DEFAULT_PRIORITY);
 	return 0;
-out:
-
-	return ret;
 }
 
 
@@ -1669,15 +1660,6 @@ static int sdma_runtime_suspend(struct device *dev)
 	clk_disable(sdma->clk_ipg);
 	clk_disable(sdma->clk_ahb);
 
-	/* free channel0 bd */
-	if (sdma->iram_pool)
-		gen_pool_free(sdma->iram_pool, (unsigned long)sdma->bd0,
-			      sizeof(struct sdma_buffer_descriptor));
-	else
-		dma_free_coherent(sdma->dev,
-				  sizeof(struct sdma_buffer_descriptor),
-				  sdma->bd0, sdma->bd0_phys);
-
 	return 0;
 }
 
@@ -1698,17 +1680,6 @@ static int sdma_runtime_resume(struct device *dev)
 	 * not off indeed.
 	 */
 	if (readl_relaxed(sdma->regs + SDMA_H_C0PTR)) {
-		if (sdma->iram_pool)
-			sdma->bd0 = gen_pool_dma_alloc(sdma->iram_pool,
-					sizeof(struct sdma_buffer_descriptor),
-					&sdma->bd0_phys);
-		else
-			sdma->bd0 = dma_alloc_coherent(sdma->dev,
-					sizeof(struct sdma_buffer_descriptor),
-					&sdma->bd0_phys, GFP_NOWAIT);
-		if (!sdma->bd0)
-			ret = -ENOMEM;
-
 		sdma->channel_control[0].base_bd_ptr = sdma->bd0_phys;
 		sdma->channel_control[0].current_bd_ptr = sdma->bd0_phys;
 
@@ -2449,6 +2420,24 @@ static int sdma_init_sw(struct sdma_engine *sdma)
 		return ret;
 	}
 
+	if (sdma->iram_pool)
+		sdma->bd0 = gen_pool_dma_alloc(sdma->iram_pool,
+					sizeof(struct sdma_buffer_descriptor),
+					&sdma->bd0_phys);
+	else
+		sdma->bd0 = dma_alloc_coherent(sdma->dev,
+					sizeof(struct sdma_buffer_descriptor),
+					&sdma->bd0_phys, GFP_NOWAIT);
+	if (!sdma->bd0) {
+		if (sdma->iram_pool)
+			gen_pool_free(sdma->iram_pool, (unsigned long)sdma->channel_control, ccbsize);
+		else
+			dma_free_coherent(sdma->dev, ccbsize, sdma->channel_control, sdma->ccb_phys);
+		ret = -ENOMEM;
+		return ret;
+	}
+
+
 	sdma->context = (void *)sdma->channel_control +
 		MAX_DMA_CHANNELS * sizeof(struct sdma_channel_control);
 	sdma->context_phys = sdma->ccb_phys +
@@ -2724,6 +2713,15 @@ static void sdma_remove(struct platform_device *pdev)
 	} else {
 		sdma_runtime_suspend(&pdev->dev);
 	}
+
+	/* free channel0 bd */
+	if (sdma->iram_pool)
+		gen_pool_free(sdma->iram_pool, (unsigned long)sdma->bd0,
+				sizeof(struct sdma_buffer_descriptor));
+	else
+		dma_free_coherent(sdma->dev,
+				sizeof(struct sdma_buffer_descriptor),
+				sdma->bd0, sdma->bd0_phys);
 
 	platform_set_drvdata(pdev, NULL);
 }
