@@ -205,6 +205,17 @@ static int octeon_i2c_hlc_wait(struct octeon_i2c *i2c)
 	return 0;
 }
 
+static int octeon_i2c_recovery(struct octeon_i2c *i2c)
+{
+	int ret;
+
+	ret = i2c_recover_bus(&i2c->adap);
+	if (ret)
+		/* recover failed, try hardware re-init */
+		ret = octeon_i2c_init_lowlevel(i2c);
+	return ret;
+}
+
 static int octeon_i2c_check_status(struct octeon_i2c *i2c, int final_read)
 {
 	u8 stat;
@@ -265,8 +276,9 @@ static int octeon_i2c_check_status(struct octeon_i2c *i2c, int final_read)
 		return -EOPNOTSUPP;
 
 	case STAT_TXDATA_NAK:
-	case STAT_BUS_ERROR:
 		return -EIO;
+	case STAT_BUS_ERROR:
+		return octeon_i2c_recovery(i2c) ? -EIO : -EAGAIN;
 	case STAT_TXADDR_NAK:
 	case STAT_RXADDR_NAK:
 	case STAT_AD2W_NAK:
@@ -277,22 +289,11 @@ static int octeon_i2c_check_status(struct octeon_i2c *i2c, int final_read)
 		/* Set BUS_MON_RST to reset bus monitor */
 		mode |= BUS_MON_RST_MASK;
 		octeon_i2c_writeq_flush(mode, i2c->twsi_base + OCTEON_REG_MODE(i2c));
-		return -EIO;
+		return octeon_i2c_recovery(i2c) ? -EIO : -EAGAIN;
 	default:
 		dev_err(i2c->dev, "unhandled state: %d\n", stat);
 		return -EIO;
 	}
-}
-
-static int octeon_i2c_recovery(struct octeon_i2c *i2c)
-{
-	int ret;
-
-	ret = i2c_recover_bus(&i2c->adap);
-	if (ret)
-		/* recover failed, try hardware re-init */
-		ret = octeon_i2c_init_lowlevel(i2c);
-	return ret;
 }
 
 /**
@@ -823,14 +824,14 @@ out:
 /* calculate and set clock divisors */
 void octeon_i2c_set_clock(struct octeon_i2c *i2c)
 {
-	int tclk, thp_base, inc, thp_idx, mdiv_idx, ndiv_idx, foscl, diff;
+	int tclk, thp_base, inc, thp_idx, mdiv_idx, mdiv_min, ndiv_idx, foscl, diff;
 	bool is_plat_otx2;
 	/*
 	 * Find divisors to produce target frequency, start with large delta
 	 * to cover wider range of divisors, note thp = TCLK half period and
 	 * ds is OSCL output frequency divisor.
 	 */
-	unsigned int thp, mdiv_min, mdiv = 2, ndiv = 0, ds = 10;
+	unsigned int thp, mdiv = 2, ndiv = 0, ds = 10;
 	unsigned int delta_hz = INITIAL_DELTA_HZ;
 
 	is_plat_otx2 = octeon_i2c_is_otx2(to_pci_dev(i2c->dev));

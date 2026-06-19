@@ -229,4 +229,6 @@ static inline bool cpu_attack_vector_mitigated(enum cpu_attack_vectors v)
 #define smt_mitigations SMT_MITIGATIONS_OFF
 #endif
 
+extern void print_arch_cpu_state(int cpu);
+
 #endif /* _LINUX_CPU_H_ */

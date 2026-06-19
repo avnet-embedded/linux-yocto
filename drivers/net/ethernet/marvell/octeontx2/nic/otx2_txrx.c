@@ -140,6 +140,8 @@ static void otx2_snd_pkt_handler(struct otx2_nic *pfvf,
 				    pfvf->netdev->name, cq->cint_idx,
 				    snd_comp->status);
 
+	/* Barrier, so that update to sq by other cpus is visible */
+	smp_mb();
 	sg = &sq->sg[snd_comp->sqe_id];
 	skb = (struct sk_buff *)sg->skb;
 	if (unlikely(!skb))
@@ -165,8 +167,26 @@ static void otx2_snd_pkt_handler(struct otx2_nic *pfvf,
 	sg->skb = (u64)NULL;
 }
 
-static void otx2_set_rxtstamp(struct otx2_nic *pfvf,
-			      struct sk_buff *skb, void *data)
+static inline void otx2_set_taginfo(struct nix_rx_parse_s *parse,
+				    struct sk_buff *skb)
+{
+	/* Check if VLAN is present, captured and stripped from packet */
+	if (parse->vtag0_valid && parse->vtag0_gone) {
+		skb_frag_t *frag0 = &skb_shinfo(skb)->frags[0];
+
+		/* Is the tag captured STAG or CTAG ? */
+		if (((struct ethhdr *)skb_frag_address(frag0))->h_proto ==
+		    htons(ETH_P_8021Q))
+			__vlan_hwaccel_put_tag(skb, htons(ETH_P_8021AD),
+					       parse->vtag0_tci);
+		else
+			__vlan_hwaccel_put_tag(skb, htons(ETH_P_8021Q),
+					       parse->vtag0_tci);
+	}
+}
+
+static inline void otx2_set_rxtstamp(struct otx2_nic *pfvf,
+				     struct sk_buff *skb, void *data)
 {
 	u64 timestamp, tsns;
 	int err;
@@ -203,6 +223,7 @@ static bool otx2_skb_add_frag(struct otx2_nic *pfvf, struct sk_buff *skb,
 			otx2_set_rxtstamp(pfvf, skb, va);
 			off = OTX2_HW_TIMESTAMP_LEN;
 		}
+		off += pfvf->xtra_hdr;
 	}
 
 	page = virt_to_page(va);
@@ -256,9 +277,12 @@ static void otx2_free_rcv_seg(struct otx2_nic *pfvf, struct nix_cqe_rx_s *cqe,
 	while (start < end) {
 		sg = (struct nix_rx_sg_s *)start;
 		seg_addr = &sg->seg_addr;
-		for (seg = 0; seg < sg->segs; seg++, seg_addr++)
+		for (seg = 0; seg < sg->segs; seg++, seg_addr++) {
+			if (unlikely(!seg_addr))
+				return;
 			pfvf->hw_ops->aura_freeptr(pfvf, qidx,
 						   *seg_addr & ~0x07ULL);
+		}
 		start += sizeof(*sg);
 	}
 }
@@ -383,6 +407,11 @@ static void otx2_rcv_pkt_handler(struct otx2_nic *pfvf,
 	if (pfvf->flags & OTX2_FLAG_TC_MARK_ENABLED)
 		skb->mark = parse->match_id;
 
+	if (test_bit(HW_MACSEC_SCI_MATCH, &pfvf->hw.cap_flag) &&
+	    (parse->mcs_mdata & 0x7F))
+		otx2_macsec_handle_rx_skb(pfvf, skb, parse->mcs_mdata & 0x7F);
+
+	otx2_set_taginfo(parse, skb);
 	skb_mark_for_recycle(skb);
 	if (metasize)
 		skb_metadata_set(skb, metasize);
@@ -550,7 +579,7 @@ static void otx2_adjust_adaptive_coalese(struct otx2_nic *pfvf, struct otx2_cq_p
 	u64 tx_frames, tx_bytes;
 
 	rx_frames = OTX2_GET_RX_STATS(RX_BCAST) + OTX2_GET_RX_STATS(RX_MCAST) +
-		OTX2_GET_RX_STATS(RX_UCAST);
+			OTX2_GET_RX_STATS(RX_UCAST);
 	rx_bytes = OTX2_GET_RX_STATS(RX_OCTS);
 	tx_bytes = OTX2_GET_TX_STATS(TX_OCTS);
 	tx_frames = OTX2_GET_TX_STATS(TX_UCAST);
@@ -703,8 +732,36 @@ static bool otx2_sqe_add_sg(struct otx2_nic *pfvf, struct otx2_snd_queue *sq,
 	return true;
 }
 
+static bool otx2_macsec_skb_is_offload(struct sk_buff *skb)
+{
+	struct metadata_dst *md_dst = skb_metadata_dst(skb);
+
+	return md_dst && (md_dst->type == METADATA_MACSEC);
+}
+
+static bool otx2_update_macsec_flowid(struct otx2_nic *pfvf, struct sk_buff *skb,
+				      struct nix_sqe_ext_s *ext)
+{
+	u8 flow_id;
+	int err;
+
+	if (!test_bit(HW_MACSEC_SCI_MATCH, &pfvf->hw.cap_flag))
+		return true;
+
+	if (!otx2_macsec_skb_is_offload(skb))
+		return true;
+
+	err = otx2_macsec_handle_tx_skb(pfvf, skb, &flow_id);
+	if (!err) {
+		ext->flow_id = flow_id;
+		ext->flow_override = 1;
+	}
+
+	return err == 0 ? true : false;
+}
+
 /* Add SQE extended header subdescriptor */
-static void otx2_sqe_add_ext(struct otx2_nic *pfvf, struct otx2_snd_queue *sq,
+static bool otx2_sqe_add_ext(struct otx2_nic *pfvf, struct otx2_snd_queue *sq,
 			     struct sk_buff *skb, int *offset)
 {
 	struct nix_sqe_ext_s *ext;
@@ -770,6 +827,7 @@ static void otx2_sqe_add_ext(struct otx2_nic *pfvf, struct otx2_snd_queue *sq,
 	}
 
 	*offset += sizeof(*ext);
+	return otx2_update_macsec_flowid(pfvf, skb, ext);
 }
 
 static void otx2_sqe_add_mem(struct otx2_snd_queue *sq, int *offset,
@@ -1224,8 +1282,9 @@ bool otx2_sq_append_skb(void *dev, struct netdev_queue *txq,
 		if (skb_vlan_tag_present(skb)) {
 			skb = __vlan_hwaccel_push_inside(skb);
 			if (!skb)
-				return true;
+				return false;
 		}
+
 		otx2_sq_append_tso(pfvf, sq, skb, qidx);
 		return true;
 	}
@@ -1242,7 +1301,8 @@ bool otx2_sq_append_skb(void *dev, struct netdev_queue *txq,
 	offset = sizeof(*sqe_hdr);
 
 	/* Add extended header if needed */
-	otx2_sqe_add_ext(pfvf, sq, skb, &offset);
+	if (!otx2_sqe_add_ext(pfvf, sq, skb, &offset))
+		return false;
 
 	/* Add SG subdesc with data frags */
 	if (static_branch_unlikely(&cn10k_ipsec_sa_enabled) &&

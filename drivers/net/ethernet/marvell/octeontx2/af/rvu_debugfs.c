@@ -14,12 +14,16 @@
 
 #include "rvu_struct.h"
 #include "rvu_reg.h"
+#include "rvu_eblock_reg.h"
 #include "rvu.h"
 #include "cgx.h"
 #include "lmac_common.h"
 #include "npc.h"
 #include "rvu_npc_hash.h"
 #include "mcs.h"
+
+#include "cn20k/debugfs.h"
+#include "mcs_reg.h"
 
 #define DEBUGFS_DIR_NAME "octeontx2"
 
@@ -211,7 +215,7 @@ static int rvu_dbg_mcs_port_stats_display(struct seq_file *filp, void *unused, i
 		seq_printf(filp, "port%d: Tcam Miss: %lld\n", lmac, stats.tcam_miss_cnt);
 		seq_printf(filp, "port%d: Parser errors: %lld\n", lmac, stats.parser_err_cnt);
 
-		if (dir == MCS_RX && mcs->hw->mcs_blks > 1)
+		if (dir == MCS_RX && mcs->hw->mcs_devtype == CNF10KB_MCS)
 			seq_printf(filp, "port%d: Preempt error: %lld\n", lmac,
 				   stats.preempt_err_cnt);
 		if (dir == MCS_TX)
@@ -236,59 +240,6 @@ static int rvu_dbg_mcs_tx_port_stats_display(struct seq_file *filp, void *unused
 
 RVU_DEBUG_SEQ_FOPS(mcs_tx_port_stats, mcs_tx_port_stats_display, NULL);
 
-static int rvu_dbg_mcs_sa_stats_display(struct seq_file *filp, void *unused, int dir)
-{
-	struct mcs *mcs = filp->private;
-	struct mcs_sa_stats stats;
-	struct rsrc_bmap *map;
-	int sa_id;
-
-	if (dir == MCS_TX) {
-		map = &mcs->tx.sa;
-		mutex_lock(&mcs->stats_lock);
-		for_each_set_bit(sa_id, map->bmap, mcs->hw->sa_entries) {
-			seq_puts(filp, "\n TX SA stats\n");
-			mcs_get_sa_stats(mcs, &stats, sa_id, MCS_TX);
-			seq_printf(filp, "sa%d: Pkts encrypted: %lld\n", sa_id,
-				   stats.pkt_encrypt_cnt);
-
-			seq_printf(filp, "sa%d: Pkts protected: %lld\n", sa_id,
-				   stats.pkt_protected_cnt);
-		}
-		mutex_unlock(&mcs->stats_lock);
-		return 0;
-	}
-
-	/* RX stats */
-	map = &mcs->rx.sa;
-	mutex_lock(&mcs->stats_lock);
-	for_each_set_bit(sa_id, map->bmap, mcs->hw->sa_entries) {
-		seq_puts(filp, "\n RX SA stats\n");
-		mcs_get_sa_stats(mcs, &stats, sa_id, MCS_RX);
-		seq_printf(filp, "sa%d: Invalid pkts: %lld\n", sa_id, stats.pkt_invalid_cnt);
-		seq_printf(filp, "sa%d: Pkts no sa error: %lld\n", sa_id, stats.pkt_nosaerror_cnt);
-		seq_printf(filp, "sa%d: Pkts not valid: %lld\n", sa_id, stats.pkt_notvalid_cnt);
-		seq_printf(filp, "sa%d: Pkts ok: %lld\n", sa_id, stats.pkt_ok_cnt);
-		seq_printf(filp, "sa%d: Pkts no sa: %lld\n", sa_id, stats.pkt_nosa_cnt);
-	}
-	mutex_unlock(&mcs->stats_lock);
-	return 0;
-}
-
-static int rvu_dbg_mcs_rx_sa_stats_display(struct seq_file *filp, void *unused)
-{
-	return rvu_dbg_mcs_sa_stats_display(filp, unused, MCS_RX);
-}
-
-RVU_DEBUG_SEQ_FOPS(mcs_rx_sa_stats, mcs_rx_sa_stats_display, NULL);
-
-static int rvu_dbg_mcs_tx_sa_stats_display(struct seq_file *filp, void *unused)
-{
-	return rvu_dbg_mcs_sa_stats_display(filp, unused, MCS_TX);
-}
-
-RVU_DEBUG_SEQ_FOPS(mcs_tx_sa_stats, mcs_tx_sa_stats_display, NULL);
-
 static int rvu_dbg_mcs_tx_sc_stats_display(struct seq_file *filp, void *unused)
 {
 	struct mcs *mcs = filp->private;
@@ -305,13 +256,6 @@ static int rvu_dbg_mcs_tx_sc_stats_display(struct seq_file *filp, void *unused)
 		seq_printf(filp, "\n=======sc%d======\n\n", sc_id);
 		seq_printf(filp, "sc%d: Pkts encrypted: %lld\n", sc_id, stats.pkt_encrypt_cnt);
 		seq_printf(filp, "sc%d: Pkts protected: %lld\n", sc_id, stats.pkt_protected_cnt);
-
-		if (mcs->hw->mcs_blks == 1) {
-			seq_printf(filp, "sc%d: Octets encrypted: %lld\n", sc_id,
-				   stats.octet_encrypt_cnt);
-			seq_printf(filp, "sc%d: Octets protected: %lld\n", sc_id,
-				   stats.octet_protected_cnt);
-		}
 	}
 	mutex_unlock(&mcs->stats_lock);
 	return 0;
@@ -342,12 +286,6 @@ static int rvu_dbg_mcs_rx_sc_stats_display(struct seq_file *filp, void *unused)
 		if (mcs->hw->mcs_blks > 1) {
 			seq_printf(filp, "sc%d: Delay pkts: %lld\n", sc_id, stats.pkt_delay_cnt);
 			seq_printf(filp, "sc%d: Pkts ok: %lld\n", sc_id, stats.pkt_ok_cnt);
-		}
-		if (mcs->hw->mcs_blks == 1) {
-			seq_printf(filp, "sc%d: Octets decrypted: %lld\n", sc_id,
-				   stats.octet_decrypt_cnt);
-			seq_printf(filp, "sc%d: Octets validated: %lld\n", sc_id,
-				   stats.octet_validate_cnt);
 		}
 	}
 	mutex_unlock(&mcs->stats_lock);
@@ -492,7 +430,7 @@ RVU_DEBUG_SEQ_FOPS(mcs_rx_secy_stats, mcs_rx_secy_stats_display, NULL);
 static void rvu_dbg_mcs_init(struct rvu *rvu)
 {
 	struct mcs *mcs;
-	char dname[10];
+	char dname[24];
 	int i;
 
 	if (!rvu->mcs_blk_cnt)
@@ -503,7 +441,7 @@ static void rvu_dbg_mcs_init(struct rvu *rvu)
 	for (i = 0; i < rvu->mcs_blk_cnt; i++) {
 		mcs = mcs_get_pdata(i);
 
-		sprintf(dname, "mcs%d", i);
+		snprintf(dname, sizeof(dname), "mcs%d", i);
 		rvu->rvu_dbg.mcs = debugfs_create_dir(dname,
 						      rvu->rvu_dbg.mcs_root);
 
@@ -518,11 +456,11 @@ static void rvu_dbg_mcs_init(struct rvu *rvu)
 		debugfs_create_file("sc", 0600, rvu->rvu_dbg.mcs_rx, mcs,
 				    &rvu_dbg_mcs_rx_sc_stats_fops);
 
-		debugfs_create_file("sa", 0600, rvu->rvu_dbg.mcs_rx, mcs,
-				    &rvu_dbg_mcs_rx_sa_stats_fops);
-
 		debugfs_create_file("port", 0600, rvu->rvu_dbg.mcs_rx, mcs,
 				    &rvu_dbg_mcs_rx_port_stats_fops);
+
+		if (is_cn20k(rvu->pdev))
+			rvu_cn20ka_handle_port_mapped_stats(rvu, mcs, MCS_RX);
 
 		rvu->rvu_dbg.mcs_tx = debugfs_create_dir("tx_stats", rvu->rvu_dbg.mcs);
 
@@ -535,11 +473,11 @@ static void rvu_dbg_mcs_init(struct rvu *rvu)
 		debugfs_create_file("sc", 0600, rvu->rvu_dbg.mcs_tx, mcs,
 				    &rvu_dbg_mcs_tx_sc_stats_fops);
 
-		debugfs_create_file("sa", 0600, rvu->rvu_dbg.mcs_tx, mcs,
-				    &rvu_dbg_mcs_tx_sa_stats_fops);
-
 		debugfs_create_file("port", 0600, rvu->rvu_dbg.mcs_tx, mcs,
 				    &rvu_dbg_mcs_tx_port_stats_fops);
+
+		if (is_cn20k(rvu->pdev))
+			rvu_cn20ka_handle_port_mapped_stats(rvu, mcs, MCS_TX);
 	}
 }
 
@@ -687,7 +625,7 @@ static int get_max_column_width(struct rvu *rvu)
 		return -ENOMEM;
 
 	for (pf = 0; pf < rvu->hw->total_pfs; pf++) {
-		for (vf = 0; vf <= rvu->hw->total_vfs; vf++) {
+		for (vf = 0; vf <= rvu->hw->max_vfs_per_pf; vf++) {
 			pcifunc = rvu_make_pcifunc(rvu->pdev, pf, vf);
 			if (!pcifunc)
 				continue;
@@ -756,7 +694,7 @@ static ssize_t rvu_dbg_rsrc_attach_status(struct file *filp,
 	i++;
 	*ppos += off;
 	for (pf = 0; pf < rvu->hw->total_pfs; pf++) {
-		for (vf = 0; vf <= rvu->hw->total_vfs; vf++) {
+		for (vf = 0; vf <= rvu->hw->max_vfs_per_pf; vf++) {
 			off = 0;
 			flag = 0;
 			pcifunc = rvu_make_pcifunc(rvu->pdev, pf, vf);
@@ -824,6 +762,7 @@ static int rvu_dbg_rvu_pf_cgx_map_display(struct seq_file *filp, void *unused)
 	int pf, domain, blkid;
 	u8 cgx_id, lmac_id;
 	u16 pcifunc;
+	u8 start;
 
 	domain = 2;
 	mac_ops = get_mac_ops(rvu_first_cgx_pdata(rvu));
@@ -832,11 +771,16 @@ static int rvu_dbg_rvu_pf_cgx_map_display(struct seq_file *filp, void *unused)
 		return 0;
 	seq_printf(filp, "PCI dev\t\tRVU PF Func\tNIX block\t%s\tLMAC\tCHAN\n",
 		   mac_ops->name);
+
+	/* All the PF devices are on contiguous PCI bus numbers, but the PF0(AF)
+	 * may not start from 1 always. Hence get bus number from PCI device.
+	 */
+	start = rvu->pdev->bus->number;
 	for (pf = 0; pf < rvu->hw->total_pfs; pf++) {
 		if (!is_pf_cgxmapped(rvu, pf))
 			continue;
 
-		pdev =  pci_get_domain_bus_and_slot(domain, pf + 1, 0);
+		pdev =  pci_get_domain_bus_and_slot(domain, pf + start, 0);
 		if (!pdev)
 			continue;
 
@@ -971,6 +915,12 @@ static void print_npa_qsize(struct seq_file *m, struct rvu_pfvf *pfvf)
 					pfvf->aura_ctx->qsize);
 		seq_printf(m, "Aura count : %d\n", pfvf->aura_ctx->qsize);
 		seq_printf(m, "Aura context ena/dis bitmap : %s\n", buf);
+		if (pfvf->halo_bmap) {
+			bitmap_print_to_pagebuf(false, buf, pfvf->halo_bmap,
+						pfvf->aura_ctx->qsize);
+			seq_printf(m, "Halo context ena/dis bitmap : %s\n",
+				   buf);
+		}
 	}
 
 	if (!pfvf->pool_ctx) {
@@ -1101,6 +1051,11 @@ static void print_npa_aura_ctx(struct seq_file *m, struct npa_aq_enq_rsp *rsp)
 	struct npa_aura_s *aura = &rsp->aura;
 	struct rvu *rvu = m->private;
 
+	if (is_cn20k(rvu->pdev)) {
+		print_npa_cn20k_aura_ctx(m, (struct npa_cn20k_aq_enq_rsp *)rsp);
+		return;
+	}
+
 	seq_printf(m, "W0: Pool addr\t\t%llx\n", aura->pool_addr);
 
 	seq_printf(m, "W1: ena\t\t\t%d\nW1: pool caching\t%d\n",
@@ -1149,6 +1104,11 @@ static void print_npa_pool_ctx(struct seq_file *m, struct npa_aq_enq_rsp *rsp)
 	struct npa_pool_s *pool = &rsp->pool;
 	struct rvu *rvu = m->private;
 
+	if (is_cn20k(rvu->pdev)) {
+		print_npa_cn20k_pool_ctx(m, (struct npa_cn20k_aq_enq_rsp *)rsp);
+		return;
+	}
+
 	seq_printf(m, "W0: Stack base\t\t%llx\n", pool->stack_base);
 
 	seq_printf(m, "W1: ena \t\t%d\nW1: nat_align \t\t%d\n",
@@ -1190,6 +1150,20 @@ static void print_npa_pool_ctx(struct seq_file *m, struct npa_aq_enq_rsp *rsp)
 		seq_printf(m, "W8: fc_msh_dst\t\t%d\n", pool->fc_msh_dst);
 }
 
+static inline char *npa_ctype_str(int ctype)
+{
+	switch (ctype) {
+	case NPA_AQ_CTYPE_AURA:
+		return "aura";
+	case NPA_AQ_CTYPE_HALO:
+		return "halo";
+	case NPA_AQ_CTYPE_POOL:
+		return "pool";
+	default:
+		return NULL;
+	}
+}
+
 /* Reads aura/pool's ctx from admin queue */
 static int rvu_dbg_npa_ctx_display(struct seq_file *m, void *unused, int ctype)
 {
@@ -1206,6 +1180,7 @@ static int rvu_dbg_npa_ctx_display(struct seq_file *m, void *unused, int ctype)
 
 	switch (ctype) {
 	case NPA_AQ_CTYPE_AURA:
+	case NPA_AQ_CTYPE_HALO:
 		npalf = rvu->rvu_dbg.npa_aura_ctx.lf;
 		id = rvu->rvu_dbg.npa_aura_ctx.id;
 		all = rvu->rvu_dbg.npa_aura_ctx.all;
@@ -1230,6 +1205,9 @@ static int rvu_dbg_npa_ctx_display(struct seq_file *m, void *unused, int ctype)
 	} else if (ctype == NPA_AQ_CTYPE_POOL && !pfvf->pool_ctx) {
 		seq_puts(m, "Pool context is not initialized\n");
 		return -EINVAL;
+	} else if (ctype == NPA_AQ_CTYPE_HALO && !pfvf->aura_ctx) {
+		seq_puts(m, "Halo context is not initialized\n");
+		return -EINVAL;
 	}
 
 	memset(&aq_req, 0, sizeof(struct npa_aq_enq_req));
@@ -1239,6 +1217,9 @@ static int rvu_dbg_npa_ctx_display(struct seq_file *m, void *unused, int ctype)
 	if (ctype == NPA_AQ_CTYPE_AURA) {
 		max_id = pfvf->aura_ctx->qsize;
 		print_npa_ctx = print_npa_aura_ctx;
+	} else if (ctype == NPA_AQ_CTYPE_HALO) {
+		max_id = pfvf->aura_ctx->qsize;
+		print_npa_ctx = print_npa_cn20k_halo_ctx;
 	} else {
 		max_id = pfvf->pool_ctx->qsize;
 		print_npa_ctx = print_npa_pool_ctx;
@@ -1246,8 +1227,7 @@ static int rvu_dbg_npa_ctx_display(struct seq_file *m, void *unused, int ctype)
 
 	if (id < 0 || id >= max_id) {
 		seq_printf(m, "Invalid %s, valid range is 0-%d\n",
-			   (ctype == NPA_AQ_CTYPE_AURA) ? "aura" : "pool",
-			max_id - 1);
+			   npa_ctype_str(ctype), max_id - 1);
 		return -EINVAL;
 	}
 
@@ -1260,12 +1240,17 @@ static int rvu_dbg_npa_ctx_display(struct seq_file *m, void *unused, int ctype)
 		aq_req.aura_id = aura;
 
 		/* Skip if queue is uninitialized */
+		if (ctype == NPA_AQ_CTYPE_AURA && !test_bit(aura, pfvf->aura_bmap))
+			continue;
+
+		if (ctype == NPA_AQ_CTYPE_HALO && !test_bit(aura, pfvf->halo_bmap))
+			continue;
+
 		if (ctype == NPA_AQ_CTYPE_POOL && !test_bit(aura, pfvf->pool_bmap))
 			continue;
 
-		seq_printf(m, "======%s : %d=======\n",
-			   (ctype == NPA_AQ_CTYPE_AURA) ? "AURA" : "POOL",
-			aq_req.aura_id);
+		seq_printf(m, "======%s : %d=======\n", npa_ctype_str(ctype),
+			   aq_req.aura_id);
 		rc = rvu_npa_aq_enq_inst(rvu, &aq_req, &rsp);
 		if (rc) {
 			seq_puts(m, "Failed to read context\n");
@@ -1294,6 +1279,12 @@ static int write_npa_ctx(struct rvu *rvu, bool all,
 			return -EINVAL;
 		}
 		max_id = pfvf->aura_ctx->qsize;
+	} else if (ctype == NPA_AQ_CTYPE_HALO) {
+		if (!pfvf->aura_ctx) {
+			dev_warn(rvu->dev, "Halo context is not initialized\n");
+			return -EINVAL;
+		}
+		max_id = pfvf->aura_ctx->qsize;
 	} else if (ctype == NPA_AQ_CTYPE_POOL) {
 		if (!pfvf->pool_ctx) {
 			dev_warn(rvu->dev, "Pool context is not initialized\n");
@@ -1304,13 +1295,14 @@ static int write_npa_ctx(struct rvu *rvu, bool all,
 
 	if (id < 0 || id >= max_id) {
 		dev_warn(rvu->dev, "Invalid %s, valid range is 0-%d\n",
-			 (ctype == NPA_AQ_CTYPE_AURA) ? "aura" : "pool",
+			 npa_ctype_str(ctype),
 			max_id - 1);
 		return -EINVAL;
 	}
 
 	switch (ctype) {
 	case NPA_AQ_CTYPE_AURA:
+	case NPA_AQ_CTYPE_HALO:
 		rvu->rvu_dbg.npa_aura_ctx.lf = npalf;
 		rvu->rvu_dbg.npa_aura_ctx.id = id;
 		rvu->rvu_dbg.npa_aura_ctx.all = all;
@@ -1369,8 +1361,7 @@ static ssize_t rvu_dbg_npa_ctx_write(struct file *filp,
 				     const char __user *buffer,
 				     size_t count, loff_t *ppos, int ctype)
 {
-	char *cmd_buf, *ctype_string = (ctype == NPA_AQ_CTYPE_AURA) ?
-					"aura" : "pool";
+	char *cmd_buf, *ctype_string = npa_ctype_str(ctype);
 	struct seq_file *seqfp = filp->private_data;
 	struct rvu *rvu = seqfp->private;
 	int npalf, id = 0, ret;
@@ -1411,6 +1402,21 @@ static int rvu_dbg_npa_aura_ctx_display(struct seq_file *filp, void *unused)
 }
 
 RVU_DEBUG_SEQ_FOPS(npa_aura_ctx, npa_aura_ctx_display, npa_aura_ctx_write);
+
+static ssize_t rvu_dbg_npa_halo_ctx_write(struct file *filp,
+					  const char __user *buffer,
+					  size_t count, loff_t *ppos)
+{
+	return rvu_dbg_npa_ctx_write(filp, buffer, count, ppos,
+				     NPA_AQ_CTYPE_HALO);
+}
+
+static int rvu_dbg_npa_halo_ctx_display(struct seq_file *filp, void *unused)
+{
+	return rvu_dbg_npa_ctx_display(filp, unused, NPA_AQ_CTYPE_HALO);
+}
+
+RVU_DEBUG_SEQ_FOPS(npa_halo_ctx, npa_halo_ctx_display, npa_halo_ctx_write);
 
 static ssize_t rvu_dbg_npa_pool_ctx_write(struct file *filp,
 					  const char __user *buffer,
@@ -1651,6 +1657,9 @@ static void print_tm_tree(struct seq_file *m,
 	int blkaddr;
 	u64 cfg;
 
+	if (!sq_ctx->ena)
+		return;
+
 	blkaddr = nix_hw->blkaddr;
 	schq = sq_ctx->smq;
 
@@ -1688,6 +1697,12 @@ static int rvu_dbg_nix_tm_tree_display(struct seq_file *m, void *unused)
 		return -EINVAL;
 
 	pfvf = rvu_get_pfvf(rvu, pcifunc);
+
+	if (!pfvf->sq_ctx) {
+		seq_printf(m, "SQ context is not initialized for pcifunc 0x%x\n", pcifunc);
+		return -EINVAL;
+	}
+
 	max_id = pfvf->sq_ctx->qsize;
 
 	memset(&aq_req, 0, sizeof(struct nix_aq_enq_req));
@@ -2009,10 +2024,16 @@ static void print_nix_sq_ctx(struct seq_file *m, struct nix_aq_enq_rsp *rsp)
 	struct nix_hw *nix_hw = m->private;
 	struct rvu *rvu = nix_hw->rvu;
 
+	if (is_cn20k(rvu->pdev)) {
+		print_nix_cn20k_sq_ctx(m, (struct nix_cn20k_sq_ctx_s *)sq_ctx);
+		return;
+	}
+
 	if (!is_rvu_otx2(rvu)) {
 		print_nix_cn10k_sq_ctx(m, (struct nix_cn10k_sq_ctx_s *)sq_ctx);
 		return;
 	}
+
 	seq_printf(m, "W0: sqe_way_mask \t\t%d\nW0: cq \t\t\t\t%d\n",
 		   sq_ctx->sqe_way_mask, sq_ctx->cq);
 	seq_printf(m, "W0: sdp_mcast \t\t\t%d\nW0: substream \t\t\t0x%03x\n",
@@ -2103,7 +2124,9 @@ static void print_nix_cn10k_rq_ctx(struct seq_file *m,
 	seq_printf(m, "W1: ipsecd_drop_ena \t\t%d\nW1: chi_ena \t\t\t%d\n\n",
 		   rq_ctx->ipsecd_drop_ena, rq_ctx->chi_ena);
 
-	seq_printf(m, "W2: band_prof_id \t\t%d\n", rq_ctx->band_prof_id);
+	seq_printf(m, "W2: band_prof_id \t\t%d\n",
+		   (u16)rq_ctx->band_prof_id_h << 10 | rq_ctx->band_prof_id);
+
 	seq_printf(m, "W2: policer_ena \t\t%d\n", rq_ctx->policer_ena);
 	seq_printf(m, "W2: spb_sizem1 \t\t\t%d\n", rq_ctx->spb_sizem1);
 	seq_printf(m, "W2: wqe_skip \t\t\t%d\nW2: sqb_ena \t\t\t%d\n",
@@ -2225,6 +2248,11 @@ static void print_nix_cq_ctx(struct seq_file *m, struct nix_aq_enq_rsp *rsp)
 	struct nix_hw *nix_hw = m->private;
 	struct rvu *rvu = nix_hw->rvu;
 
+	if (is_cn20k(rvu->pdev)) {
+		print_nix_cn20k_cq_ctx(m, (struct nix_cn20k_aq_enq_rsp *)rsp);
+		return;
+	}
+
 	seq_printf(m, "W0: base \t\t\t%llx\n\n", cq_ctx->base);
 
 	seq_printf(m, "W1: wrptr \t\t\t%llx\n", (u64)cq_ctx->wrptr);
@@ -2254,6 +2282,7 @@ static void print_nix_cq_ctx(struct seq_file *m, struct nix_aq_enq_rsp *rsp)
 		   cq_ctx->cq_err_int_ena, cq_ctx->cq_err_int);
 	seq_printf(m, "W3: qsize \t\t\t%d\nW3:caching \t\t\t%d\n",
 		   cq_ctx->qsize, cq_ctx->caching);
+
 	seq_printf(m, "W3: substream \t\t\t0x%03x\nW3: ena \t\t\t%d\n",
 		   cq_ctx->substream, cq_ctx->ena);
 	if (!is_rvu_otx2(rvu)) {
@@ -2615,7 +2644,10 @@ static void print_band_prof_ctx(struct seq_file *m,
 		(prof->rc_action == 1) ? "DROP" : "RED";
 	seq_printf(m, "W1: rc_action\t\t%s\n", str);
 	seq_printf(m, "W1: meter_algo\t\t%d\n", prof->meter_algo);
-	seq_printf(m, "W1: band_prof_id\t%d\n", prof->band_prof_id);
+
+	seq_printf(m, "W1: band_prof_id\t%d\n",
+		   (u16)prof->band_prof_id_h << 7 | prof->band_prof_id);
+
 	seq_printf(m, "W1: hl_en\t\t%d\n", prof->hl_en);
 
 	seq_printf(m, "W2: ts\t\t\t%lld\n", (u64)prof->ts);
@@ -2774,16 +2806,71 @@ static void rvu_dbg_nix_init(struct rvu *rvu, int blkaddr)
 			    &rvu_dbg_nix_band_prof_rsrc_fops);
 }
 
+static int rvu_dbg_npa_dwrr_display(struct seq_file *m, void *unused)
+{
+	struct rvu *rvu = m->private;
+	u64 int_req_dwrr, ext_req_dwrr;
+
+	int_req_dwrr = rvu_read64(rvu, BLKADDR_NPA, NPA_AF_INT_REQ_DWRR);
+	ext_req_dwrr = rvu_read64(rvu, BLKADDR_NPA, NPA_AF_EXT_REQ_DWRR);
+
+	seq_printf(m, "NPA_AF_INT_REQ_DWRR (0x0C0): 0x%llx\n", int_req_dwrr);
+	seq_printf(m, "  [55:48] ref_cnt_wt      : %llu\n",
+		   (int_req_dwrr >> 48) & 0xFF);
+	seq_printf(m, "  [47:40] dsf_upd_wt      : %llu\n",
+		   (int_req_dwrr >> 40) & 0xFF);
+	seq_printf(m, "  [39:32] aq_inst_wt      : %llu\n",
+		   (int_req_dwrr >> 32) & 0xFF);
+	seq_printf(m, "  [31:24] batch_free_wt   : %llu\n",
+		   (int_req_dwrr >> 24) & 0xFF);
+	seq_printf(m, "  [23:16] batch_alloc_wt  : %llu\n",
+		   (int_req_dwrr >> 16) & 0xFF);
+	seq_printf(m, "  [15:8]  oob_op_wt       : %llu\n",
+		   (int_req_dwrr >> 8) & 0xFF);
+	seq_printf(m, "  [7:0]   sw_ptr_op_wt    : %llu\n",
+		   int_req_dwrr & 0xFF);
+
+	seq_puts(m, "\n");
+
+	seq_printf(m, "NPA_AF_EXT_REQ_DWRR (0x0C8): 0x%llx\n", ext_req_dwrr);
+	seq_printf(m, "  [55:48] dpi_wt          : %llu\n",
+		   (ext_req_dwrr >> 48) & 0xFF);
+	seq_printf(m, "  [47:40] nixrx_wt        : %llu\n",
+		   (ext_req_dwrr >> 40) & 0xFF);
+	seq_printf(m, "  [39:32] nixtx_wt        : %llu\n",
+		   (ext_req_dwrr >> 32) & 0xFF);
+	seq_printf(m, "  [31:24] xcb_wt          : %llu\n",
+		   (ext_req_dwrr >> 24) & 0xFF);
+	seq_printf(m, "  [23:16] cpt_wt          : %llu\n",
+		   (ext_req_dwrr >> 16) & 0xFF);
+	seq_printf(m, "  [15:8]  tim_wt          : %llu\n",
+		   (ext_req_dwrr >> 8) & 0xFF);
+	seq_printf(m, "  [7:0]   sso_wt          : %llu\n",
+		   ext_req_dwrr & 0xFF);
+
+	return 0;
+}
+
+RVU_DEBUG_SEQ_FOPS(npa_dwrr, npa_dwrr_display, NULL);
+
 static void rvu_dbg_npa_init(struct rvu *rvu)
 {
 	rvu->rvu_dbg.npa = debugfs_create_dir("npa", rvu->rvu_dbg.root);
 
 	debugfs_create_file("qsize", 0600, rvu->rvu_dbg.npa, rvu,
 			    &rvu_dbg_npa_qsize_fops);
+	debugfs_create_file("dwrr", 0400, rvu->rvu_dbg.npa, rvu,
+			    &rvu_dbg_npa_dwrr_fops);
 	debugfs_create_file("aura_ctx", 0600, rvu->rvu_dbg.npa, rvu,
 			    &rvu_dbg_npa_aura_ctx_fops);
+	if (is_cn20k(rvu->pdev))
+		debugfs_create_file("halo_ctx", 0600, rvu->rvu_dbg.npa, rvu,
+				    &rvu_dbg_npa_halo_ctx_fops);
 	debugfs_create_file("pool_ctx", 0600, rvu->rvu_dbg.npa, rvu,
 			    &rvu_dbg_npa_pool_ctx_fops);
+
+	if (is_cn20k(rvu->pdev)) /* NDC not appliable for cn20k */
+		return;
 	debugfs_create_file("ndc_cache", 0600, rvu->rvu_dbg.npa, rvu,
 			    &rvu_dbg_npa_ndc_cache_fops);
 	debugfs_create_file("ndc_hits_miss", 0600, rvu->rvu_dbg.npa, rvu,
@@ -2977,6 +3064,9 @@ static int cgx_print_dmac_flt(struct seq_file *s, int lmac_id)
 		}
 	}
 
+	seq_printf(s, "\nDMAC filter drop count: %lld\n",
+		   rvu_cgx_get_dmacflt_dropped_pktcnt(cgxd, lmac_id));
+
 	pci_dev_put(pdev);
 	return 0;
 }
@@ -3161,6 +3251,8 @@ static void rvu_print_npc_mcam_info(struct seq_file *s,
 static int rvu_dbg_npc_mcam_info_display(struct seq_file *filp, void *unsued)
 {
 	struct rvu *rvu = filp->private;
+	int x4_free, x2_free, sb_free;
+	struct npc_priv_t *npc_priv;
 	int pf, vf, numvfs, blkaddr;
 	struct npc_mcam *mcam;
 	u16 pcifunc, counters;
@@ -3175,16 +3267,30 @@ static int rvu_dbg_npc_mcam_info_display(struct seq_file *filp, void *unsued)
 
 	seq_puts(filp, "\nNPC MCAM info:\n");
 	/* MCAM keywidth on receive and transmit sides */
-	cfg = rvu_read64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_RX));
-	cfg = (cfg >> 32) & 0x07;
-	seq_printf(filp, "\t\t RX keywidth \t: %s\n", (cfg == NPC_MCAM_KEY_X1) ?
-		   "112bits" : ((cfg == NPC_MCAM_KEY_X2) ?
-		   "224bits" : "448bits"));
-	cfg = rvu_read64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_TX));
-	cfg = (cfg >> 32) & 0x07;
-	seq_printf(filp, "\t\t TX keywidth \t: %s\n", (cfg == NPC_MCAM_KEY_X1) ?
-		   "112bits" : ((cfg == NPC_MCAM_KEY_X2) ?
-		   "224bits" : "448bits"));
+	if (is_cn20k(rvu->pdev)) {
+		npc_priv = npc_priv_get();
+		seq_printf(filp, "\t\t RX keywidth \t: %s\n",
+			   (npc_priv->kw == NPC_MCAM_KEY_X1) ?
+			   "256bits" : "512bits");
+
+		npc_cn20k_subbank_calc_free(rvu, &x2_free, &x4_free, &sb_free);
+		seq_printf(filp, "\t\t free x4 slots\t: %d\n", x4_free);
+
+		seq_printf(filp, "\t\t free x2 slots\t: %d\n", x2_free);
+
+		seq_printf(filp, "\t\t free subbanks\t: %d\n", sb_free);
+	} else {
+		cfg = rvu_read64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_RX));
+		cfg = (cfg >> 32) & 0x07;
+		seq_printf(filp, "\t\t RX keywidth \t: %s\n", (cfg == NPC_MCAM_KEY_X1) ?
+			   "112bits" : ((cfg == NPC_MCAM_KEY_X2) ?
+					"224bits" : "448bits"));
+		cfg = rvu_read64(rvu, blkaddr, NPC_AF_INTFX_KEX_CFG(NIX_INTF_TX));
+		cfg = (cfg >> 32) & 0x07;
+		seq_printf(filp, "\t\t TX keywidth \t: %s\n", (cfg == NPC_MCAM_KEY_X1) ?
+			   "112bits" : ((cfg == NPC_MCAM_KEY_X2) ?
+					"224bits" : "448bits"));
+	}
 
 	mutex_lock(&mcam->lock);
 	/* MCAM entries */
@@ -3393,6 +3499,14 @@ static void rvu_dbg_npc_mcam_show_flows(struct seq_file *s,
 			seq_printf(s, "%d ", rule->packet.icmp_code);
 			seq_printf(s, "mask 0x%x\n", rule->mask.icmp_code);
 			break;
+		case NPC_GTPU_TEID:
+			seq_printf(s, "%d ", ntohl(rule->packet.gtpu_teid));
+			seq_printf(s, "mask 0x%x\n", ntohl(rule->mask.gtpu_teid));
+			break;
+		case NPC_GTPC_TEID:
+			seq_printf(s, "%d ", ntohl(rule->packet.gtpc_teid));
+			seq_printf(s, "mask 0x%x\n", ntohl(rule->mask.gtpc_teid));
+			break;
 		default:
 			seq_puts(s, "\n");
 			break;
@@ -3471,10 +3585,10 @@ static int rvu_dbg_npc_mcam_show_rules(struct seq_file *s, void *unused)
 	struct rvu_npc_mcam_rule *iter;
 	struct rvu *rvu = s->private;
 	struct npc_mcam *mcam;
-	int pf, vf = -1;
+	int pf, vf = -1, bank;
+	u16 target, index;
 	bool enabled;
 	int blkaddr;
-	u16 target;
 	u64 hits;
 
 	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_NPC, 0);
@@ -3519,6 +3633,15 @@ static int rvu_dbg_npc_mcam_show_rules(struct seq_file *s, void *unused)
 
 		enabled = is_mcam_entry_enabled(rvu, mcam, blkaddr, iter->entry);
 		seq_printf(s, "\tenabled: %s\n", enabled ? "yes" : "no");
+		if (is_cn20k(rvu->pdev)) {
+			seq_printf(s, "\tpriority: %u\n", iter->hw_prio);
+			index = iter->entry & (mcam->banksize - 1);
+			bank = npc_get_bank(rvu, mcam, iter->entry);
+			hits = rvu_read64(rvu, blkaddr,
+					  NPC_AF_CN20K_MCAMEX_BANKX_STAT_EXT(index, bank));
+			seq_printf(s, "\thits: %lld\n", hits);
+			continue;
+		}
 
 		if (!iter->has_cntr)
 			continue;
@@ -3687,10 +3810,16 @@ static int rvu_dbg_npc_exact_drop_cnt(struct seq_file *s, void *unused)
 
 		str = (cfg & 1) ? "enabled" : "disabled";
 
-		seq_printf(s, "0x%x\t%d\t\t%llu\t0x%x\t%s\n", pcifunc, i,
-			   rvu_read64(rvu, blkaddr,
-				      NPC_AF_MATCH_STATX(table->counter_idx[i])),
-			   chan, str);
+		if (is_cn20k(rvu->pdev))
+			seq_printf(s, "0x%x\t%d\t\t%llu\t0x%x\t%s\n", pcifunc, i,
+				   rvu_read64(rvu, blkaddr,
+					      NPC_AF_CN20K_MCAMEX_BANKX_STAT_EXT(i, 0)),
+				   chan, str);
+		else
+			seq_printf(s, "0x%x\t%d\t\t%llu\t0x%x\t%s\n", pcifunc, i,
+				   rvu_read64(rvu, blkaddr,
+					      NPC_AF_MATCH_STATX(table->counter_idx[i])),
+				   chan, str);
 	}
 
 	return 0;
@@ -3710,6 +3839,9 @@ static void rvu_dbg_npc_init(struct rvu *rvu)
 	debugfs_create_file("rx_miss_act_stats", 0444, rvu->rvu_dbg.npc, rvu,
 			    &rvu_dbg_npc_rx_miss_act_fops);
 
+	if (is_cn20k(rvu->pdev))
+		npc_cn20k_debugfs_init(rvu);
+
 	if (!rvu->hw->cap.npc_exact_match_enabled)
 		return;
 
@@ -3726,10 +3858,10 @@ static void rvu_dbg_npc_init(struct rvu *rvu)
 
 static int cpt_eng_sts_display(struct seq_file *filp, u8 eng_type)
 {
+	u16 max_ses, max_aes, max_ies, max_re;
 	struct cpt_ctx *ctx = filp->private;
+	u32 e_min = 0, e_max = 0, e, index;
 	u64 busy_sts = 0, free_sts = 0;
-	u32 e_min = 0, e_max = 0, e, i;
-	u16 max_ses, max_ies, max_aes;
 	struct rvu *rvu = ctx->rvu;
 	int blkaddr = ctx->blkaddr;
 	u64 reg;
@@ -3738,11 +3870,12 @@ static int cpt_eng_sts_display(struct seq_file *filp, u8 eng_type)
 	max_ses = reg & 0xffff;
 	max_ies = (reg >> 16) & 0xffff;
 	max_aes = (reg >> 32) & 0xffff;
+	max_re = (reg >> 48) & 0xffff;
 
 	switch (eng_type) {
 	case CPT_AE_TYPE:
-		e_min = max_ses + max_ies;
-		e_max = max_ses + max_ies + max_aes;
+		e_min = max_ses + max_ies + max_re;
+		e_max = e_min + max_aes;
 		break;
 	case CPT_SE_TYPE:
 		e_min = 0;
@@ -3756,16 +3889,35 @@ static int cpt_eng_sts_display(struct seq_file *filp, u8 eng_type)
 		return -EINVAL;
 	}
 
-	for (e = e_min, i = 0; e < e_max; e++, i++) {
+	for (e = e_min, index = 0; e < e_max; e++) {
 		reg = rvu_read64(rvu, blkaddr, CPT_AF_EXEX_STS(e));
 		if (reg & 0x1)
-			busy_sts |= 1ULL << i;
+			busy_sts |= 1ULL << index;
 
 		if (reg & 0x2)
-			free_sts |= 1ULL << i;
+			free_sts |= 1ULL << index;
+
+		if (++index < 64)
+			continue;
+
+		/* Status of last 64 engines */
+		seq_printf(filp, "FREE STS : Engines %d to %d \t: 0x%016llx\n",
+			   ((e - e_min) / 64) * 64, (e - e_min), free_sts);
+		seq_printf(filp, "BUSY STS : Engines %d to %d \t: 0x%016llx\n",
+			   ((e - e_min) / 64) * 64, (e - e_min), busy_sts);
+		free_sts = 0;
+		busy_sts = 0;
+		index = 0;
 	}
-	seq_printf(filp, "FREE STS : 0x%016llx\n", free_sts);
-	seq_printf(filp, "BUSY STS : 0x%016llx\n", busy_sts);
+
+	/* Status of remaining engines */
+	if (index) {
+		e--;
+		seq_printf(filp, "FREE STS : Engines %d to %d \t: 0x%016llx\n",
+			   ((e - e_min) / 64) * 64, (e - e_min), free_sts);
+		seq_printf(filp, "BUSY STS : Engines %d to %d \t: 0x%016llx\n",
+			   ((e - e_min) / 64) * 64, (e - e_min), busy_sts);
+	}
 
 	return 0;
 }
@@ -3793,8 +3945,8 @@ RVU_DEBUG_SEQ_FOPS(cpt_ie_sts, cpt_ie_sts_display, NULL);
 
 static int rvu_dbg_cpt_engines_info_display(struct seq_file *filp, void *unused)
 {
+	u16 max_ses, max_aes, max_ies, max_re;
 	struct cpt_ctx *ctx = filp->private;
-	u16 max_ses, max_ies, max_aes;
 	struct rvu *rvu = ctx->rvu;
 	int blkaddr = ctx->blkaddr;
 	u32 e_max, e;
@@ -3804,8 +3956,9 @@ static int rvu_dbg_cpt_engines_info_display(struct seq_file *filp, void *unused)
 	max_ses = reg & 0xffff;
 	max_ies = (reg >> 16) & 0xffff;
 	max_aes = (reg >> 32) & 0xffff;
+	max_re = (reg >> 48) & 0xffff;
 
-	e_max = max_ses + max_ies + max_aes;
+	e_max = max_ses + max_ies + max_aes + max_re;
 
 	seq_puts(filp, "===========================================\n");
 	for (e = 0; e < e_max; e++) {
@@ -3885,12 +4038,38 @@ static int rvu_dbg_cpt_err_info_display(struct seq_file *filp, void *unused)
 
 RVU_DEBUG_SEQ_FOPS(cpt_err_info, cpt_err_info_display, NULL);
 
+static int cn20k_cpt_pc_display(struct seq_file *filp, struct rvu *rvu,
+				int blkaddr)
+{
+	u64 reg;
+
+	reg = rvu_read64(rvu, blkaddr, CPT_AF_CN20K_INST_REQ_PC);
+	seq_printf(filp, "CPT instruction requests   %llu\n", reg);
+	reg = rvu_read64(rvu, blkaddr, CPT_AF_CN20K_INST_LATENCY_PC);
+	seq_printf(filp, "CPT instruction latency    %llu\n", reg);
+	reg = rvu_read64(rvu, blkaddr, CPT_AF_CN20K_RD_REQ_PC);
+	seq_printf(filp, "CPT NCB read requests      %llu\n", reg);
+	reg = rvu_read64(rvu, blkaddr, CPT_AF_CN20K_RD_LATENCY_PC);
+	seq_printf(filp, "CPT NCB read latency       %llu\n", reg);
+	reg = rvu_read64(rvu, blkaddr, CPT_AF_CN20K_RD_UC_PC);
+	seq_printf(filp, "CPT read requests caused by UC fills   %llu\n", reg);
+	reg = rvu_read64(rvu, blkaddr, CPT_AF_CN20K_ACTIVE_CYCLES_PC);
+	seq_printf(filp, "CPT active cycles pc       %llu\n", reg);
+	reg = rvu_read64(rvu, blkaddr, CPT_AF_CPTCLK_CNT);
+	seq_printf(filp, "CPT clock count pc         %llu\n", reg);
+
+	return 0;
+}
+
 static int rvu_dbg_cpt_pc_display(struct seq_file *filp, void *unused)
 {
 	struct cpt_ctx *ctx = filp->private;
 	struct rvu *rvu = ctx->rvu;
 	int blkaddr = ctx->blkaddr;
 	u64 reg;
+
+	if (is_cn20k(rvu->pdev))
+		return cn20k_cpt_pc_display(filp, rvu, blkaddr);
 
 	reg = rvu_read64(rvu, blkaddr, CPT_AF_INST_REQ_PC);
 	seq_printf(filp, "CPT instruction requests   %llu\n", reg);
@@ -3950,10 +4129,719 @@ static void rvu_dbg_cpt_init(struct rvu *rvu, int blkaddr)
 
 static const char *rvu_get_dbg_dir_name(struct rvu *rvu)
 {
+	if (is_cn20k(rvu->pdev))
+		return "cn20k";
+
 	if (!is_rvu_otx2(rvu))
 		return "cn10k";
 	else
 		return "octeontx2";
+}
+
+static int parse_sso_cmd_buffer(char *cmd_buf, size_t *count,
+				const char __user *buffer, int *ssolf,
+				bool *all)
+{
+	int ret, bytes_not_copied;
+	char *cmd_buf_tmp;
+	char *subtoken;
+
+	bytes_not_copied = copy_from_user(cmd_buf, buffer, *count);
+	if (bytes_not_copied) {
+		kfree(cmd_buf);
+		return -EFAULT;
+	}
+
+	cmd_buf[*count] = '\0';
+	cmd_buf_tmp = strchr(cmd_buf, '\n');
+
+	if (cmd_buf_tmp) {
+		*cmd_buf_tmp = '\0';
+		*count = cmd_buf_tmp - cmd_buf + 1;
+	}
+
+	subtoken = strsep(&cmd_buf, " ");
+	if (subtoken && strcmp(subtoken, "all") == 0) {
+		*all = true;
+	} else {
+		ret = subtoken ? kstrtoint(subtoken, 10, ssolf) : -EINVAL;
+		if (ret < 0)
+			return ret;
+	}
+	if (cmd_buf)
+		return -EINVAL;
+
+	return 0;
+}
+
+static void sso_hwgrp_display_iq_list(struct rvu *rvu, int ssolf, u16 idx,
+				      u16 tail_idx, u8 queue_type)
+{
+	const char *queue[3] = {"DQ", "CQ", "AQ"};
+	int blkaddr;
+	u64 reg;
+
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_SSO, 0);
+	if (blkaddr < 0)
+		return;
+
+	pr_info("SSO HWGGRP[%d] [%s] Chain queue head[%d]", ssolf,
+		queue[queue_type], idx);
+	pr_info("SSO HWGGRP[%d] [%s] Chain queue tail[%d]", ssolf,
+		queue[queue_type], tail_idx);
+	pr_info("--------------------------------------------------\n");
+	do {
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_IENTX_TAG(idx));
+		pr_info("SSO HWGGRP[%d] [%s] IE[%d] TAG      0x%llx\n", ssolf,
+			queue[queue_type], idx, reg);
+
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_IENTX_GRP(idx));
+		pr_info("SSO HWGGRP[%d] [%s] IE[%d] GRP      0x%llx\n", ssolf,
+			queue[queue_type], idx, reg);
+
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_IENTX_PENDTAG(idx));
+		pr_info("SSO HWGGRP[%d] [%s] IE[%d] PENDTAG  0x%llx\n", ssolf,
+			queue[queue_type], idx, reg);
+
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_IENTX_LINKS(idx));
+		pr_info("SSO HWGGRP[%d] [%s] IE[%d] LINKS    0x%llx\n", ssolf,
+			queue[queue_type], idx, reg);
+
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_IENTX_QLINKS(idx));
+		pr_info("SSO HWGGRP[%d] [%s] IE[%d] QLINKS   0x%llx\n", ssolf,
+			queue[queue_type], idx, reg);
+		pr_info("--------------------------------------------------\n");
+		if (idx == tail_idx)
+			break;
+		idx = reg & 0x1FFF;
+	} while (idx != 0x1FFF);
+}
+
+static void sso_hwgrp_display_taq_list(struct rvu *rvu, int ssolf, u8 wae_head,
+				       u16 ent_head, u8 wae_used, u8 taq_lines)
+{
+	int i, blkaddr;
+	u64 reg;
+
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_SSO, 0);
+	if (blkaddr < 0)
+		return;
+
+	pr_info("--------------------------------------------------\n");
+	do {
+		for (i = wae_head; i < taq_lines && wae_used; i++) {
+			reg = rvu_read64(rvu, blkaddr,
+					 SSO_AF_TAQX_WAEY_TAG(ent_head, i));
+			pr_info("SSO HWGGRP[%d] TAQ[%d] WAE[%d] TAG  0x%llx\n",
+				ssolf, ent_head, i, reg);
+
+			reg = rvu_read64(rvu, blkaddr,
+					 SSO_AF_TAQX_WAEY_WQP(ent_head, i));
+			pr_info("SSO HWGGRP[%d] TAQ[%d] WAE[%d] WQP  0x%llx\n",
+				ssolf, ent_head, i, reg);
+			wae_used--;
+		}
+
+		reg = rvu_read64(rvu, blkaddr,
+				 SSO_AF_TAQX_LINK(ent_head));
+		pr_info("SSO HWGGRP[%d] TAQ[%d] LINK         0x%llx\n",
+			ssolf, ent_head, reg);
+		ent_head = reg & 0xFFF;
+		pr_info("--------------------------------------------------\n");
+	} while (ent_head && wae_used);
+}
+
+static int read_sso_pc(struct rvu *rvu)
+{
+	int blkaddr;
+	u64 reg;
+
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_SSO, 0);
+	if (blkaddr < 0)
+		return -ENODEV;
+
+	reg = rvu_read64(rvu, blkaddr, SSO_AF_ACTIVE_CYCLES0);
+	pr_info("SSO Add-Work active cycles		%lld\n", reg);
+	reg = rvu_read64(rvu, blkaddr, SSO_AF_ACTIVE_CYCLES1);
+	pr_info("SSO Get-Work active cycles		%lld\n", reg);
+	reg = rvu_read64(rvu, blkaddr, SSO_AF_ACTIVE_CYCLES2);
+	pr_info("SSO Work-Slot active cycles		%lld\n", reg);
+	pr_info("\n");
+
+	if (is_rvu_otx2(rvu)) {
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_NOS_CNT) & 0x1FFF;
+		pr_info("SSO work-queue entries on the no-schedule list	%lld\n",
+			reg);
+		pr_info("\n");
+	}
+
+	reg = rvu_read64(rvu, blkaddr, SSO_AF_AW_READ_ARB);
+	pr_info("SSO XAQ reads outstanding		%lld\n",
+		(reg & 0x3F) >> 24);
+
+	reg = rvu_read64(rvu, blkaddr, SSO_AF_XAQ_REQ_PC);
+	pr_info("SSO XAQ reads requests			%lld\n", reg);
+	reg = rvu_read64(rvu, blkaddr, SSO_AF_XAQ_LATENCY_PC);
+	pr_info("SSO XAQ read latency cycles		%lld\n", reg);
+	pr_info("\n");
+
+	reg = rvu_read64(rvu, blkaddr, SSO_AF_AW_WE);
+	pr_info("SSO IAQ reserved			%lld\n",
+		(reg & 0x3FFF) >> 16);
+	pr_info("SSO IAQ total				%lld\n", reg & 0x3FFF);
+	pr_info("\n");
+
+	reg = rvu_read64(rvu, blkaddr, SSO_AF_TAQ_CNT);
+	pr_info("SSO TAQ reserved			%lld\n",
+		(reg & 0x7FF) >> 16);
+	pr_info("SSO TAQ total				%lld\n", reg & 0x7FF);
+	pr_info("\n");
+
+	return 0;
+}
+
+/* Reads SSO hwgrp perfomance counters */
+static void read_sso_hwgrp_pc(struct rvu *rvu, int ssolf, bool all)
+{
+	struct rvu_hwinfo *hw = rvu->hw;
+	struct rvu_block *block;
+	int blkaddr, max_id;
+	u64 reg;
+
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_SSO, 0);
+	if (blkaddr < 0)
+		return;
+
+	block = &hw->block[blkaddr];
+	if (ssolf < 0 || ssolf >= block->lf.max) {
+		pr_info("Invalid SSOLF(HWGRP), valid range is 0-%d\n",
+			block->lf.max - 1);
+		return;
+	}
+	max_id =  block->lf.max;
+
+	if (all)
+		ssolf = 0;
+	else
+		max_id = ssolf + 1;
+
+	pr_info("==================================================\n");
+	for (; ssolf < max_id; ssolf++) {
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_HWGRPX_WS_PC(ssolf));
+		pr_info("SSO HWGGRP[%d] Work-Schedule PC     0x%llx\n", ssolf,
+			reg);
+
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_HWGRPX_EXT_PC(ssolf));
+		pr_info("SSO HWGGRP[%d] External Schedule PC 0x%llx\n", ssolf,
+			reg);
+
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_HWGRPX_WA_PC(ssolf));
+		pr_info("SSO HWGGRP[%d] Work-Add PC          0x%llx\n", ssolf,
+			reg);
+
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_HWGRPX_TS_PC(ssolf));
+		pr_info("SSO HWGGRP[%d] Tag Switch PC        0x%llx\n", ssolf,
+			reg);
+
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_HWGRPX_DS_PC(ssolf));
+		pr_info("SSO HWGGRP[%d] Deschedule PC        0x%llx\n", ssolf,
+			reg);
+
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_HWGRPX_DQ_PC(ssolf));
+		pr_info("SSO HWGGRP[%d] Work-Descheduled PC  0x%llx\n", ssolf,
+			reg);
+
+		reg = rvu_read64(rvu, blkaddr,
+				 SSO_AF_HWGRPX_PAGE_CNT(ssolf));
+		pr_info("SSO HWGGRP[%d] In-use Page Count    0x%llx\n", ssolf,
+			reg);
+		pr_info("==================================================\n");
+	}
+}
+
+/* Reads SSO hwgrp Threshold */
+static void read_sso_hwgrp_thresh(struct rvu *rvu, int ssolf, bool all)
+{
+	struct rvu_hwinfo *hw = rvu->hw;
+	struct rvu_block *block;
+	int blkaddr, max_id;
+	u64 reg;
+
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_SSO, 0);
+	if (blkaddr < 0)
+		return;
+
+	block = &hw->block[blkaddr];
+	if (ssolf < 0 || ssolf >= block->lf.max) {
+		pr_info("Invalid SSOLF(HWGRP), valid range is 0-%d\n",
+			block->lf.max - 1);
+		return;
+	}
+	max_id =  block->lf.max;
+
+	if (all)
+		ssolf = 0;
+	else
+		max_id = ssolf + 1;
+
+	pr_info("==================================================\n");
+	for (; ssolf < max_id; ssolf++) {
+		reg = rvu_read64(rvu, blkaddr,
+				 SSO_AF_HWGRPX_IAQ_THR(ssolf));
+		pr_info("SSO HWGGRP[%d] IAQ Threshold        0x%llx\n", ssolf,
+			reg);
+
+		reg = rvu_read64(rvu, blkaddr,
+				 SSO_AF_HWGRPX_TAQ_THR(ssolf));
+		pr_info("SSO HWGGRP[%d] TAQ Threshold        0x%llx\n", ssolf,
+			reg);
+
+		reg = rvu_read64(rvu, blkaddr,
+				 SSO_AF_HWGRPX_XAQ_AURA(ssolf));
+		pr_info("SSO HWGGRP[%d] XAQ Aura             0x%llx\n", ssolf,
+			reg);
+
+		reg = rvu_read64(rvu, blkaddr,
+				 SSO_AF_HWGRPX_XAQ_LIMIT(ssolf));
+		pr_info("SSO HWGGRP[%d] XAQ Limit            0x%llx\n", ssolf,
+			reg);
+
+		reg = rvu_read64(rvu, blkaddr,
+				 SSO_AF_HWGRPX_IU_ACCNT(ssolf));
+		pr_info("SSO HWGGRP[%d] IU Account Index     0x%llx\n", ssolf,
+			reg);
+
+		reg = rvu_read64(rvu, blkaddr,
+				 SSO_AF_IU_ACCNTX_CFG(reg & 0xFF));
+		pr_info("SSO HWGGRP[%d] IU Accounting Cfg    0x%llx\n", ssolf,
+			reg);
+		pr_info("==================================================\n");
+	}
+}
+
+/* Reads SSO hwgrp TAQ list */
+static void read_sso_hwgrp_taq_list(struct rvu *rvu, int ssolf, bool all)
+{
+	struct rvu_hwinfo *hw = rvu->hw;
+	u8 taq_entries, wae_head;
+	struct rvu_block *block;
+	u16 ent_head, cl_used;
+	int blkaddr, max_id;
+	u64 reg;
+
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_SSO, 0);
+	if (blkaddr < 0)
+		return;
+
+	block = &hw->block[blkaddr];
+	if (ssolf < 0 || ssolf >= block->lf.max) {
+		pr_info("Invalid SSOLF(HWGRP), valid range is 0-%d\n",
+			block->lf.max - 1);
+		return;
+	}
+	max_id =  block->lf.max;
+
+	if (all)
+		ssolf = 0;
+	else
+		max_id = ssolf + 1;
+	reg = rvu_read64(rvu, blkaddr, SSO_AF_CONST);
+	taq_entries = (reg >> 48) & 0xFF;
+	pr_info("==================================================\n");
+	for (; ssolf < max_id; ssolf++) {
+		pr_info("++++++++++++++++++++++++++++++++++++++++++++++++++\n");
+		pr_info("SSO HWGGRP[%d] Transitory Output Admission Queue",
+			ssolf);
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_TOAQX_STATUS(ssolf));
+		pr_info("SSO HWGGRP[%d] TOAQ Status          0x%llx\n", ssolf,
+			reg);
+		ent_head = (reg >> 12) & 0xFFF;
+		cl_used = (reg >> 32) & 0xFFF;
+		if (reg & BIT_ULL(61) && cl_used) {
+			pr_info("SSO HWGGRP[%d] TOAQ CL_USED         0x%x\n",
+				ssolf, cl_used);
+			sso_hwgrp_display_taq_list(rvu, ssolf, ent_head, 0,
+						   cl_used * taq_entries,
+						   taq_entries);
+		}
+		pr_info("++++++++++++++++++++++++++++++++++++++++++++++++++\n");
+		pr_info("SSO HWGGRP[%d] Transitory Input Admission Queue",
+			ssolf);
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_TIAQX_STATUS(ssolf));
+		pr_info("SSO HWGGRP[%d] TIAQ Status          0x%llx\n", ssolf,
+			reg);
+		wae_head = (reg >> 60) & 0xF;
+		cl_used = (reg >> 32) & 0x7FFF;
+		ent_head = (reg >> 12) & 0xFFF;
+		if (reg & BIT_ULL(61) && cl_used) {
+			pr_info("SSO HWGGRP[%d] TIAQ WAE_USED         0x%x\n",
+				ssolf, cl_used);
+			sso_hwgrp_display_taq_list(rvu, ssolf, ent_head,
+						   wae_head, cl_used,
+						   taq_entries);
+		}
+		pr_info("++++++++++++++++++++++++++++++++++++++++++++++++++\n");
+		pr_info("==================================================\n");
+	}
+}
+
+/* Reads SSO hwgrp IAQ list */
+static void read_sso_hwgrp_iaq_list(struct rvu *rvu, int ssolf, bool all)
+{
+	struct rvu_hwinfo *hw = rvu->hw;
+	struct rvu_block *block;
+	u16 head_idx, tail_idx;
+	int blkaddr, max_id;
+	u64 reg;
+
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_SSO, 0);
+	if (blkaddr < 0)
+		return;
+
+	block = &hw->block[blkaddr];
+	if (ssolf < 0 || ssolf >= block->lf.max) {
+		pr_info("Invalid SSOLF(HWGRP), valid range is 0-%d\n",
+			block->lf.max - 1);
+		return;
+	}
+	max_id =  block->lf.max;
+
+	if (all)
+		ssolf = 0;
+	else
+		max_id = ssolf + 1;
+	pr_info("==================================================\n");
+	for (; ssolf < max_id; ssolf++) {
+		pr_info("++++++++++++++++++++++++++++++++++++++++++++++++++\n");
+		pr_info("SSO HWGGRP[%d] Deschedule Queue(DQ)\n", ssolf);
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_IPL_DESCHEDX(ssolf));
+		pr_info("SSO HWGGRP[%d] DQ List              0x%llx\n", ssolf,
+			reg);
+		head_idx = (reg >> 13) & 0x1FFF;
+		tail_idx = reg & 0x1FFF;
+		if (reg & (BIT_ULL(26) | BIT_ULL(27)))
+			sso_hwgrp_display_iq_list(rvu, ssolf, head_idx,
+						  tail_idx, 0);
+		pr_info("++++++++++++++++++++++++++++++++++++++++++++++++++\n");
+		pr_info("SSO HWGGRP[%d] Conflict Queue(CQ)\n", ssolf);
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_IPL_CONFX(ssolf));
+		pr_info("SSO HWGGRP[%d] CQ List              0x%llx\n", ssolf,
+			reg);
+		head_idx = (reg >> 13) & 0x1FFF;
+		tail_idx = reg & 0x1FFF;
+		if (reg & (BIT_ULL(26) | BIT_ULL(27)))
+			sso_hwgrp_display_iq_list(rvu, ssolf, head_idx,
+						  tail_idx, 1);
+		pr_info("++++++++++++++++++++++++++++++++++++++++++++++++++\n");
+		pr_info("SSO HWGGRP[%d] Admission Queue(AQ)\n", ssolf);
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_IPL_IAQX(ssolf));
+		pr_info("SSO HWGGRP[%d] AQ List              0x%llx\n", ssolf,
+			reg);
+		head_idx = (reg >> 13) & 0x1FFF;
+		tail_idx = reg & 0x1FFF;
+		if (reg & (BIT_ULL(26) | BIT_ULL(27)))
+			sso_hwgrp_display_iq_list(rvu, ssolf, head_idx,
+						  tail_idx, 2);
+		pr_info("++++++++++++++++++++++++++++++++++++++++++++++++++\n");
+		pr_info("==================================================\n");
+	}
+}
+
+/* Reads SSO hwgrp IENT list */
+static int read_sso_hwgrp_ient_list(struct rvu *rvu)
+{
+	const char *tt_c[4] = {"SSO_TT_ORDERED_", "SSO_TT_ATOMIC__",
+				"SSO_TT_UNTAGGED", "SSO_TT_EMPTY___"};
+	struct rvu_hwinfo *hw = rvu->hw;
+	int max_idx = hw->sso.sso_iue;
+	u64 pendtag, qlinks, links;
+	int len, idx, blkaddr;
+	u64 tag, grp, wqp;
+	char str[300];
+
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_SSO, 0);
+	if (blkaddr < 0)
+		return -ENODEV;
+
+	for (idx = 0; idx < max_idx; idx++) {
+		len = 0;
+		tag = rvu_read64(rvu, blkaddr, SSO_AF_IENTX_TAG(idx));
+		grp = rvu_read64(rvu, blkaddr, SSO_AF_IENTX_GRP(idx));
+		pendtag = rvu_read64(rvu, blkaddr,
+				     SSO_AF_IENTX_PENDTAG(idx));
+		links = rvu_read64(rvu, blkaddr, SSO_AF_IENTX_LINKS(idx));
+		qlinks = rvu_read64(rvu, blkaddr,
+				    SSO_AF_IENTX_QLINKS(idx));
+		wqp = rvu_read64(rvu, blkaddr, SSO_AF_IENTX_WQP(idx));
+		len = snprintf(str + len, 300,
+			       "SSO IENT[%4d] TT [%s] HWGRP [%3lld] ", idx,
+				tt_c[(tag >> 32) & 0x3], (grp >> 48) & 0x1f);
+		len += snprintf(str + len, 300 - len,
+				"TAG [0x%010llx] GRP [0x%016llx] ", tag, grp);
+		len += snprintf(str + len, 300 - len, "PENDTAG [0x%010llx] ",
+				pendtag);
+		len += snprintf(str + len, 300 - len,
+				"LINKS [0x%016llx] QLINKS [0x%010llx] ", links,
+				qlinks);
+		snprintf(str + len, 300 - len, "WQP [0x%016llx]\n", wqp);
+		pr_info("%s", str);
+	}
+
+	return 0;
+}
+
+/* Reads SSO hwgrp free list */
+static int read_sso_hwgrp_free_list(struct rvu *rvu)
+{
+	int blkaddr;
+	u64 reg;
+	u8 idx;
+
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_SSO, 0);
+	if (blkaddr < 0)
+		return -ENODEV;
+
+	pr_info("==================================================\n");
+	for (idx = 0; idx < 4; idx++) {
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_IPL_FREEX(idx));
+		pr_info("SSO FREE LIST[%d]\n", idx);
+		pr_info("qnum_head : %lld qnum_tail : %lld\n",
+			(reg >> 58) & 0x3, (reg >> 56) & 0x3);
+		pr_info("queue_cnt : %llx\n", (reg >> 26) & 0x7fff);
+		pr_info("queue_val : %lld queue_head : %4lld queue_tail %4lld\n"
+			, (reg >> 40) & 0x1, (reg >> 13) & 0x1fff,
+			reg & 0x1fff);
+		pr_info("==================================================\n");
+	}
+
+	return 0;
+}
+
+/* Reads SSO hwgrp perfomance counters */
+static void read_sso_hws_info(struct rvu *rvu, int ssowlf, bool all)
+{
+	struct rvu_hwinfo *hw = rvu->hw;
+	struct rvu_block *block;
+	int blkaddr;
+	int max_id;
+	u64 reg;
+	u8 mask;
+	u8 set;
+
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_SSOW, 0);
+	if (blkaddr < 0)
+		return;
+
+	block = &hw->block[blkaddr];
+	if (ssowlf < 0 || ssowlf >= block->lf.max) {
+		pr_info("Invalid SSOWLF(HWS), valid range is 0-%d\n",
+			block->lf.max - 1);
+		return;
+	}
+	max_id =  block->lf.max;
+
+	if (all)
+		ssowlf = 0;
+	else
+		max_id = ssowlf + 1;
+
+	blkaddr = rvu_get_blkaddr(rvu, BLKTYPE_SSO, 0);
+	if (blkaddr < 0)
+		return;
+
+	pr_info("==================================================\n");
+	for (; ssowlf < max_id; ssowlf++) {
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_HWSX_ARB(ssowlf));
+		pr_info("SSOW HWS[%d] Arbitration State      0x%llx\n", ssowlf,
+			reg);
+		reg = rvu_read64(rvu, blkaddr, SSO_AF_HWSX_GMCTL(ssowlf));
+		pr_info("SSOW HWS[%d] Guest Machine Control  0x%llx\n", ssowlf,
+			reg);
+		for (set = 0; set < 2; set++)
+			for (mask = 0; mask < 4; mask++) {
+				reg = rvu_read64(rvu, blkaddr,
+						 SSO_AF_HWSX_SX_GRPMSKX(ssowlf,
+									set,
+									mask));
+				pr_info(
+				"SSOW HWS[%d] SET[%d] Group Mask[%d] 0x%llx\n",
+				ssowlf, set, mask, reg);
+			}
+		pr_info("==================================================\n");
+	}
+}
+
+typedef void (*dump_cb)(struct rvu *rvu, int ssolf, bool all);
+
+static ssize_t rvu_dbg_sso_cmd_parser(struct file *filp,
+				      const char __user *buffer, size_t count,
+				      loff_t *ppos,
+				      char *lf_type, char *file_nm, dump_cb fn)
+{
+	struct rvu *rvu = filp->private_data;
+	bool all = false;
+	char *cmd_buf;
+	int lf = 0;
+
+	if (*ppos != 0)
+		return 0;
+
+	cmd_buf = kzalloc(count + 1, GFP_KERNEL);
+
+	if (!cmd_buf || !count)
+		return count;
+	if (parse_sso_cmd_buffer(cmd_buf, &count, buffer,
+				 &lf, &all) < 0) {
+		pr_info("Usage: echo [<%s>/all] > %s\n", lf_type, file_nm);
+	} else {
+		fn(rvu, lf, all);
+	}
+	kfree(cmd_buf);
+
+	return count;
+}
+
+/* SSO debugfs APIs */
+static ssize_t rvu_dbg_sso_pc_display(struct file *filp,
+				      char __user *buffer,
+				      size_t count, loff_t *ppos)
+{
+	return read_sso_pc(filp->private_data);
+}
+
+static ssize_t rvu_dbg_sso_hwgrp_pc_display(struct file *filp,
+					    const char __user *buffer,
+					    size_t count, loff_t *ppos)
+{
+	return rvu_dbg_sso_cmd_parser(filp, buffer, count, ppos, "hwgrp",
+			"sso_hwgrp_pc", read_sso_hwgrp_pc);
+}
+
+static ssize_t rvu_dbg_sso_hwgrp_thresh_display(struct file *filp,
+						const char __user *buffer,
+						size_t count, loff_t *ppos)
+{
+	return rvu_dbg_sso_cmd_parser(filp, buffer, count, ppos, "hwgrp",
+			"sso_hwgrp_thresh", read_sso_hwgrp_thresh);
+}
+
+static ssize_t rvu_dbg_sso_hwgrp_taq_wlk_display(struct file *filp,
+						 const char __user *buffer,
+						 size_t count, loff_t *ppos)
+{
+	return rvu_dbg_sso_cmd_parser(filp, buffer, count, ppos, "hwgrp",
+			"sso_hwgrp_taq_wlk", read_sso_hwgrp_taq_list);
+}
+
+static ssize_t rvu_dbg_sso_hwgrp_iaq_wlk_display(struct file *filp,
+						 const char __user *buffer,
+						 size_t count, loff_t *ppos)
+{
+	return rvu_dbg_sso_cmd_parser(filp, buffer, count, ppos, "hwgrp",
+			"sso_hwgrp_iaq_wlk", read_sso_hwgrp_iaq_list);
+}
+
+static ssize_t rvu_dbg_sso_hwgrp_ient_wlk_display(struct file *filp,
+						  char __user *buffer,
+						  size_t count, loff_t *ppos)
+{
+	return read_sso_hwgrp_ient_list(filp->private_data);
+}
+
+static ssize_t rvu_dbg_sso_hwgrp_fl_wlk_display(struct file *filp,
+						char __user *buffer,
+						size_t count, loff_t *ppos)
+{
+	return read_sso_hwgrp_free_list(filp->private_data);
+}
+
+static ssize_t rvu_dbg_sso_hws_info_display(struct file *filp,
+					    const char __user *buffer,
+					    size_t count, loff_t *ppos)
+{
+	return rvu_dbg_sso_cmd_parser(filp, buffer, count, ppos, "hws",
+			"sso_hws_info", read_sso_hws_info);
+}
+
+RVU_DEBUG_FOPS(sso_pc, sso_pc_display, NULL);
+RVU_DEBUG_FOPS(sso_hwgrp_pc, NULL, sso_hwgrp_pc_display);
+RVU_DEBUG_FOPS(sso_hwgrp_thresh, NULL, sso_hwgrp_thresh_display);
+RVU_DEBUG_FOPS(sso_hwgrp_taq_wlk, NULL, sso_hwgrp_taq_wlk_display);
+RVU_DEBUG_FOPS(sso_hwgrp_iaq_wlk, NULL, sso_hwgrp_iaq_wlk_display);
+RVU_DEBUG_FOPS(sso_hwgrp_ient_wlk, sso_hwgrp_ient_wlk_display, NULL);
+RVU_DEBUG_FOPS(sso_hwgrp_fl_wlk, sso_hwgrp_fl_wlk_display, NULL);
+RVU_DEBUG_FOPS(sso_hws_info, NULL, sso_hws_info_display);
+
+static void rvu_dbg_sso_init(struct rvu *rvu)
+{
+	const struct device *dev = &rvu->pdev->dev;
+	struct dentry *pfile;
+
+	rvu->rvu_dbg.sso = debugfs_create_dir("sso", rvu->rvu_dbg.root);
+	if (!rvu->rvu_dbg.sso)
+		return;
+
+	rvu->rvu_dbg.sso_hwgrp = debugfs_create_dir("hwgrp", rvu->rvu_dbg.sso);
+	if (!rvu->rvu_dbg.sso_hwgrp)
+		return;
+
+	rvu->rvu_dbg.sso_hws = debugfs_create_dir("hws", rvu->rvu_dbg.sso);
+	if (!rvu->rvu_dbg.sso_hws)
+		return;
+
+	pfile = debugfs_create_file("sso_pc", 0600,
+				    rvu->rvu_dbg.sso, rvu,
+			&rvu_dbg_sso_pc_fops);
+	if (!pfile)
+		goto create_failed;
+
+	pfile = debugfs_create_file("sso_hwgrp_pc", 0600,
+				    rvu->rvu_dbg.sso_hwgrp, rvu,
+			&rvu_dbg_sso_hwgrp_pc_fops);
+	if (!pfile)
+		goto create_failed;
+
+	pfile = debugfs_create_file("sso_hwgrp_thresh", 0600,
+				    rvu->rvu_dbg.sso_hwgrp, rvu,
+			&rvu_dbg_sso_hwgrp_thresh_fops);
+	if (!pfile)
+		goto create_failed;
+
+	pfile = debugfs_create_file("sso_hwgrp_taq_walk", 0600,
+				    rvu->rvu_dbg.sso_hwgrp, rvu,
+			&rvu_dbg_sso_hwgrp_taq_wlk_fops);
+	if (!pfile)
+		goto create_failed;
+
+	pfile = debugfs_create_file("sso_hwgrp_iaq_walk", 0600,
+				    rvu->rvu_dbg.sso_hwgrp, rvu,
+			&rvu_dbg_sso_hwgrp_iaq_wlk_fops);
+	if (!pfile)
+		goto create_failed;
+
+	pfile = debugfs_create_file("sso_hwgrp_ient_walk", 0600,
+				    rvu->rvu_dbg.sso_hwgrp, rvu,
+			&rvu_dbg_sso_hwgrp_ient_wlk_fops);
+	if (!pfile)
+		goto create_failed;
+
+	pfile = debugfs_create_file("sso_hwgrp_free_list_walk", 0600,
+				    rvu->rvu_dbg.sso_hwgrp, rvu,
+			&rvu_dbg_sso_hwgrp_fl_wlk_fops);
+	if (!pfile)
+		goto create_failed;
+
+	pfile = debugfs_create_file("sso_hws_info", 0600,
+				    rvu->rvu_dbg.sso_hws, rvu,
+			&rvu_dbg_sso_hws_info_fops);
+	if (!pfile)
+		goto create_failed;
+
+	return;
+
+create_failed:
+	dev_err(dev, "Failed to create debugfs dir/file for SSO\n");
+	debugfs_remove_recursive(rvu->rvu_dbg.sso);
 }
 
 void rvu_dbg_init(struct rvu *rvu)
@@ -3990,6 +4878,8 @@ create:
 	rvu_dbg_cpt_init(rvu, BLKADDR_CPT0);
 	rvu_dbg_cpt_init(rvu, BLKADDR_CPT1);
 	rvu_dbg_mcs_init(rvu);
+	rvu_dbg_sso_init(rvu);
+	rvu_dbg_sdp_init(rvu);
 }
 
 void rvu_dbg_exit(struct rvu *rvu)

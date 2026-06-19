@@ -9028,6 +9028,12 @@ S:	Maintained
 F:	Documentation/devicetree/bindings/memory-controllers/nuvoton,npcm-memory-controller.yaml
 F:	drivers/edac/npcm_edac.c
 
+EDAC-OCTEONTX
+M:	Vasyl Gomonovych <vgomonovych@marvell.com>
+M:	Piyush Malgujar <pmalgujar@marvell.com>
+S:	Maintained
+F:	drivers/edac/octeontx_edac.c
+
 EDAC-PASEMI
 M:	Egor Martovetsky <egor@pasemi.com>
 L:	linux-edac@vger.kernel.org
@@ -14948,6 +14954,36 @@ F:	include/net/mctpdevice.h
 F:	include/net/netns/mctp.h
 F:	net/mctp/
 
+MAILBOX MARVELL MHU DRIVER
+M:	Wojciech Bartczak <wbartczak@marvell.com>
+M:	Piyush Malgujar <pmalgujar@marvell.com>
+S:	Maintained
+F:	drivers/mailbox/mvl_mhu.c
+
+MAILBOX MARVELL MUB DRIVER
+M:	Wojciech Bartczak <wbartczak@marvell.com>
+M:	Piyush Malgujar <pmalgujar@marvell.com>
+S:	Maintained
+F:	drivers/firmware/octeontx2/mub.c
+
+MAILBOX MARVELL RPRAM DRIVER
+M:	Wojciech Bartczak <wbartczak@marvell.com>
+M:	Piyush Malgujar <pmalgujar@marvell.com>
+S:	Maintained
+F:	drivers/firmware/octeontx2/rpram.c
+
+MAILBOX MARVELL MEMTEST DRIVER
+M:	Wojciech Bartczak <wbartczak@marvell.com>
+M:	Piyush Malgujar <pmalgujar@marvell.com>
+S:	Maintained
+F:	drivers/firmware/octeontx2/memtest.c
+
+MAILBOX MARVELL MAC MANAGEMENT DRIVER
+M:	Wojciech Bartczak <wbartczak@marvell.com>
+M:	Piyush Malgujar <pmalgujar@marvell.com>
+S:	Maintained
+F:	drivers/firmware/octeontx2/mac_mgmt.c
+
 MAPLE TREE
 M:	Liam R. Howlett <Liam.Howlett@oracle.com>
 R:	Alice Ryhl <aliceryhl@google.com>
@@ -15114,6 +15150,12 @@ M:	Satananda Burla <sburla@marvell.com>
 L:	netdev@vger.kernel.org
 S:	Maintained
 F:	drivers/net/ethernet/marvell/octeon_ep_vf
+
+MARVELL OCTEON PEM CONTROLLER DRIVER
+R:	George Cherian <gcherian@marvell.com>
+R:	Pragnesh Patel <pragneshp@marvell.com>
+S:	Supported
+F:	drivers/pci/controller/pci-octeon-pem.c
 
 MARVELL OCTEONTX2 PHYSICAL FUNCTION DRIVER
 M:	Sunil Goutham <sgoutham@marvell.com>
@@ -17480,6 +17522,16 @@ L:	dri-devel@lists.freedesktop.org
 S:	Maintained
 F:	Documentation/devicetree/bindings/leds/backlight/mps,mp3309c.yaml
 F:	drivers/video/backlight/mp3309c.c
+
+MPAM DRIVER
+M:	James Morse <james.morse@arm.com>
+M:	Ben Horgan <ben.horgan@arm.com>
+R:	Reinette Chatre <reinette.chatre@intel.com>
+R:	Fenghua Yu <fenghuay@nvidia.com>
+S:	Maintained
+F:	drivers/resctrl/mpam_*
+F:	drivers/resctrl/test_mpam_*
+F:	include/linux/arm_mpam.h
 
 MPS MP2869 DRIVER
 M:	Wensheng Wang <wenswang@yeah.net>

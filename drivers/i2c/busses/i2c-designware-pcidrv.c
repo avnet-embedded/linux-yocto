@@ -10,6 +10,7 @@
  * Copyright (C) 2011, 2015, 2016 Intel Corporation.
  */
 #include <linux/delay.h>
+#include <linux/dma-mapping.h>
 #include <linux/err.h>
 #include <linux/errno.h>
 #include <linux/i2c.h>
@@ -37,6 +38,7 @@ enum dw_pci_ctl_id_t {
 	haswell,
 	elkhartlake,
 	navi_amd,
+	marvell,
 };
 
 /*
@@ -150,12 +152,28 @@ static u32 navi_amd_get_clk_rate_khz(struct dw_i2c_dev *dev)
 	return 100000;
 }
 
+static u32 marvell_get_clk_rate_khz(struct dw_i2c_dev *dev)
+{
+	return 100000;
+}
+
 static int navi_amd_setup(struct pci_dev *pdev, struct dw_pci_controller *c)
 {
 	struct dw_i2c_dev *dev = pci_get_drvdata(pdev);
 
 	dev->flags |= MODEL_AMD_NAVI_GPU | ACCESS_POLLING;
 	dev->timings.bus_freq_hz = I2C_MAX_STANDARD_MODE_FREQ;
+	return 0;
+}
+
+static int marvell_setup(struct pci_dev *pdev, struct dw_pci_controller *c)
+{
+	struct dw_i2c_dev *dev = dev_get_drvdata(&pdev->dev);
+	u64 intr_val;
+
+	/* Enable interrupt for Marvell CN20K I2C controllers */
+	intr_val = readq(dev->base + CN20K_IC_INTR_ENA_W1S);
+	writeq(intr_val | 0x1, dev->base + CN20K_IC_INTR_ENA_W1S);
 	return 0;
 }
 
@@ -191,6 +209,11 @@ static struct dw_pci_controller dw_pci_controllers[] = {
 		.scl_sda_cfg = &navi_amd_config,
 		.setup =  navi_amd_setup,
 		.get_clk_rate_khz = navi_amd_get_clk_rate_khz,
+	},
+	[marvell] = {
+		.bus_num = -1,
+		.setup = marvell_setup,
+		.get_clk_rate_khz = marvell_get_clk_rate_khz,
 	},
 };
 
@@ -229,6 +252,13 @@ static int i2c_dw_pci_probe(struct pci_dev *pdev,
 	r = pcim_iomap_regions(pdev, 1 << 0, pci_name(pdev));
 	if (r)
 		return dev_err_probe(device, r, "I/O memory remapping failed\n");
+
+	/* Marvell DesignWare: prefer 48-bit DMA */
+	if (id->driver_data == marvell) {
+		r = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(48));
+		if (r)
+			dev_warn(&pdev->dev, "Failed to set 48-bit DMA mask, using default\n");
+	}
 
 	dev = devm_kzalloc(device, sizeof(*dev), GFP_KERNEL);
 	if (!dev)
@@ -352,7 +382,9 @@ static const struct pci_device_id i2c_designware_pci_ids[] = {
 	{ PCI_VDEVICE(ATI,  0x73c4), navi_amd },
 	{ PCI_VDEVICE(ATI,  0x7444), navi_amd },
 	{ PCI_VDEVICE(ATI,  0x7464), navi_amd },
-	{}
+	/* Marvell CN20K */
+	{ PCI_VDEVICE(CAVIUM, 0xa0a9), marvell },
+	{ 0, }
 };
 MODULE_DEVICE_TABLE(pci, i2c_designware_pci_ids);
 

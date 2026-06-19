@@ -510,6 +510,23 @@ config ARM64_ERRATUM_826319
 
 	  If unsure, say Y.
 
+config ARM64_WORKAROUND_MARVELL_38891
+       bool "Marvell CN10K TAD Errata 38891"
+       default y
+       help
+	  This option adds an alternative code sequence to work around Marvell
+	  CN10K TAD erratum 38891 and also enables kernel trap for execution of
+	  cache maintenance instruction in user space.
+
+	  An issue exists whereby if one core (core A) is accessing a cache line
+	  and a certain set of race cases occur when a second core (Core B) is
+	  executing a DC CVAC, DC CVAP or DC CVADP to the same cache line, the
+	  second core B may respond to the Last Level Cache (TAD's) request for
+	  data with an unexpected transaction type. This will cause the TAD to
+	  ignore the response, response will never come to Core A, so as soon
+	  as Core A reaches an instruction that requires that response to
+	  complete it will hang. Core B and other cores will remain responsive.
+
 config ARM64_ERRATUM_827319
 	bool "Cortex-A53: 827319: Data cache clean instructions might cause overlapping transactions to the interconnect"
 	default y
@@ -1285,6 +1302,18 @@ config HISILICON_ERRATUM_162100801
 
 	  If unsure, say Y.
 
+config CAVIUM_ERRATUM_36890
+	bool "Cavium erratum 36890"
+	default y
+	help
+	  Enable workaround for erratum 36890.  On all ThunderX T88xx and
+	  OcteonTX1 T81/T83 and some OcteonTX2 chips, the "dc zva" instruction
+	  does not work all the time.  This happens when there are two VAs
+	  that match up with one PA; including when the two VAs match but have
+	  different asids.  The fix is to disable "dc zva" in userspace.
+
+	  If unsure, say Y.
+
 config QCOM_FALKOR_ERRATUM_1003
 	bool "Falkor E1003: Incorrect translation due to ASID change"
 	default y
@@ -1651,7 +1680,7 @@ config ARCH_FORCE_MAX_ORDER
 	int
 	default "13" if ARM64_64K_PAGES
 	default "11" if ARM64_16K_PAGES
-	default "10"
+	default "12"
 	help
 	  The kernel page allocator limits the size of maximal physically
 	  contiguous allocations. The limit is called MAX_PAGE_ORDER and it
@@ -2034,6 +2063,33 @@ config ARM64_TLB_RANGE
 	help
 	  ARMv8.4-TLBI provides TLBI invalidation instruction that apply to a
 	  range of input addresses.
+
+config ARM64_MPAM
+	bool "Enable support for MPAM"
+	select ARM64_MPAM_DRIVER
+	select ARCH_HAS_CPU_RESCTRL
+	help
+	  Memory System Resource Partitioning and Monitoring (MPAM) is an
+	  optional extension to the Arm architecture that allows each
+	  transaction issued to the memory system to be labelled with a
+	  Partition identifier (PARTID) and Performance Monitoring Group
+	  identifier (PMG).
+
+	  Memory system components, such as the caches, can be configured with
+	  policies to control how much of various physical resources (such as
+	  memory bandwidth or cache memory) the transactions labelled with each
+	  PARTID can consume.  Depending on the capabilities of the hardware,
+	  the PARTID and PMG can also be used as filtering criteria to measure
+	  the memory system resource consumption of different parts of a
+	  workload.
+
+	  Use of this extension requires CPU support, support in the
+	  Memory System Components (MSC), and a description from firmware
+	  of where the MSCs are in the address space.
+
+	  MPAM is exposed to user-space via the resctrl pseudo filesystem.
+
+	  This option enables the extra context switch code.
 
 endmenu # "ARMv8.4 architectural features"
 

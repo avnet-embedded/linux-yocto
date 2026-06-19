@@ -231,6 +231,15 @@ config PCI_HYPERV_INTERFACE
 	  drivers to have a common interface with the Hyper-V PCI frontend
 	  driver.
 
+config PCI_OCTEON_PEM
+	bool "Marvell Octeon PEM (PCIe MAC) controller"
+	depends on ARM64 || COMPILE_TEST
+	depends on PCI_MSI
+	depends on HOTPLUG_PCI_PCIE
+	help
+	  Say Y here if you want PEM controller support for Marvell ARM64 Octeon SoCs
+	  in root complex mode.
+
 config PCI_TEGRA
 	bool "NVIDIA Tegra PCIe controller"
 	depends on ARCH_TEGRA || COMPILE_TEST
@@ -264,6 +273,17 @@ config PCI_RCAR_GEN2
 	  Say Y here if you want internal PCI support on R-Car Gen2 SoC.
 	  Each internal PCI controller contains a single built-in EHCI/OHCI
 	  host controller.
+
+config PCIE_MARVELL_CNXK_EP
+	tristate "Marvell CNXK PEM EP driver"
+	depends on ARM64 && UIO
+	default m
+	help
+	  This driver configures the PEM when OcteonTx2 and CN10K SoCs are  in PCIe
+	  EndPoint mode. Also it programs the indexed BAR4 regions for mailbox
+	  communication with host.
+
+	  To compile this as a module choose M here.
 
 config PCIE_ROCKCHIP
 	bool

@@ -18,9 +18,25 @@
 #include <linux/spinlock.h>
 #include <linux/workqueue.h>
 
-#define OCTEP_HP_INTR_OFFSET(x) (0x20400 + ((x) << 4))
+#define OCTEP_HP_INTR_OFFSET(x, shift) (0x20400 + ((x) << (shift)))
+#define OCTEP_HP_REG_SHIFT_CN10K 4
+#define OCTEP_HP_REG_SHIFT_CN20K 3
 #define OCTEP_HP_INTR_VECTOR(x) (16 + (x))
 #define OCTEP_HP_DRV_NAME "octep_hp"
+
+#define OCTEP_HP_SCRATCH_OFFSET_CN10K 0x209E0
+#define OCTEP_HP_SCRATCH_OFFSET_CN20K 0x28000
+
+/* State flags are mutually exclusive, only one is set at a time */
+#define OCTEP_HP_SCRATCH_ON  BIT_ULL(63)
+#define OCTEP_HP_SCRATCH_OFF BIT_ULL(62)
+
+/* Interrupt value layout: bits [31:0] slot mask, bits [63:32] cookie */
+#define OCTEP_HP_INTR_SLOT_MASK GENMASK_ULL(31, 0)
+#define OCTEP_HP_INTR_COOKIE_SHIFT 32
+
+#define PCI_SUBSYS_DEVID_CNF10K_A 0xBA00
+#define PCI_SUBSYS_DEVID_CN20KA 0xC200
 
 /*
  * Type of MSI-X interrupts. OCTEP_HP_INTR_VECTOR() and
@@ -64,6 +80,8 @@ struct octep_hp_controller {
 	struct mutex slot_lock; /* Protects slot_list */
 	struct list_head hp_cmd_list;
 	spinlock_t hp_cmd_lock; /* Protects hp_cmd_list */
+	u32 scratch_offset;
+	u8 reg_shift;
 };
 
 static void octep_hp_enable_pdev(struct octep_hp_controller *hp_ctrl,
@@ -148,7 +166,7 @@ octep_hp_register_slot(struct octep_hp_controller *hp_ctrl,
 
 	snprintf(slot_name, sizeof(slot_name), "octep_hp_%u", slot_number);
 	ret = pci_hp_register(&hp_slot->slot, hp_ctrl->pdev->bus,
-			      PCI_SLOT(pdev->devfn), slot_name);
+			      slot_number, slot_name);
 	if (ret) {
 		kfree(hp_slot);
 		return ERR_PTR(ret);
@@ -174,6 +192,21 @@ static void octep_hp_deregister_slot(void *data)
 	kfree(hp_slot);
 }
 
+static void octep_hp_scratch_write(struct octep_hp_controller *hp_ctrl, u64 val)
+{
+	writeq(val, hp_ctrl->base + hp_ctrl->scratch_offset);
+}
+
+static u32 octep_hp_intr_slot_mask(u64 intr_val)
+{
+	return intr_val & OCTEP_HP_INTR_SLOT_MASK;
+}
+
+static u32 octep_hp_intr_cookie(u64 intr_val)
+{
+	return intr_val >> OCTEP_HP_INTR_COOKIE_SHIFT;
+}
+
 static const char *octep_hp_cmd_name(enum octep_hp_intr_type type)
 {
 	switch (type) {
@@ -189,18 +222,21 @@ static const char *octep_hp_cmd_name(enum octep_hp_intr_type type)
 static void octep_hp_cmd_handler(struct octep_hp_controller *hp_ctrl,
 				 struct octep_hp_cmd *hp_cmd)
 {
+	u32 slot_mask = octep_hp_intr_slot_mask(hp_cmd->intr_val);
+	u32 cookie = octep_hp_intr_cookie(hp_cmd->intr_val);
 	struct octep_hp_slot *hp_slot;
 
 	/*
 	 * Enable or disable the slots based on the slot mask.
-	 * intr_val is a bit mask where each bit represents a slot.
+	 * Bits [31:0] of intr_val are the slot bitmask.
+	 * Bits [63:32] carry the cookie for command acknowledgement.
 	 */
 	list_for_each_entry(hp_slot, &hp_ctrl->slot_list, list) {
-		if (!(hp_cmd->intr_val & BIT(hp_slot->slot_number)))
+		if (!(slot_mask & BIT(hp_slot->slot_number)))
 			continue;
 
-		pci_info(hp_ctrl->pdev, "Received %s command for slot %s\n",
-			 octep_hp_cmd_name(hp_cmd->intr_type),
+		pci_info(hp_ctrl->pdev, "Received %s command (cookie=%x) for slot %s\n",
+			 octep_hp_cmd_name(hp_cmd->intr_type), cookie,
 			 hotplug_slot_name(&hp_slot->slot));
 
 		switch (hp_cmd->intr_type) {
@@ -214,6 +250,9 @@ static void octep_hp_cmd_handler(struct octep_hp_controller *hp_ctrl,
 			break;
 		}
 	}
+
+	/* Acknowledge command completion, keep ON flag set */
+	octep_hp_scratch_write(hp_ctrl, OCTEP_HP_SCRATCH_ON | cookie);
 }
 
 static void octep_hp_work_handler(struct work_struct *work)
@@ -268,8 +307,8 @@ static irqreturn_t octep_hp_intr_handler(int irq, void *data)
 	}
 
 	/* Read and clear the interrupt */
-	intr_val = readq(hp_ctrl->base + OCTEP_HP_INTR_OFFSET(type));
-	writeq(intr_val, hp_ctrl->base + OCTEP_HP_INTR_OFFSET(type));
+	intr_val = readq(hp_ctrl->base + OCTEP_HP_INTR_OFFSET(type, hp_ctrl->reg_shift));
+	writeq(intr_val, hp_ctrl->base + OCTEP_HP_INTR_OFFSET(type, hp_ctrl->reg_shift));
 
 	hp_cmd = kzalloc(sizeof(*hp_cmd), GFP_ATOMIC);
 	if (!hp_cmd)
@@ -292,6 +331,17 @@ static void octep_hp_irq_cleanup(void *data)
 	struct octep_hp_controller *hp_ctrl = data;
 
 	pci_free_irq_vectors(hp_ctrl->pdev);
+	octep_hp_scratch_write(hp_ctrl, OCTEP_HP_SCRATCH_OFF);
+}
+
+static void octep_hp_work_cleanup(void *data)
+{
+	struct octep_hp_controller *hp_ctrl = data;
+	enum octep_hp_intr_type type;
+
+	for (type = OCTEP_HP_INTR_ENA; type < OCTEP_HP_INTR_MAX; type++)
+		disable_irq(hp_ctrl->intr[type].number);
+
 	flush_work(&hp_ctrl->work);
 }
 
@@ -331,6 +381,21 @@ static int octep_hp_controller_setup(struct pci_dev *pdev,
 		return dev_err_probe(dev, PTR_ERR(hp_ctrl->base),
 				     "Failed to map PCI device region\n");
 
+	switch (pdev->subsystem_device) {
+	case PCI_SUBSYS_DEVID_CNF10K_A:
+		hp_ctrl->reg_shift = OCTEP_HP_REG_SHIFT_CN10K;
+		hp_ctrl->scratch_offset = OCTEP_HP_SCRATCH_OFFSET_CN10K;
+		break;
+	case PCI_SUBSYS_DEVID_CN20KA:
+		hp_ctrl->reg_shift = OCTEP_HP_REG_SHIFT_CN20K;
+		hp_ctrl->scratch_offset = OCTEP_HP_SCRATCH_OFFSET_CN20K;
+		break;
+	default:
+		return dev_err_probe(dev, -ENODEV,
+				     "Unsupported subsystem device ID: 0x%x\n",
+				     pdev->subsystem_device);
+	}
+
 	pci_set_master(pdev);
 	pci_set_drvdata(pdev, hp_ctrl);
 
@@ -347,7 +412,7 @@ static int octep_hp_controller_setup(struct pci_dev *pdev,
 	if (ret < 0)
 		return dev_err_probe(dev, ret, "Failed to alloc MSI-X vectors\n");
 
-	ret = devm_add_action(&pdev->dev, octep_hp_irq_cleanup, hp_ctrl);
+	ret = devm_add_action_or_reset(&pdev->dev, octep_hp_irq_cleanup, hp_ctrl);
 	if (ret)
 		return dev_err_probe(&pdev->dev, ret, "Failed to add IRQ cleanup action\n");
 
@@ -396,8 +461,8 @@ static int octep_hp_pci_probe(struct pci_dev *pdev,
 					     "Failed to register hotplug slot %u\n",
 					     slot_number);
 
-		ret = devm_add_action(&pdev->dev, octep_hp_deregister_slot,
-				      hp_slot);
+		ret = devm_add_action_or_reset(&pdev->dev, octep_hp_deregister_slot,
+					       hp_slot);
 		if (ret)
 			return dev_err_probe(&pdev->dev, ret,
 					     "Failed to add action for deregistering slot %u\n",
@@ -405,6 +470,12 @@ static int octep_hp_pci_probe(struct pci_dev *pdev,
 		slot_number++;
 	}
 
+	ret = devm_add_action_or_reset(&pdev->dev, octep_hp_work_cleanup, hp_ctrl);
+	if (ret)
+		return dev_err_probe(&pdev->dev, ret,
+				     "Failed to add work cleanup action\n");
+
+	octep_hp_scratch_write(hp_ctrl, OCTEP_HP_SCRATCH_ON);
 	return 0;
 }
 

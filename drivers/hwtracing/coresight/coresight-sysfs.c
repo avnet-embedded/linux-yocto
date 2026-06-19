@@ -11,6 +11,7 @@
 
 #include "coresight-priv.h"
 #include "coresight-trace-id.h"
+#include "coresight-tmc.h"
 
 /*
  * Use IDR to map the hash of the source's device name
@@ -170,6 +171,7 @@ int coresight_enable_sysfs(struct coresight_device *csdev)
 	int cpu, ret = 0;
 	struct coresight_device *sink;
 	struct coresight_path *path;
+	struct tmc_drvdata *drvdata;
 	enum coresight_dev_subtype_source subtype;
 	u32 hash;
 
@@ -214,6 +216,9 @@ int coresight_enable_sysfs(struct coresight_device *csdev)
 	coresight_path_assign_trace_id(path, CS_MODE_SYSFS);
 	if (!IS_VALID_CS_TRACE_ID(path->trace_id))
 		goto err_path;
+
+	drvdata = dev_get_drvdata(sink->dev.parent);
+	drvdata->etm_source = csdev;
 
 	ret = coresight_enable_path(path, CS_MODE_SYSFS, NULL);
 	if (ret)

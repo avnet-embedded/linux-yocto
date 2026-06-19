@@ -663,10 +663,10 @@ static int cn10k_ipsec_inb_add_state(struct xfrm_state *x,
 	return -EOPNOTSUPP;
 }
 
-static int cn10k_ipsec_outb_add_state(struct net_device *dev,
-				      struct xfrm_state *x,
+static int cn10k_ipsec_outb_add_state(struct xfrm_state *x,
 				      struct netlink_ext_ack *extack)
 {
+	struct net_device *dev = x->xso.dev;
 	struct cn10k_tx_sa_s *sa_entry;
 	struct qmem *sa_info;
 	struct otx2_nic *pf;
@@ -700,18 +700,18 @@ static int cn10k_ipsec_outb_add_state(struct net_device *dev,
 	return 0;
 }
 
-static int cn10k_ipsec_add_state(struct net_device *dev,
-				 struct xfrm_state *x,
+static int cn10k_ipsec_add_state(struct xfrm_state *x,
 				 struct netlink_ext_ack *extack)
 {
 	if (x->xso.dir == XFRM_DEV_OFFLOAD_IN)
 		return cn10k_ipsec_inb_add_state(x, extack);
 	else
-		return cn10k_ipsec_outb_add_state(dev, x, extack);
+		return cn10k_ipsec_outb_add_state(x, extack);
 }
 
-static void cn10k_ipsec_del_state(struct net_device *dev, struct xfrm_state *x)
+static void cn10k_ipsec_del_state(struct xfrm_state *x)
 {
+	struct net_device *dev = x->xso.dev;
 	struct cn10k_tx_sa_s *sa_entry;
 	struct qmem *sa_info;
 	struct otx2_nic *pf;
@@ -762,23 +762,110 @@ static void cn10k_ipsec_sa_wq_handler(struct work_struct *work)
 	rtnl_unlock();
 }
 
+static void cn10k_ipsec_cleanup_send_queues(struct otx2_nic *pfvf)
+{
+	struct otx2_qset *qset = &pfvf->qset;
+	struct otx2_snd_queue *sq;
+	int qidx;
+
+	for (qidx = 0; qidx < pfvf->hw.non_qos_queues; qidx++) {
+		sq = &qset->sq[qidx];
+		qmem_free(pfvf->dev, sq->sqe_ring);
+		qmem_free(pfvf->dev, sq->cpt_resp);
+		sq->sqe_ring = NULL;
+		sq->cpt_resp = NULL;
+	}
+}
+
+static int cn10k_ipsec_init_send_queues(struct otx2_nic *pfvf)
+{
+	struct otx2_qset *qset = &pfvf->qset;
+	struct otx2_snd_queue *sq;
+	int qidx, err;
+
+	for (qidx = 0; qidx < pfvf->hw.non_qos_queues; qidx++) {
+		/* Allocate memory for NIX SQE (which includes NIX SG) and
+		 * CPT SG. SG of NIX and CPT are same in size. Allocate memory
+		 * for CPT SG same as NIX SQE for base address alignment.
+		 * Layout of a NIX SQE and CPT SG entry:
+		 *      -----------------------------
+		 *     |     CPT Scatter Gather      |
+		 *     |       (SQE SIZE)            |
+		 *     |                             |
+		 *      -----------------------------
+		 *     |       NIX SQE               |
+		 *     |       (SQE SIZE)            |
+		 *     |                             |
+		 *      -----------------------------
+		 */
+		sq = &qset->sq[qidx];
+
+		err = qmem_alloc(pfvf->dev, &sq->sqe_ring, qset->sqe_cnt,
+				 sq->sqe_size * 2);
+		if (err)
+			goto free_mem;
+
+		err = qmem_alloc(pfvf->dev, &sq->cpt_resp, qset->sqe_cnt, 64);
+		if (err)
+			goto free_mem;
+	}
+
+	return 0;
+
+free_mem:
+	cn10k_ipsec_cleanup_send_queues(pfvf);
+	return err;
+}
+
+int cn10k_ipsec_send_queues_init(struct otx2_nic *pfvf)
+{
+	if (otx2_rep_dev(pfvf->pdev))
+		return 0;
+
+	if (pfvf->netdev->features & NETIF_F_HW_ESP)
+		return cn10k_ipsec_init_send_queues(pfvf);
+
+	return 0;
+}
+
+void cn10k_ipsec_send_queues_cleanup(struct otx2_nic *pfvf)
+{
+	if (otx2_rep_dev(pfvf->pdev))
+		return;
+
+	if (pfvf->netdev->features & NETIF_F_HW_ESP)
+		cn10k_ipsec_cleanup_send_queues(pfvf);
+}
+
 int cn10k_ipsec_ethtool_init(struct net_device *netdev, bool enable)
 {
 	struct otx2_nic *pf = netdev_priv(netdev);
+	int err;
 
 	/* IPsec offload supported on cn10k */
 	if (!is_dev_support_ipsec_offload(pf->pdev))
 		return -EOPNOTSUPP;
 
 	/* Initialize CPT for outbound ipsec offload */
-	if (enable)
+	if (enable) {
+		if (netif_running(netdev)) {
+			err = cn10k_ipsec_init_send_queues(pf);
+			if (err)
+				return err;
+		}
+
 		return cn10k_outb_cpt_init(netdev);
+	}
 
 	/* Don't do CPT cleanup if SA installed */
 	if (pf->ipsec.outb_sa_count) {
 		netdev_err(pf->netdev, "SA installed on this device\n");
 		return -EBUSY;
 	}
+
+	/* Cleanup IPsec SQs and CPT */
+	if (netif_running(netdev))
+		cn10k_ipsec_cleanup_send_queues(pf);
 
 	return cn10k_outb_cpt_clean(pf);
 }

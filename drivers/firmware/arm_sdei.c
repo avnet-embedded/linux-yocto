@@ -1084,6 +1084,7 @@ static int __init sdei_init(void)
 {
 	return platform_driver_register(&sdei_driver);
 }
+
 arch_initcall(sdei_init);
 
 int sdei_event_handler(struct pt_regs *regs,

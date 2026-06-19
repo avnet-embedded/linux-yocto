@@ -15,6 +15,7 @@
 #include "cn10k.h"
 #include "otx2_reg.h"
 #include "rep.h"
+#include "switch/sw_nb.h"
 
 #define DRV_NAME	"rvu_rep"
 #define DRV_STRING	"Marvell RVU Representor Driver"
@@ -252,6 +253,7 @@ static int rvu_rep_devlink_port_register(struct rep_dev *rep)
 	}
 
 	rvu_rep_devlink_set_switch_id(priv, &attrs.switch_id);
+
 	devlink_port_attrs_set(&rep->dl_port, &attrs);
 
 	err = devl_port_register_with_ops(dl, &rep->dl_port, rep->rep_id,
@@ -262,16 +264,6 @@ static int rvu_rep_devlink_port_register(struct rep_dev *rep)
 		return err;
 	}
 	return 0;
-}
-
-static int rvu_rep_get_repid(struct otx2_nic *priv, u16 pcifunc)
-{
-	int rep_id;
-
-	for (rep_id = 0; rep_id < priv->rep_cnt; rep_id++)
-		if (priv->rep_pf_map[rep_id] == pcifunc)
-			return rep_id;
-	return -EINVAL;
 }
 
 static int rvu_rep_notify_pfvf(struct otx2_nic *priv, u16 event,
@@ -291,27 +283,6 @@ static int rvu_rep_notify_pfvf(struct otx2_nic *priv, u16 event,
 	memcpy(&req->evt_data, &data->evt_data, sizeof(struct rep_evt_data));
 	otx2_sync_mbox_msg(&priv->mbox);
 	mutex_unlock(&priv->mbox.lock);
-	return 0;
-}
-
-static void rvu_rep_state_evt_handler(struct otx2_nic *priv,
-				      struct rep_event *info)
-{
-	struct rep_dev *rep;
-	int rep_id;
-
-	rep_id = rvu_rep_get_repid(priv, info->pcifunc);
-	rep = priv->reps[rep_id];
-	if (info->evt_data.vf_state)
-		rep->flags |= RVU_REP_VF_INITIALIZED;
-	else
-		rep->flags &= ~RVU_REP_VF_INITIALIZED;
-}
-
-int rvu_event_up_notify(struct otx2_nic *pf, struct rep_event *info)
-{
-	if (info->event & RVU_EVENT_PFVF_STATE)
-		rvu_rep_state_evt_handler(pf, info);
 	return 0;
 }
 
@@ -399,7 +370,10 @@ static void rvu_rep_get_stats64(struct net_device *dev,
 
 static int rvu_eswitch_config(struct otx2_nic *priv, u8 ena)
 {
+	struct devlink_port_attrs attrs = {};
 	struct esw_cfg_req *req;
+
+	rvu_rep_devlink_set_switch_id(priv, &attrs.switch_id);
 
 	mutex_lock(&priv->mbox.lock);
 	req = otx2_mbox_alloc_msg_esw_cfg(&priv->mbox);
@@ -408,8 +382,14 @@ static int rvu_eswitch_config(struct otx2_nic *priv, u8 ena)
 		return -ENOMEM;
 	}
 	req->ena = ena;
+	memcpy(req->switch_id, attrs.switch_id.id, attrs.switch_id.id_len);
 	otx2_sync_mbox_msg(&priv->mbox);
 	mutex_unlock(&priv->mbox.lock);
+
+#if IS_ENABLED(CONFIG_OCTEONTX_SWITCH)
+	ena ? sw_nb_register() : sw_nb_unregister();
+#endif
+
 	return 0;
 }
 
@@ -459,6 +439,9 @@ static int rvu_rep_open(struct net_device *dev)
 	netif_carrier_on(dev);
 	netif_tx_start_all_queues(dev);
 
+	if (rep->pcifunc & RVU_PFVF_FUNC_MASK)
+		return 0;
+
 	evt.event = RVU_EVENT_PORT_STATE;
 	evt.evt_data.port_state = 1;
 	evt.pcifunc = rep->pcifunc;
@@ -477,6 +460,9 @@ static int rvu_rep_stop(struct net_device *dev)
 
 	netif_carrier_off(dev);
 	netif_tx_disable(dev);
+
+	if (rep->pcifunc & RVU_PFVF_FUNC_MASK)
+		return 0;
 
 	evt.event = RVU_EVENT_PORT_STATE;
 	evt.pcifunc = rep->pcifunc;
@@ -634,8 +620,10 @@ void rvu_rep_destroy(struct otx2_nic *priv)
 	rvu_eswitch_config(priv, false);
 	priv->flags |= OTX2_FLAG_INTF_DOWN;
 	rvu_rep_free_cq_rsrc(priv);
+	priv->flags &= ~OTX2_FLAG_REP_MODE_ENABLED;
 	for (rep_id = 0; rep_id < priv->rep_cnt; rep_id++) {
 		rep = priv->reps[rep_id];
+		cancel_delayed_work_sync(&rep->stats_wrk);
 		unregister_netdev(rep->netdev);
 		rvu_rep_devlink_port_unregister(rep);
 		free_netdev(rep->netdev);
@@ -717,6 +705,7 @@ int rvu_rep_create(struct otx2_nic *priv, struct netlink_ext_ack *extack)
 		goto exit;
 
 	rvu_eswitch_config(priv, true);
+	priv->flags |= OTX2_FLAG_REP_MODE_ENABLED;
 	return 0;
 exit:
 	while (--rep_id >= 0) {
@@ -802,7 +791,6 @@ static int rvu_rep_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	priv->pdev = pdev;
 	priv->dev = dev;
 	priv->flags |= OTX2_FLAG_INTF_DOWN;
-	priv->flags |= OTX2_FLAG_REP_MODE_ENABLED;
 
 	hw = &priv->hw;
 	hw->pdev = pdev;
@@ -815,12 +803,19 @@ static int rvu_rep_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto err_set_drv_data;
 
 	priv->iommu_domain = iommu_get_domain_for_dev(dev);
+	if (priv->iommu_domain)
+		priv->iommu_domain_type =
+			((struct iommu_domain *)priv->iommu_domain)->type;
+
+	if (priv->iommu_domain)
+		priv->iommu_domain_type =
+			((struct iommu_domain *)priv->iommu_domain)->type;
 
 	err = rvu_get_rep_cnt(priv);
 	if (err)
 		goto err_detach_rsrc;
 
-	err = otx2_register_dl(priv);
+	err = rvu_rep_register_dl(priv);
 	if (err)
 		goto err_detach_rsrc;
 
@@ -844,9 +839,9 @@ static void rvu_rep_remove(struct pci_dev *pdev)
 {
 	struct otx2_nic *priv = pci_get_drvdata(pdev);
 
-	otx2_unregister_dl(priv);
 	if (!(priv->flags & OTX2_FLAG_INTF_DOWN))
 		rvu_rep_destroy(priv);
+	rvu_rep_unregister_dl(priv);
 	otx2_detach_resources(&priv->mbox);
 	if (priv->hw.lmt_info)
 		free_percpu(priv->hw.lmt_info);

@@ -14,12 +14,19 @@
 #include <linux/platform_device.h>
 #include <linux/acpi.h>
 
-#define TAD_PFC_OFFSET		0x800
-#define TAD_PFC(counter)	(TAD_PFC_OFFSET | (counter << 3))
 #define TAD_PRF_OFFSET		0x900
-#define TAD_PRF(counter)	(TAD_PRF_OFFSET | (counter << 3))
+#define TAD_PFC_OFFSET		0x800
+#define TAD_PRF_NS_OFFSET	0x30900
+#define TAD_PFC_NS_OFFSET	0x30800
+#define TAD_PFC(base, counter)	(base | (counter << 3))
+#define TAD_PRF(base, counter)	(base | (counter << 3))
 #define TAD_PRF_CNTSEL_MASK	0xFF
+#define TAD_PRF_MATCH_PARTID	BIT(8)
+#define TAD_PRF_PARTID_NS	BIT(10)
 #define TAD_MAX_COUNTERS	8
+
+#define TAD_UNSUPP_PARTID	0x100
+#define TAD_ALLOC_ANY		0x1c
 
 #define to_tad_pmu(p) (container_of(p, struct tad_pmu, pmu))
 
@@ -27,30 +34,149 @@ struct tad_region {
 	void __iomem	*base;
 };
 
+struct tad_pmu_data {
+	int id;
+	u64 tad_prf_offset;
+	u64 tad_pfc_offset;
+};
+
 struct tad_pmu {
 	struct pmu pmu;
 	struct tad_region *regions;
 	u32 region_cnt;
 	unsigned int cpu;
+	const struct tad_pmu_ops *ops;
+	const struct tad_pmu_data *pdata;
 	struct hlist_node node;
 	struct perf_event *events[TAD_MAX_COUNTERS];
 	DECLARE_BITMAP(counters_map, TAD_MAX_COUNTERS);
 };
 
+struct tad_pmu_ops {
+	void (*start_counter)(struct tad_pmu *pmu, struct perf_event *event);
+	void (*stop_counter)(struct tad_pmu *pmu, u32 counter_idx);
+};
+
 enum mrvl_tad_pmu_version {
 	TAD_PMU_V1 = 1,
 	TAD_PMU_V2,
-};
-
-struct tad_pmu_data {
-	int id;
+	TAD_PMU_V3,
 };
 
 static int tad_pmu_cpuhp_state;
 
+static void tad_pmu_start_counter(struct tad_pmu *pmu,
+				  struct perf_event *event)
+{
+	const struct tad_pmu_data *pdata = pmu->pdata;
+	struct hw_perf_event *hwc = &event->hw;
+	u32 event_idx = event->attr.config;
+	u32 counter_idx = hwc->idx;
+	u32 partid_filter = 0;
+	u64 reg_val;
+	u32 partid;
+	int i;
+
+	/* Extract the partid (if any) passed by user */
+	partid = event->attr.config1 & 0x3f;
+
+	/* Typically TAD_PFC() are zeroed to start counting */
+	for (i = 0; i < pmu->region_cnt; i++)
+		writeq_relaxed(0, pmu->regions[i].base +
+			       TAD_PFC(pdata->tad_pfc_offset, counter_idx));
+
+	/* Only some counters are filterable by MPAM */
+	if (partid && event_idx > 0x19 && event_idx < 0x21) {
+		partid_filter = TAD_PRF_MATCH_PARTID | TAD_PRF_PARTID_NS |
+				(partid << 11);
+		if (pdata->id == TAD_PMU_V3)
+			partid_filter = TAD_PRF_MATCH_PARTID | BIT_ULL(25) |
+				(partid << 10);
+	}
+
+	/* TAD()_PFC() start counting on the write
+	 * which sets TAD()_PRF()[CNTSEL] != 0
+	 */
+	if (pdata->id == TAD_PMU_V1 && event_idx > 0x24)
+		return;
+
+	for (i = 0; i < pmu->region_cnt; i++) {
+		reg_val = event_idx & 0xFF;
+		reg_val |= partid_filter;
+		writeq_relaxed(reg_val, pmu->regions[i].base +
+			       TAD_PRF(pdata->tad_prf_offset, counter_idx));
+	}
+}
+
+static void tad_pmu_v2_start_counter(struct tad_pmu *pmu,
+				     struct perf_event *event)
+{
+	const struct tad_pmu_data *pdata = pmu->pdata;
+	struct hw_perf_event *hwc = &event->hw;
+	u32 event_idx = event->attr.config;
+	u32 counter_idx = hwc->idx;
+	u64 reg_val;
+	int i;
+
+	/* Typically TAD_PFC() are zeroed to start counting */
+	for (i = 0; i < pmu->region_cnt; i++)
+		writeq_relaxed(0, pmu->regions[i].base +
+			       TAD_PFC(pdata->tad_pfc_offset, counter_idx));
+
+	/* TAD()_PFC() start counting on the write
+	 * which sets TAD()_PRF()[CNTSEL] != 0
+	 */
+	for (i = 0; i < pmu->region_cnt; i++) {
+		reg_val = event_idx & 0xFF;
+		writeq_relaxed(reg_val, pmu->regions[i].base +
+			       TAD_PRF(pdata->tad_prf_offset, counter_idx));
+	}
+}
+
+static void tad_pmu_stop_counter(struct tad_pmu *tad_pmu, u32 counter_idx)
+{
+	const struct tad_pmu_data *pdata = tad_pmu->pdata;
+	u64 reg_val;
+	int i;
+
+	/* Write with unsupported partid before stopping the counter*/
+	if (pdata->id == TAD_PMU_V3)
+		reg_val = TAD_PRF_MATCH_PARTID | BIT_ULL(25) |
+			  (TAD_UNSUPP_PARTID << 10) | TAD_ALLOC_ANY;
+	else
+		reg_val = TAD_PRF_MATCH_PARTID | TAD_PRF_PARTID_NS |
+			  (TAD_UNSUPP_PARTID << 11) | TAD_ALLOC_ANY;
+
+	/* TAD()_PFC() stop counting on the write
+	 * which sets TAD()_PRF()[CNTSEL] == 0
+	 */
+	for (i = 0; i < tad_pmu->region_cnt; i++) {
+		writeq(reg_val, tad_pmu->regions[i].base +
+			       TAD_PRF(pdata->tad_prf_offset, counter_idx));
+
+		writeq(0, tad_pmu->regions[i].base +
+			       TAD_PRF(pdata->tad_prf_offset, counter_idx));
+	}
+}
+
+static void tad_pmu_v2_stop_counter(struct tad_pmu *tad_pmu, u32 counter_idx)
+{
+	const struct tad_pmu_data *pdata = tad_pmu->pdata;
+	int i;
+
+	/* TAD()_PFC() stop counting on the write
+	 * which sets TAD()_PRF()[CNTSEL] == 0
+	 */
+	for (i = 0; i < tad_pmu->region_cnt; i++) {
+		writeq(0, tad_pmu->regions[i].base +
+			       TAD_PRF(pdata->tad_prf_offset, counter_idx));
+	}
+}
+
 static void tad_pmu_event_counter_read(struct perf_event *event)
 {
 	struct tad_pmu *tad_pmu = to_tad_pmu(event->pmu);
+	const struct tad_pmu_data *pdata = tad_pmu->pdata;
 	struct hw_perf_event *hwc = &event->hw;
 	u32 counter_idx = hwc->idx;
 	u64 prev, new;
@@ -60,7 +186,7 @@ static void tad_pmu_event_counter_read(struct perf_event *event)
 		prev = local64_read(&hwc->prev_count);
 		for (i = 0, new = 0; i < tad_pmu->region_cnt; i++)
 			new += readq(tad_pmu->regions[i].base +
-				     TAD_PFC(counter_idx));
+				     TAD_PFC(pdata->tad_pfc_offset, counter_idx));
 	} while (local64_cmpxchg(&hwc->prev_count, prev, new) != prev);
 
 	local64_add(new - prev, &event->count);
@@ -71,15 +197,8 @@ static void tad_pmu_event_counter_stop(struct perf_event *event, int flags)
 	struct tad_pmu *tad_pmu = to_tad_pmu(event->pmu);
 	struct hw_perf_event *hwc = &event->hw;
 	u32 counter_idx = hwc->idx;
-	int i;
 
-	/* TAD()_PFC() stop counting on the write
-	 * which sets TAD()_PRF()[CNTSEL] == 0
-	 */
-	for (i = 0; i < tad_pmu->region_cnt; i++) {
-		writeq_relaxed(0, tad_pmu->regions[i].base +
-			       TAD_PRF(counter_idx));
-	}
+	tad_pmu->ops->stop_counter(tad_pmu, counter_idx);
 
 	tad_pmu_event_counter_read(event);
 	hwc->state |= PERF_HES_STOPPED | PERF_HES_UPTODATE;
@@ -89,26 +208,10 @@ static void tad_pmu_event_counter_start(struct perf_event *event, int flags)
 {
 	struct tad_pmu *tad_pmu = to_tad_pmu(event->pmu);
 	struct hw_perf_event *hwc = &event->hw;
-	u32 event_idx = event->attr.config;
-	u32 counter_idx = hwc->idx;
-	u64 reg_val;
-	int i;
 
 	hwc->state = 0;
 
-	/* Typically TAD_PFC() are zeroed to start counting */
-	for (i = 0; i < tad_pmu->region_cnt; i++)
-		writeq_relaxed(0, tad_pmu->regions[i].base +
-			       TAD_PFC(counter_idx));
-
-	/* TAD()_PFC() start counting on the write
-	 * which sets TAD()_PRF()[CNTSEL] != 0
-	 */
-	for (i = 0; i < tad_pmu->region_cnt; i++) {
-		reg_val = event_idx & 0xFF;
-		writeq_relaxed(reg_val,	tad_pmu->regions[i].base +
-			       TAD_PRF(counter_idx));
-	}
+	tad_pmu->ops->start_counter(tad_pmu, event);
 }
 
 static void tad_pmu_event_counter_del(struct perf_event *event, int flags)
@@ -215,6 +318,18 @@ static struct attribute *tad_pmu_event_attrs[] = {
 	TAD_PMU_EVENT_ATTR(tad_dat_rd_byp, 0x22),
 	TAD_PMU_EVENT_ATTR(tad_ifb_occ, 0x23),
 	TAD_PMU_EVENT_ATTR(tad_req_occ, 0x24),
+	TAD_PMU_EVENT_ATTR(tad_req_msh_out_dtg_evict, 0x25),
+	TAD_PMU_EVENT_ATTR(tad_REQ_MSH_OUT_LTG_EVICT, 0x26),
+	TAD_PMU_EVENT_ATTR(tad_RSP_MSH_OUT_MPAM, 0x28),
+	TAD_PMU_EVENT_ATTR(tad_REPLAYS, 0x29),
+	TAD_PMU_EVENT_ATTR(tad_REQ_BYP0, 0x2A),
+	TAD_PMU_EVENT_ATTR(tad_REQ_BYP1, 0x2B),
+	TAD_PMU_EVENT_ATTR(tad_TXREQ_BYP, 0x2C),
+	TAD_PMU_EVENT_ATTR(tad_TIME_IN_DSLP, 0x2D),
+	TAD_PMU_EVENT_ATTR(tad_TIME_ELAPSED, 0x2E),
+	TAD_PMU_EVENT_ATTR(tad_REQ_MSH_OUT_DSS_RD_128MRG, 0x2F),
+	TAD_PMU_EVENT_ATTR(tad_REQ_MSH_OUT_DSS_WR_128MRG, 0x30),
+	TAD_PMU_EVENT_ATTR(tad_tot_cycle, 0xFF),
 	NULL
 };
 
@@ -242,15 +357,27 @@ static const struct attribute_group ody_tad_pmu_events_attr_group = {
 };
 
 PMU_FORMAT_ATTR(event, "config:0-7");
+PMU_FORMAT_ATTR(partid, "config1:0-15");
 
 static struct attribute *tad_pmu_format_attrs[] = {
 	&format_attr_event.attr,
+	&format_attr_partid.attr,
 	NULL
 };
 
 static struct attribute_group tad_pmu_format_attr_group = {
 	.name = "format",
 	.attrs = tad_pmu_format_attrs,
+};
+
+static struct attribute *ody_tad_pmu_format_attrs[] = {
+	&format_attr_event.attr,
+	NULL
+};
+
+static struct attribute_group ody_tad_pmu_format_attr_group = {
+	.name = "format",
+	.attrs = ody_tad_pmu_format_attrs,
 };
 
 static ssize_t tad_pmu_cpumask_show(struct device *dev,
@@ -281,9 +408,19 @@ static const struct attribute_group *tad_pmu_attr_groups[] = {
 
 static const struct attribute_group *ody_tad_pmu_attr_groups[] = {
 	&ody_tad_pmu_events_attr_group,
-	&tad_pmu_format_attr_group,
+	&ody_tad_pmu_format_attr_group,
 	&tad_pmu_cpumask_attr_group,
 	NULL
+};
+
+static const struct tad_pmu_ops tad_pmu_ops = {
+	.start_counter = tad_pmu_start_counter,
+	.stop_counter = tad_pmu_stop_counter,
+};
+
+static const struct tad_pmu_ops tad_pmu_v2_ops = {
+	.start_counter = tad_pmu_v2_start_counter,
+	.stop_counter = tad_pmu_v2_stop_counter,
 };
 
 static int tad_pmu_probe(struct platform_device *pdev)
@@ -312,6 +449,7 @@ static int tad_pmu_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 	version = dev_data->id;
+	tad_pmu->pdata = dev_data;
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
@@ -374,10 +512,13 @@ static int tad_pmu_probe(struct platform_device *pdev)
 		.read		= tad_pmu_event_counter_read,
 	};
 
-	if (version == TAD_PMU_V1)
+	if (version == TAD_PMU_V1 || version == TAD_PMU_V3) {
 		tad_pmu->pmu.attr_groups = tad_pmu_attr_groups;
-	else
+		tad_pmu->ops		 = &tad_pmu_ops;
+	} else {
 		tad_pmu->pmu.attr_groups = ody_tad_pmu_attr_groups;
+		tad_pmu->ops		 = &tad_pmu_v2_ops;
+	}
 
 	tad_pmu->cpu = raw_smp_processor_id();
 
@@ -410,18 +551,29 @@ static void tad_pmu_remove(struct platform_device *pdev)
 #if defined(CONFIG_OF) || defined(CONFIG_ACPI)
 static const struct tad_pmu_data tad_pmu_data = {
 	.id   = TAD_PMU_V1,
+	.tad_prf_offset = TAD_PRF_OFFSET,
+	.tad_pfc_offset = TAD_PFC_OFFSET,
+};
+
+static const struct tad_pmu_data tad_pmu_cn20k_data = {
+	.id   = TAD_PMU_V3,
+	.tad_prf_offset = TAD_PRF_NS_OFFSET,
+	.tad_pfc_offset = TAD_PFC_NS_OFFSET,
 };
 #endif
 
 #ifdef CONFIG_ACPI
 static const struct tad_pmu_data tad_pmu_v2_data = {
 	.id   = TAD_PMU_V2,
+	.tad_prf_offset = TAD_PRF_OFFSET,
+	.tad_pfc_offset = TAD_PFC_OFFSET,
 };
 #endif
 
 #ifdef CONFIG_OF
 static const struct of_device_id tad_pmu_of_match[] = {
 	{ .compatible = "marvell,cn10k-tad-pmu", .data = &tad_pmu_data },
+	{ .compatible = "marvell,cn20k-tad-pmu", .data = &tad_pmu_cn20k_data },
 	{},
 };
 #endif
@@ -430,6 +582,7 @@ static const struct of_device_id tad_pmu_of_match[] = {
 static const struct acpi_device_id tad_pmu_acpi_match[] = {
 	{"MRVL000B", (kernel_ulong_t)&tad_pmu_data},
 	{"MRVL000D", (kernel_ulong_t)&tad_pmu_v2_data},
+	{"MRVL000C", (kernel_ulong_t)&tad_pmu_cn20k_data},
 	{},
 };
 MODULE_DEVICE_TABLE(acpi, tad_pmu_acpi_match);

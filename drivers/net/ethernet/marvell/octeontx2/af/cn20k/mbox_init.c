@@ -269,8 +269,8 @@ static int rvu_alloc_mbox_memory(struct rvu *rvu, int type,
 				 int ndevs, int mbox_size)
 {
 	struct qmem *mbox_addr;
-	dma_addr_t iova;
 	int pf, err;
+	u64 pa;
 
 	/* Allocate contiguous memory for mailbox communication.
 	 * eg: AF <=> PFx mbox memory
@@ -292,11 +292,11 @@ static int rvu_alloc_mbox_memory(struct rvu *rvu, int type,
 	switch (type) {
 	case TYPE_AFPF:
 		rvu->ng_rvu->pf_mbox_addr = mbox_addr;
-		iova = (u64)mbox_addr->iova;
+		pa = (u64)virt_to_phys(mbox_addr->base);
 		for (pf = 0; pf < ndevs; pf++) {
 			rvu_write64(rvu, BLKADDR_RVUM, RVU_MBOX_AF_PFX_ADDR(pf),
-				    (u64)iova);
-			iova += mbox_size;
+				    pa);
+			pa += mbox_size;
 		}
 		break;
 	case TYPE_AFVF:
@@ -317,20 +317,17 @@ static struct mbox_ops cn20k_mbox_ops = {
 
 int cn20k_rvu_mbox_init(struct rvu *rvu, int type, int ndevs)
 {
-	int dev;
-
 	if (!is_cn20k(rvu->pdev))
 		return 0;
 
 	rvu->ng_rvu->rvu_mbox_ops = &cn20k_mbox_ops;
 
-	if (type == TYPE_AFVF) {
-		rvu_write64(rvu, BLKADDR_RVUM, RVU_MBOX_PF_VF_CFG, ilog2(MBOX_SIZE));
-	} else {
-		for (dev = 0; dev < ndevs; dev++)
-			rvu_write64(rvu, BLKADDR_RVUM,
-				    RVU_MBOX_AF_PFX_CFG(dev), ilog2(MBOX_SIZE));
-	}
+	if (type == TYPE_AFVF)
+		rvu_write64(rvu, BLKADDR_RVUM, RVU_PF_PFVF_MBOX_CFG,
+			    RVU_MBOX_SZ_64K);
+	else
+		rvu_write64(rvu, BLKADDR_RVUM,
+			    RVU_AF_AFPF_MBOX_CFG, RVU_MBOX_SZ_64K);
 
 	return rvu_alloc_mbox_memory(rvu, type, ndevs, MBOX_SIZE);
 }
@@ -397,6 +394,12 @@ int rvu_alloc_cint_qint_mem(struct rvu *rvu, struct rvu_pfvf *pfvf,
 	if (is_rvu_otx2(rvu) || is_cn20k(rvu->pdev))
 		return 0;
 
+	/* sanity check */
+	cfg = rvu_read64(rvu, BLKADDR_RVUM, RVU_PRIV_PFX_NIXX_CFG(0) |
+			 (RVU_AFPF << 16));
+	if (!cfg)
+		return 0;
+
 	ctx_cfg = rvu_read64(rvu, blkaddr, NIX_AF_CONST3);
 	/* Alloc memory for CQINT's HW contexts */
 	cfg = rvu_read64(rvu, blkaddr, NIX_AF_CONST2);
@@ -419,6 +422,17 @@ int rvu_alloc_cint_qint_mem(struct rvu *rvu, struct rvu_pfvf *pfvf,
 
 	rvu_write64(rvu, blkaddr, NIX_AF_LFX_QINTS_BASE(nixlf),
 		    (u64)pfvf->nix_qints_ctx->iova);
+
+	rvu_write64(rvu, BLKADDR_NIX0, RVU_AF_BAR2_SEL, RVU_AF_BAR2_PFID);
+	rvu_write64(rvu, BLKADDR_NIX0,
+		    AF_BAR2_ALIASX(0, NIX_GINT_INT_W1S), ALTAF_RDY);
+	/* wait for ack */
+	err = rvu_poll_reg(rvu, BLKADDR_NIX0,
+			   AF_BAR2_ALIASX(0, NIX_GINT_INT), ALTAF_RDY, true);
+	if (err)
+		rvu->altaf_ready = false;
+	else
+		rvu->altaf_ready = true;
 
 	return 0;
 }

@@ -98,11 +98,16 @@ unsigned int resctrl_rmid_realloc_limit;
  *
  * The domain's rmid_busy_llc and rmid_ptrs[] are sized by index. The arch code
  * must accept an attempt to read every index.
+ *
+ * Returns NULL if the rmid_ptrs[] array is not allocated.
  */
 static inline struct rmid_entry *__rmid_entry(u32 idx)
 {
 	struct rmid_entry *entry;
 	u32 closid, rmid;
+
+	if (!rmid_ptrs)
+		return NULL;
 
 	entry = &rmid_ptrs[idx];
 	resctrl_arch_rmid_idx_decode(idx, &closid, &rmid);
@@ -113,6 +118,20 @@ static inline struct rmid_entry *__rmid_entry(u32 idx)
 	return entry;
 }
 
+static bool __has_closid_num_dirty_rmid_array(void)
+{
+	lockdep_assert_held(&rdtgroup_mutex);
+
+	if (!IS_ENABLED(CONFIG_RESCTRL_RMID_DEPENDS_ON_CLOSID))
+		return false;
+
+	/*
+	 * Avoid a race with dom_data_exit() freeing the array under
+	 * rdtgroup_mutex.
+	 */
+	return closid_num_dirty_rmid;
+}
+
 static void limbo_release_entry(struct rmid_entry *entry)
 {
 	lockdep_assert_held(&rdtgroup_mutex);
@@ -120,7 +139,7 @@ static void limbo_release_entry(struct rmid_entry *entry)
 	rmid_limbo_count--;
 	list_add_tail(&entry->list, &rmid_free_lru);
 
-	if (IS_ENABLED(CONFIG_RESCTRL_RMID_DEPENDS_ON_CLOSID))
+	if (__has_closid_num_dirty_rmid_array())
 		closid_num_dirty_rmid[entry->closid]--;
 }
 
@@ -159,6 +178,8 @@ void __check_limbo(struct rdt_mon_domain *d, bool force_free)
 			break;
 
 		entry = __rmid_entry(idx);
+		if (!entry)
+			break;
 		if (resctrl_arch_rmid_read(r, d, entry->closid, entry->rmid,
 					   QOS_L3_OCCUP_EVENT_ID, &val,
 					   arch_mon_ctx)) {
@@ -240,7 +261,7 @@ int resctrl_find_cleanest_closid(void)
 
 	lockdep_assert_held(&rdtgroup_mutex);
 
-	if (!IS_ENABLED(CONFIG_RESCTRL_RMID_DEPENDS_ON_CLOSID))
+	if (!__has_closid_num_dirty_rmid_array())
 		return -EIO;
 
 	for (i = 0; i < closids_supported(); i++) {
@@ -313,7 +334,7 @@ static void add_rmid_to_limbo(struct rmid_entry *entry)
 	}
 
 	rmid_limbo_count++;
-	if (IS_ENABLED(CONFIG_RESCTRL_RMID_DEPENDS_ON_CLOSID))
+	if (__has_closid_num_dirty_rmid_array())
 		closid_num_dirty_rmid[entry->closid]++;
 }
 
@@ -323,6 +344,10 @@ void free_rmid(u32 closid, u32 rmid)
 	struct rmid_entry *entry;
 
 	lockdep_assert_held(&rdtgroup_mutex);
+
+	/* rmid_ptrs[] not allocated if there are no monitors */
+	if (!resctrl_arch_mon_capable())
+		return;
 
 	/*
 	 * Do not allow the default rmid to be free'd. Comparing by index
@@ -335,6 +360,8 @@ void free_rmid(u32 closid, u32 rmid)
 		return;
 
 	entry = __rmid_entry(idx);
+	if (!entry)
+		return;
 
 	if (resctrl_is_mon_event_enabled(QOS_L3_OCCUP_EVENT_ID))
 		add_rmid_to_limbo(entry);
@@ -899,6 +926,7 @@ static int dom_data_init(struct rdt_resource *r)
 	idx = resctrl_arch_rmid_idx_encode(RESCTRL_RESERVED_CLOSID,
 					   RESCTRL_RESERVED_RMID);
 	entry = __rmid_entry(idx);
+	WARN_ON_ONCE(!entry);
 	list_del(&entry->list);
 
 out_unlock:

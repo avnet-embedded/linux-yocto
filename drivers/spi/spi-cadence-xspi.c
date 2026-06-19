@@ -21,6 +21,10 @@
 #include <linux/limits.h>
 #include <linux/log2.h>
 #include <linux/bitrev.h>
+#include <linux/debugfs.h>
+#include <soc/marvell/octeontx/octeontx_smc.h>
+
+struct dentry *mrvl_xspi_debug_root;
 
 #define CDNS_XSPI_MAGIC_NUM_VALUE	0x6522
 #define CDNS_XSPI_MAX_BANKS		8
@@ -255,7 +259,7 @@
 #define MRVL_XSPI_CLOCK_IO_HZ	     800000000
 #define MRVL_XSPI_CLOCK_DIVIDED(div) ((MRVL_XSPI_CLOCK_IO_HZ) / (div))
 #define MRVL_DEFAULT_CLK	     25000000
-
+#define MRVL_XSPI_XFER_SUPPORTED	BIT(7)
 /* Marvell overlay registers - xfer */
 #define MRVL_XFER_FUNC_CTRL		 0x210
 #define MRVL_XFER_FUNC_CTRL_READ_DATA(i) (0x000 + 8 * (i))
@@ -271,6 +275,13 @@
 
 #define MRVL_XSPI_POLL_TIMEOUT_US	1000
 #define MRVL_XSPI_POLL_DELAY_US		10
+
+/* Controller access arbitration registers */
+#define CDNS_XSPI_OWNERX(owner)		(0x2040 + 8 * ((owner) & 0x7))
+#define OWNER_KERNEL			5
+#define REQ_DEVICE			BIT(0)
+#define REQ_GRANTED			BIT(8)
+#define SPI_LOCK_TIMEOUT_IN_MS		200
 
 /* Macros for calculating data bits in generic command
  * Up to 10 bytes can be fit into cmd_registers
@@ -327,10 +338,6 @@ static struct cdns_xspi_driver_data marvell_driver_data = {
 	.rfile_phy_dll_slave_ctrl = MARVELL_RFILE_PHY_DLL_SLAVE_CTRL,
 };
 
-static struct cdns_xspi_driver_data cdns_driver_data = {
-	.mrvl_hw_overlay = false,
-};
-
 static const int cdns_mrvl_xspi_clk_div_list[] = {
 	4,	//0x0 = Divide by 4.   SPI clock is 200 MHz.
 	6,	//0x1 = Divide by 6.   SPI clock is 133.33 MHz.
@@ -377,6 +384,9 @@ struct cdns_xspi_dev {
 
 	bool xfer_in_progress;
 	int current_xfer_qword;
+	int write_len;
+	int xspi_id;
+	bool wo_mode;
 };
 
 static void cdns_xspi_reset_dll(struct cdns_xspi_dev *cdns_xspi)
@@ -388,6 +398,31 @@ static void cdns_xspi_reset_dll(struct cdns_xspi_dev *cdns_xspi)
 	dll_cntrl |= CDNS_XSPI_DLL_RST_N;
 	writel(dll_cntrl, cdns_xspi->iobase +
 			  CDNS_XSPI_RF_MINICTRL_REGS_DLL_PHY_CTRL);
+}
+
+static int unlock_spi_bus(struct cdns_xspi_dev *cdns_xspi)
+{
+	u64 ctrl_owner = readq(cdns_xspi->auxbase + CDNS_XSPI_OWNERX(OWNER_KERNEL));
+
+	writeq(ctrl_owner & ~REQ_DEVICE, cdns_xspi->auxbase + CDNS_XSPI_OWNERX(OWNER_KERNEL));
+	return 0;
+}
+
+static int lock_spi_bus(struct cdns_xspi_dev *cdns_xspi)
+{
+	u64 ctrl_owner = readq(cdns_xspi->auxbase + CDNS_XSPI_OWNERX(OWNER_KERNEL));
+
+	if (ctrl_owner & REQ_DEVICE)
+		return 0;
+
+	writeq(ctrl_owner | REQ_DEVICE, cdns_xspi->auxbase + CDNS_XSPI_OWNERX(OWNER_KERNEL));
+	return readq_relaxed_poll_timeout(cdns_xspi->auxbase +
+		CDNS_XSPI_OWNERX(OWNER_KERNEL),
+		ctrl_owner, ((ctrl_owner & REQ_GRANTED) == 0), 1000 * 10,
+		1000 * SPI_LOCK_TIMEOUT_IN_MS);
+
+	pr_err("Timeout. Flash arbitration failed.\n");
+	return -1;
 }
 
 static bool cdns_xspi_is_dll_locked(struct cdns_xspi_dev *cdns_xspi)
@@ -680,6 +715,13 @@ static int cdns_xspi_send_stig_command(struct cdns_xspi_dev *cdns_xspi,
 	int ret;
 	int dummybytes = op->dummy.nbytes;
 
+	if (cdns_xspi->driver_data->mrvl_hw_overlay) {
+		if (lock_spi_bus(cdns_xspi) != 0) {
+			pr_err("Failed to lock SPI bus\n");
+			return -EIO;
+		}
+	}
+
 	ret = cdns_xspi_wait_for_controller_idle(cdns_xspi);
 	if (ret < 0)
 		return -EIO;
@@ -731,6 +773,9 @@ static int cdns_xspi_send_stig_command(struct cdns_xspi_dev *cdns_xspi,
 	cmd_status = cdns_xspi_check_command_status(cdns_xspi);
 	if (cmd_status)
 		return -EPROTO;
+
+	if (cdns_xspi->driver_data->mrvl_hw_overlay)
+		unlock_spi_bus(cdns_xspi);
 
 	return 0;
 }
@@ -942,6 +987,16 @@ static void cdns_xspi_print_phy_config(struct cdns_xspi_dev *cdns_xspi)
 		 readl(cdns_xspi->auxbase + CDNS_XSPI_CCP_PHY_DLL_SLAVE_CTRL));
 }
 
+static bool cdns_xspi_is_xfer_supported(struct cdns_xspi_dev *cdns_xspi)
+{
+	u32 clk_reg = readl(cdns_xspi->auxbase + MRVL_XSPI_CLK_CTRL_AUX_REG);
+
+	if (clk_reg & MRVL_XSPI_XFER_SUPPORTED)
+		return true;
+
+	return false;
+}
+
 static int cdns_xspi_prepare_generic(int cs, const void *dout, int len, int glue, u32 *cmd_regs)
 {
 	u8 *data = (u8 *)dout;
@@ -1040,7 +1095,7 @@ static bool cdns_xspi_is_sdma_ready(struct cdns_xspi_dev *cdns_xspi, bool sleep)
 		sleep ? MRVL_XSPI_POLL_TIMEOUT_US : 0);
 }
 
-static int cdns_xspi_transfer_one_message_b0(struct spi_controller *controller,
+static int cdns_xspi_transfer_one_message(struct spi_controller *controller,
 					   struct spi_message *m)
 {
 	struct cdns_xspi_dev *cdns_xspi = spi_controller_get_devdata(controller);
@@ -1051,6 +1106,12 @@ static int cdns_xspi_transfer_one_message_b0(struct spi_controller *controller,
 	int current_transfer_len;
 	int cs = spi_get_chipselect(spi, 0);
 	int cs_change = 0;
+
+	if (cdns_xspi_wait_for_controller_idle(cdns_xspi) < 0)
+		return -EIO;
+
+	writel(FIELD_PREP(CDNS_XSPI_CTRL_WORK_MODE, CDNS_XSPI_WORK_MODE_STIG),
+	       cdns_xspi->iobase + CDNS_XSPI_CTRL_CONFIG_REG);
 
 	/* Enable xfer state machine */
 	if (!cdns_xspi->xfer_in_progress) {
@@ -1140,6 +1201,130 @@ static int cdns_xspi_transfer_one_message_b0(struct spi_controller *controller,
 	return 0;
 }
 
+static int handle_tx_rx(struct cdns_xspi_dev *cdns_xspi, void *tx_buf,
+			void *rx_buf, int write_len, int len)
+{
+	u32 cmd_regs[6] = {0};
+	u32 cmd_status;
+	int read_dir = 0;
+	int glue_command = 0;
+
+	/* Incorrect params */
+	if (write_len > len) {
+		pr_info("Write len cannot be bigger than len\n");
+		return -ENODEV;
+	}
+
+	/* NO transmit buffer - not supported */
+	if (tx_buf == NULL || write_len == 0) {
+		pr_info("RX only operation not supported\n");
+		return -ENODEV;
+	}
+
+	/* TX RX operation requested */
+	if (rx_buf != NULL && write_len != len) {
+		read_dir = 0;
+		glue_command = 1;
+	} else {
+		read_dir = 1;
+		if (len > 10) {
+			glue_command = 1;
+			write_len = 10;
+		}
+	}
+
+	cdns_xspi_set_interrupts(cdns_xspi, true);
+
+	cdns_xspi->in_buffer = rx_buf + write_len;
+	cdns_xspi->out_buffer = tx_buf + 10;
+
+	cdns_xspi_prepare_generic(cdns_xspi->cur_cs, tx_buf, write_len, glue_command, cmd_regs);
+	cdns_xspi_trigger_command(cdns_xspi, cmd_regs);
+	if (glue_command) {
+		cdns_xspi_prepare_transfer(cdns_xspi->cur_cs, read_dir, len - write_len, cmd_regs);
+		cdns_xspi_trigger_command(cdns_xspi, cmd_regs);
+		wait_for_completion(&cdns_xspi->sdma_complete);
+		if (cdns_xspi->sdma_error) {
+			cdns_xspi_set_interrupts(cdns_xspi, false);
+			return -EIO;
+		}
+		cdns_xspi_sdma_handle(cdns_xspi);
+		wait_for_completion(&cdns_xspi->cmd_complete);
+	}
+
+	cdns_xspi_set_interrupts(cdns_xspi, false);
+
+	cmd_status = cdns_xspi_check_command_status(cdns_xspi);
+	if (cmd_status)
+		return -EPROTO;
+
+	return 0;
+}
+
+static int cdns_xspi_transfer_one_message_wo(struct spi_controller *host,
+					   struct spi_message *m)
+{
+	struct cdns_xspi_dev *cdns_xspi = spi_controller_get_devdata(host);
+	struct spi_device *spi = m->spi;
+	struct spi_transfer *t = NULL;
+	int cs = spi_get_chipselect(spi, 0);
+
+	cdns_xspi->cur_cs = cs;
+
+	list_for_each_entry(t, &m->transfers, transfer_list) {
+		handle_tx_rx(cdns_xspi, (void *)t->tx_buf, t->rx_buf, cdns_xspi->write_len, t->len);
+	}
+	m->status = 0;
+	spi_finalize_current_message(host);
+
+	return 0;
+}
+
+static struct cdns_xspi_dev *cdns_xspi_debug;
+static int mrvl_spi_open(struct inode *i, struct file *f)
+{
+	cdns_xspi_debug = i->i_private;
+	return 0;
+}
+static ssize_t mrvl_spi_wl_write(struct file *f, const char __user *user_buf,
+				size_t size, loff_t *l)
+{
+	char buf[20] = {0};
+	long val;
+
+	if (copy_from_user(buf, user_buf, size)) {
+		pr_info("SPI_%d: Failed to set write length\n", cdns_xspi_debug->xspi_id);
+		return -EACCES;
+	}
+	if (kstrtol(buf, 10, &val))
+		val = 1;
+	cdns_xspi_debug->write_len = val;
+	pr_info("SPI_%d: Setting write length to: %ld\n", cdns_xspi_debug->xspi_id, val);
+
+	return size;
+}
+
+static const struct file_operations mrvl_spi_wl_fops = {
+	.owner                  = THIS_MODULE,
+	.write                  = mrvl_spi_wl_write,
+	.open                   = mrvl_spi_open,
+};
+
+
+static int mrvl_spi_setup_debugfs(struct cdns_xspi_dev *cdns_xspi)
+{
+	char file_name[30];
+
+	if (mrvl_xspi_debug_root == NULL)
+		mrvl_xspi_debug_root = debugfs_create_dir("cn10k_spi", NULL);
+
+	sprintf(file_name, "SPI_%d_WriteLength", cdns_xspi->xspi_id);
+	debugfs_create_file(file_name, 0644, mrvl_xspi_debug_root, cdns_xspi,
+		&mrvl_spi_wl_fops);
+
+	return 0;
+}
+
 static int cdns_xspi_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -1166,7 +1351,7 @@ static int cdns_xspi_probe(struct platform_device *pdev)
 
 	if (cdns_xspi->driver_data->mrvl_hw_overlay) {
 		host->mem_ops = &marvell_xspi_mem_ops;
-		host->transfer_one_message = cdns_xspi_transfer_one_message_b0;
+		host->transfer_one_message = cdns_xspi_transfer_one_message;
 		cdns_xspi->sdma_handler = &marvell_xspi_sdma_handle;
 		cdns_xspi->set_interrupts_handler = &marvell_xspi_set_interrupts;
 	} else {
@@ -1245,6 +1430,12 @@ static int cdns_xspi_probe(struct platform_device *pdev)
 	if (cdns_xspi->driver_data->mrvl_hw_overlay) {
 		cdns_mrvl_xspi_setup_clock(cdns_xspi, MRVL_DEFAULT_CLK);
 		cdns_xspi_configure_phy(cdns_xspi);
+		if (!cdns_xspi_is_xfer_supported(cdns_xspi)) {
+			host->transfer_one_message = cdns_xspi_transfer_one_message_wo;
+			cdns_xspi->wo_mode = true;
+		} else {
+			cdns_xspi->wo_mode = false;
+		}
 	}
 
 	cdns_xspi_print_phy_config(cdns_xspi);
@@ -1263,6 +1454,9 @@ static int cdns_xspi_probe(struct platform_device *pdev)
 		return ret;
 	}
 
+	if (cdns_xspi->wo_mode)
+		mrvl_spi_setup_debugfs(cdns_xspi);
+
 	dev_info(dev, "Successfully registered SPI host\n");
 
 	return 0;
@@ -1270,22 +1464,25 @@ static int cdns_xspi_probe(struct platform_device *pdev)
 
 static const struct of_device_id cdns_xspi_of_match[] = {
 	{
-		.compatible = "cdns,xspi-nor",
-		.data = &cdns_driver_data,
-	},
-	{
-		.compatible = "marvell,cn10-xspi-nor",
+		.compatible = "marvell,xspi-nor",
 		.data = &marvell_driver_data,
 	},
 	{ /* end of table */}
 };
 MODULE_DEVICE_TABLE(of, cdns_xspi_of_match);
 
+static const struct acpi_device_id cdns_xspi_acpi_match[] = {
+	{"marvell,xspi-nor", 0},
+	{},
+};
+MODULE_DEVICE_TABLE(acpi, cdns_xspi_acpi_match);
+
 static struct platform_driver cdns_xspi_platform_driver = {
 	.probe          = cdns_xspi_probe,
 	.driver = {
 		.name = CDNS_XSPI_NAME,
 		.of_match_table = cdns_xspi_of_match,
+		.acpi_match_table = cdns_xspi_acpi_match,
 	},
 };
 

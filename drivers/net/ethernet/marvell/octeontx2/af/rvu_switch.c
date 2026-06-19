@@ -52,6 +52,7 @@ static int rvu_switch_install_tx_rule(struct rvu *rvu, u16 pcifunc, u16 entry)
 {
 	struct npc_install_flow_req req = { 0 };
 	struct npc_install_flow_rsp rsp = { 0 };
+	struct rvu_hwinfo *hw = rvu->hw;
 	struct rvu_pfvf *pfvf;
 	u8 lbkid;
 
@@ -74,7 +75,7 @@ static int rvu_switch_install_tx_rule(struct rvu *rvu, u16 pcifunc, u16 entry)
 	req.features = BIT_ULL(NPC_DMAC);
 	req.intf = pfvf->nix_tx_intf;
 	req.op = NIX_TX_ACTIONOP_UCAST_CHAN;
-	req.index = (lbkid << 8) | RVU_SWITCH_LBK_CHAN;
+	req.index = (lbkid << 8) | (hw->lbk_chan_base + RVU_SWITCH_LBK_CHAN);
 	req.set_cntr = 1;
 
 	return rvu_mbox_handler_npc_install_flow(rvu, &req, &rsp);
@@ -271,11 +272,12 @@ free_ents:
 
 void rvu_switch_update_rules(struct rvu *rvu, u16 pcifunc, bool ena)
 {
+	struct rvu_pfvf *pfvf = rvu_get_pfvf(rvu, pcifunc);
 	struct rvu_switch *rswitch = &rvu->rswitch;
 	u32 max = rswitch->used_entries;
 	u16 entry;
 
-	if (rvu->rep_mode)
+	if (rvu->rep_mode || pfvf->esw_rules)
 		return rvu_rep_update_rules(rvu, pcifunc, ena);
 
 	if (!rswitch->used_entries)
