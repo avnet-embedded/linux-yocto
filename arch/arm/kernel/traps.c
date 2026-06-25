@@ -375,6 +375,7 @@ void arm_notify_die(const char *str, struct pt_regs *regs,
 		unsigned long err, unsigned long trap)
 {
 	if (user_mode(regs)) {
+		local_irq_enable();
 		current->thread.error_code = err;
 		current->thread.trap_no = trap;
 
