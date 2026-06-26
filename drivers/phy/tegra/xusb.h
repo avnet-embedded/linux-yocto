@@ -435,6 +435,7 @@ struct tegra_xusb_padctl_soc {
 	bool poll_trk_completed;
 	bool trk_hw_mode;
 	bool supports_lp_cfg_en;
+	bool has_per_pad_term;
 };
 
 struct tegra_xusb_padctl {
