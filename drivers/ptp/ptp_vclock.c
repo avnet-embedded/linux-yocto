@@ -19,6 +19,8 @@ static DEFINE_SPINLOCK(vclock_hash_lock);
 
 static DEFINE_READ_MOSTLY_HASHTABLE(vclock_hash, 8);
 
+DEFINE_STATIC_SRCU(vclock_srcu);
+
 static void ptp_vclock_hash_add(struct ptp_vclock *vclock)
 {
 	spin_lock(&vclock_hash_lock);
@@ -37,7 +39,7 @@ static void ptp_vclock_hash_del(struct ptp_vclock *vclock)
 
 	spin_unlock(&vclock_hash_lock);
 
-	synchronize_rcu();
+	synchronize_srcu(&vclock_srcu);
 }
 
 /* This function and its return value (the vclock pointer) must be used
@@ -48,7 +50,8 @@ static struct ptp_vclock *ptp_vclock_lookup(int vclock_index)
 	unsigned int hash = vclock_index % HASH_SIZE(vclock_hash);
 	struct ptp_vclock *vclock;
 
-	hlist_for_each_entry_rcu(vclock, &vclock_hash[hash], vclock_hash_node) {
+	hlist_for_each_entry_srcu(vclock, &vclock_hash[hash], vclock_hash_node,
+				  srcu_read_lock_held(&vclock_srcu)) {
 		if (vclock->clock->index != vclock_index)
 			continue;
 
@@ -227,6 +230,7 @@ int ptp_vclock_convert_timestamps(struct ptp_clock *ptp, struct ptp_clock_time *
 	struct ptp_vclock *vclock = info_to_vclock(ptp->info);
 	struct ptp_vclock *vclock_dst;
 	int i, rc = 0;
+	int srcu_idx;
 	u64 dst_ns;
 
 	/* The destination clock domain is the same as the source, early exit. */
@@ -235,7 +239,7 @@ int ptp_vclock_convert_timestamps(struct ptp_clock *ptp, struct ptp_clock_time *
 		goto out;
 	}
 
-	rcu_read_lock();
+	srcu_idx = srcu_read_lock(&vclock_srcu);
 
 	vclock_dst = ptp_vclock_lookup(dst_phc_index);
 
@@ -295,7 +299,7 @@ int ptp_vclock_convert_timestamps(struct ptp_clock *ptp, struct ptp_clock_time *
 	}
 
 out_unlock_rcu:
-	rcu_read_unlock();
+	srcu_read_unlock(&vclock_srcu, srcu_idx);
 
 out:
 	return rc;
@@ -308,9 +312,10 @@ int ptp_vclock_convert_from_hw_timestamps(struct ptp_clock *ptp, struct ptp_cloc
 {
 	struct ptp_vclock *vclock;
 	int i, rc = 0;
+	int srcu_idx;
 	u64 dst_ns;
 
-	rcu_read_lock();
+	srcu_idx = srcu_read_lock(&vclock_srcu);
 
 	vclock = ptp_vclock_lookup(dst_vclock_index);
 
@@ -341,7 +346,7 @@ int ptp_vclock_convert_from_hw_timestamps(struct ptp_clock *ptp, struct ptp_cloc
 	mutex_unlock(&vclock->lock);
 
 out_unlock_rcu:
-	rcu_read_unlock();
+	srcu_read_unlock(&vclock_srcu, srcu_idx);
 
 	return rc;
 }
@@ -467,12 +472,13 @@ EXPORT_SYMBOL(ptp_get_vclocks_index);
 ktime_t ptp_convert_timestamp(const ktime_t *hwtstamp, int vclock_index)
 {
 	struct ptp_vclock *vclock;
-	u64 ns;
 	u64 vclock_ns = 0;
+	int srcu_idx;
+	u64 ns;
 
 	ns = ktime_to_ns(*hwtstamp);
 
-	rcu_read_lock();
+	srcu_idx = srcu_read_lock(&vclock_srcu);
 
 	vclock = ptp_vclock_lookup(vclock_index);
 	if (vclock) {
@@ -483,7 +489,7 @@ ktime_t ptp_convert_timestamp(const ktime_t *hwtstamp, int vclock_index)
 	}
 
 out_unlock_rcu:
-	rcu_read_unlock();
+	srcu_read_unlock(&vclock_srcu, srcu_idx);
 
 	return ns_to_ktime(vclock_ns);
 }
