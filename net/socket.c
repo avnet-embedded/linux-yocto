@@ -674,7 +674,7 @@ static void __sock_release(struct socket *sock, struct inode *inode)
 		fast_raw_socket_sock = NULL;
 		fast_raw_socket_fd = -1;
 	}
-	sock->file = NULL;
+	WRITE_ONCE(sock->file, NULL);
 }
 
 /**
