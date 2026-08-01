@@ -3722,7 +3722,7 @@ static int gpiochip_set_multiple(struct gpio_chip *gc,
 				 unsigned long *mask, unsigned long *bits)
 {
 	unsigned int i;
-	int ret;
+	int ret = 0;
 
 #ifndef REJECT_HOTPLUG_TAX
 	lockdep_assert_held(&gc->gpiodev->srcu);
