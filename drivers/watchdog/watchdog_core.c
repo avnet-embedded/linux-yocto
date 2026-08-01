@@ -414,6 +414,9 @@ static void __watchdog_unregister_device(struct watchdog_device *wdd)
 		atomic_notifier_chain_unregister(&panic_notifier_list,
 						 &wdd->panic_nb);
 
+	if (test_bit(WDOG_NO_PING_ON_SUSPEND, &wdd->status))
+		unregister_pm_notifier(&wdd->pm_nb);
+
 	watchdog_dev_unregister(wdd);
 	ida_free(&watchdog_ida, wdd->id);
 }
