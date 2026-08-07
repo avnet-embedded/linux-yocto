@@ -73,23 +73,25 @@ static void otx2_get_egress_rate_cfg(u64 maxrate, u32 *exp,
 	 * PIR_ADD = ((256 + mantissa) << exp) / 256
 	 * rate = (2 * PIR_ADD) / ( 1 << div_exp)
 	 * The resultant rate is in Mbps.
-	 */
-
-	/* The hardware uses the following formula to calculate the rate
-	 *  maxrate = 2 × (1.mantissa × 2^exp) / (1 << div_exp)
-	 * At higher speeds (greater than 70G), the exponent value can overflow.
-	 * To prevent this, use the method below
-	 * Set div_exp to zero so that the value is simply multiplied by 2.
-	 * Compute the mantissa and exponent for half of the desired maxrate.
+	 *
+	 * Use div_exp = 0 and compute exp/mantissa for maxrate / 2; the
+	 * leading factor of two yields the full rate. Rates below 2 Mbps
+	 * are floored to the smallest step (exp = 0, mantissa = 0).
 	 */
 
 	*div_exp = 0;
 	if (maxrate) {
 		maxrate = maxrate / 2;
-		*exp = ilog2(maxrate);
-		/* Clear MSB and derive fractional bits */
-		maxrate &= ~BIT(*exp);
-		*mantissa = (maxrate << RATE_MANTISSA_BITS) >> *exp;
+		if (!maxrate) {
+			/* Rates below 2 Mbps map to the smallest step */
+			*exp = 0;
+			*mantissa = 0;
+		} else {
+			*exp = ilog2(maxrate);
+			/* Clear MSB and derive fractional bits */
+			maxrate &= ~BIT(*exp);
+			*mantissa = (maxrate << RATE_MANTISSA_BITS) >> *exp;
+		}
 	} else {
 		/* Instead of disabling rate limiting, set all values to max */
 		*exp = MAX_RATE_EXPONENT;
