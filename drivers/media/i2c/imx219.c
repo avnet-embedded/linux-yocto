@@ -72,7 +72,7 @@
 
 /* V_TIMING internal */
 #define IMX219_REG_VTS			CCI_REG16(0x0160)
-#define IMX219_VTS_MAX			0xffff
+#define IMX219_VTS_MAX			0xfffe
 
 #define IMX219_VBLANK_MIN		32
 
