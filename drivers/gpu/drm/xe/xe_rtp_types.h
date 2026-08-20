@@ -3,13 +3,14 @@
  * Copyright © 2022 Intel Corporation
  */
 
-#ifndef _XE_RTP_TYPES_
-#define _XE_RTP_TYPES_
+#ifndef _XE_RTP_TYPES_H_
+#define _XE_RTP_TYPES_H_
 
 #include <linux/types.h>
 
 #include "regs/xe_reg_defs.h"
 
+struct xe_device;
 struct xe_hw_engine;
 struct xe_gt;
 
@@ -40,6 +41,7 @@ struct xe_rtp_action {
 enum {
 	XE_RTP_MATCH_PLATFORM,
 	XE_RTP_MATCH_SUBPLATFORM,
+	XE_RTP_MATCH_PLATFORM_STEP,
 	XE_RTP_MATCH_GRAPHICS_VERSION,
 	XE_RTP_MATCH_GRAPHICS_VERSION_RANGE,
 	XE_RTP_MATCH_GRAPHICS_VERSION_ANY_GT,
@@ -86,7 +88,8 @@ struct xe_rtp_rule {
 			u8 engine_class;
 		};
 		/* MATCH_FUNC */
-		bool (*match_func)(const struct xe_gt *gt,
+		bool (*match_func)(const struct xe_device *xe,
+				   const struct xe_gt *gt,
 				   const struct xe_hw_engine *hwe);
 	};
 };
@@ -107,6 +110,16 @@ struct xe_rtp_entry {
 	const char *name;
 	const struct xe_rtp_rule *rules;
 	u8 n_rules;
+};
+
+struct xe_rtp_table_sr {
+	const struct xe_rtp_entry_sr *entries;
+	size_t n_entries;
+};
+
+struct xe_rtp_table {
+	const struct xe_rtp_entry *entries;
+	size_t n_entries;
 };
 
 enum xe_rtp_process_type {

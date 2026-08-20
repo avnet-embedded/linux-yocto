@@ -27,7 +27,7 @@ static struct fw_node *fw_node_create(u32 sid, int port_count, int color)
 {
 	struct fw_node *node;
 
-	node = kzalloc(struct_size(node, ports, port_count), GFP_ATOMIC);
+	node = kzalloc_flex(*node, ports, port_count, GFP_ATOMIC);
 	if (node == NULL)
 		return NULL;
 
@@ -272,7 +272,9 @@ static void for_each_fw_node(struct fw_card *card, struct fw_node *root,
 	fw_node_get(root);
 	list_add_tail(&root->link, &list);
 	parent = NULL;
-	list_for_each_entry(node, &list, link) {
+	for (node = list_first_entry(&list, typeof(*node), link);
+	     !list_entry_is_head(node, &list, link);
+	     node = list_next_entry(node, link)) {
 		node->color = card->color;
 
 		for (i = 0; i < node->port_count; i++) {

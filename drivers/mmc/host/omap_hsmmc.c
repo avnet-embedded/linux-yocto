@@ -746,7 +746,7 @@ omap_hsmmc_show_slot_name(struct device *dev, struct device_attribute *attr,
 	return sprintf(buf, "%s\n", mmc_pdata(host)->name);
 }
 
-static DEVICE_ATTR(slot_name, S_IRUGO, omap_hsmmc_show_slot_name, NULL);
+static DEVICE_ATTR(slot_name, 0444, omap_hsmmc_show_slot_name, NULL);
 
 /*
  * Configure the response type and send the cmd.
@@ -1357,7 +1357,7 @@ omap_hsmmc_prepare_data(struct omap_hsmmc_host *host, struct mmc_request *req)
 	if (req->data == NULL) {
 		OMAP_HSMMC_WRITE(host->base, BLK, 0);
 		if (req->cmd->flags & MMC_RSP_BUSY) {
-			timeout = req->cmd->busy_timeout * NSEC_PER_MSEC;
+			timeout = (u64)req->cmd->busy_timeout * NSEC_PER_MSEC;
 
 			/*
 			 * Set an arbitrary 100ms data timeout for commands with
@@ -1672,7 +1672,7 @@ DEFINE_SHOW_ATTRIBUTE(mmc_regs);
 static void omap_hsmmc_debugfs(struct mmc_host *mmc)
 {
 	if (mmc->debugfs_root)
-		debugfs_create_file("regs", S_IRUSR, mmc->debugfs_root,
+		debugfs_create_file("regs", 0400, mmc->debugfs_root,
 			mmc, &mmc_regs_fops);
 }
 

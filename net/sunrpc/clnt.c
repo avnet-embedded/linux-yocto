@@ -374,7 +374,7 @@ static struct rpc_clnt * rpc_new_client(const struct rpc_create_args *args,
 		goto out_err;
 
 	err = -ENOMEM;
-	clnt = kzalloc(sizeof(*clnt), GFP_KERNEL);
+	clnt = kzalloc_obj(*clnt);
 	if (!clnt)
 		goto out_err;
 	clnt->cl_parent = parent ? : clnt;
@@ -1026,8 +1026,23 @@ rpc_free_auth(struct rpc_clnt *clnt)
 	return NULL;
 }
 
-/*
- * Release reference to the RPC client
+/**
+ * rpc_hold_client - acquire a reference on an rpc_clnt
+ * @clnt: rpc_clnt to pin
+ *
+ * Pairs with rpc_release_client().
+ */
+void rpc_hold_client(struct rpc_clnt *clnt)
+{
+	refcount_inc(&clnt->cl_count);
+}
+
+/**
+ * rpc_release_client - release a reference on an rpc_clnt
+ * @clnt: rpc_clnt to release
+ *
+ * Pairs with rpc_hold_client(). The rpc_clnt's resources are
+ * freed once its reference count drops to zero.
  */
 void
 rpc_release_client(struct rpc_clnt *clnt)
@@ -1457,12 +1472,12 @@ static int rpc_sockname(struct net *net, struct sockaddr *sap, size_t salen,
 	switch (sap->sa_family) {
 	case AF_INET:
 		err = kernel_bind(sock,
-				(struct sockaddr *)&rpc_inaddr_loopback,
+				(struct sockaddr_unsized *)&rpc_inaddr_loopback,
 				sizeof(rpc_inaddr_loopback));
 		break;
 	case AF_INET6:
 		err = kernel_bind(sock,
-				(struct sockaddr *)&rpc_in6addr_loopback,
+				(struct sockaddr_unsized *)&rpc_in6addr_loopback,
 				sizeof(rpc_in6addr_loopback));
 		break;
 	default:
@@ -1474,7 +1489,7 @@ static int rpc_sockname(struct net *net, struct sockaddr *sap, size_t salen,
 		goto out_release;
 	}
 
-	err = kernel_connect(sock, sap, salen, 0);
+	err = kernel_connect(sock, (struct sockaddr_unsized *)sap, salen, 0);
 	if (err < 0) {
 		dprintk("RPC:       can't connect UDP socket (%d)\n", err);
 		goto out_release;
@@ -2976,7 +2991,7 @@ int rpc_clnt_test_and_add_xprt(struct rpc_clnt *clnt,
 		return -EINVAL;
 	}
 
-	data = kmalloc(sizeof(*data), GFP_KERNEL);
+	data = kmalloc_obj(*data);
 	if (!data)
 		return -ENOMEM;
 	data->xps = xprt_switch_get(xps);

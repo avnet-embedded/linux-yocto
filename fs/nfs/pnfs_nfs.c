@@ -101,7 +101,7 @@ pnfs_alloc_commit_array(size_t n, gfp_t gfp_flags)
 	struct pnfs_commit_array *p;
 	struct pnfs_commit_bucket *b;
 
-	p = kmalloc(struct_size(p, buckets, n), gfp_flags);
+	p = kmalloc_flex(*p, buckets, n, gfp_flags);
 	if (!p)
 		return NULL;
 	p->nbuckets = n;
@@ -618,7 +618,7 @@ _data_server_lookup_locked(const struct nfs_net *nn, const struct list_head *dsa
 
 static struct nfs4_pnfs_ds_addr *nfs4_pnfs_ds_addr_alloc(gfp_t gfp_flags)
 {
-	struct nfs4_pnfs_ds_addr *da = kzalloc(sizeof(*da), gfp_flags);
+	struct nfs4_pnfs_ds_addr *da = kzalloc_obj(*da, gfp_flags);
 	if (da)
 		INIT_LIST_HEAD(&da->da_node);
 	return da;
@@ -730,7 +730,7 @@ nfs4_pnfs_ds_add(const struct net *net, struct list_head *dsaddrs, gfp_t gfp_fla
 		goto out;
 	}
 
-	ds = kzalloc(sizeof(*ds), gfp_flags);
+	ds = kzalloc_obj(*ds, gfp_flags);
 	if (!ds)
 		goto out;
 
@@ -1075,14 +1075,14 @@ nfs4_decode_mp_ds_addr(struct net *net, struct xdr_stream *xdr, gfp_t gfp_flags)
 	/* r_netid */
 	nlen = xdr_stream_decode_string_dup(xdr, &netid, XDR_MAX_NETOBJ,
 					    gfp_flags);
-	if (unlikely(nlen < 0))
+	if (unlikely(nlen <= 0))
 		goto out_err;
 
 	/* r_addr: ip/ip6addr with port in dec octets - see RFC 5665 */
 	/* port is ".ABC.DEF", 8 chars max */
 	rlen = xdr_stream_decode_string_dup(xdr, &buf, INET6_ADDRSTRLEN +
 					    IPV6_SCOPE_ID_LEN + 8, gfp_flags);
-	if (unlikely(rlen < 0))
+	if (unlikely(rlen <= 0))
 		goto out_free_netid;
 
 	/* replace port '.' with '-' */
@@ -1199,7 +1199,7 @@ pnfs_layout_mark_request_commit(struct nfs_page *req,
 
 	nfs_request_add_commit_list_locked(req, list, cinfo);
 	mutex_unlock(&NFS_I(cinfo->inode)->commit_mutex);
-	nfs_folio_mark_unstable(nfs_page_to_folio(req), cinfo);
+	nfs_folio_mark_unstable(req, cinfo);
 	return;
 out_resched:
 	mutex_unlock(&NFS_I(cinfo->inode)->commit_mutex);

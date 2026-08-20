@@ -16,7 +16,6 @@
 #include <linux/irq.h>
 #include <linux/math.h>
 #include <linux/module.h>
-#include <linux/mod_devicetable.h>
 #include <linux/regulator/consumer.h>
 #include <linux/spi/spi.h>
 #include <linux/string.h>
@@ -840,7 +839,7 @@ static int ad7779_setup_without_backend(struct ad7779_state *st, struct iio_dev 
 	iio_trigger_set_drvdata(st->trig, st);
 
 	ret = devm_request_irq(dev, st->spi->irq, iio_trigger_generic_data_rdy_poll,
-			       IRQF_ONESHOT | IRQF_NO_AUTOEN, indio_dev->name,
+			       IRQF_NO_THREAD | IRQF_NO_AUTOEN, indio_dev->name,
 			       st->trig);
 	if (ret)
 		return dev_err_probe(dev, ret, "request IRQ %d failed\n",

@@ -154,10 +154,17 @@ impl DeliverToRead for FreezeMessage {
 }
 
 impl FreezeListener {
-    pub(crate) fn on_process_exit(&self, proc: &Arc<Process>) {
+    /// Called when this freeze listener is cleared abnormally.
+    ///
+    /// This occurs either because the process exited or because the process dropped its last
+    /// refcount on the node ref without explicitly removing the freeze listener first.
+    ///
+    /// The returned `KVVec` is just a value that should be dropped outside of the lock.
+    pub(crate) fn on_process_cleanup(&self, proc: &Process) -> KVVec<Arc<Process>> {
         if !self.is_clearing {
-            self.node.remove_freeze_listener(proc);
+            return self.node.remove_freeze_listener(proc);
         }
+        KVVec::new()
     }
 }
 
@@ -331,7 +338,7 @@ impl Process {
             KVVec::with_capacity(8, GFP_KERNEL).unwrap_or_else(|_err| KVVec::new());
 
         let mut inner = self.lock_with_nodes();
-        let mut curr = inner.nodes.cursor_front();
+        let mut curr = inner.nodes.cursor_front_mut();
         while let Some(cursor) = curr {
             let (key, node) = cursor.current();
             let key = *key;
@@ -345,7 +352,7 @@ impl Process {
                 // Find the node we were looking at and try again. If the set of nodes was changed,
                 // then just proceed to the next node. This is ok because we don't guarantee the
                 // inclusion of nodes that are added or removed in parallel with this operation.
-                curr = inner.nodes.cursor_lower_bound(&key);
+                curr = inner.nodes.cursor_lower_bound_mut(&key);
                 continue;
             }
 

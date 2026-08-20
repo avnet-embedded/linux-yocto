@@ -66,8 +66,7 @@ static int brcmf_cyw_alloc_fweh_info(struct brcmf_pub *drvr)
 {
 	struct brcmf_fweh_info *fweh;
 
-	fweh = kzalloc(struct_size(fweh, evt_handler, BRCMF_CYW_E_LAST),
-		       GFP_KERNEL);
+	fweh = kzalloc_flex(*fweh, evt_handler, BRCMF_CYW_E_LAST);
 	if (!fweh)
 		return -ENOMEM;
 
@@ -290,6 +289,12 @@ brcmf_notify_auth_frame_rx(struct brcmf_if *ifp,
 
 	if (e->datalen < sizeof(*rxframe)) {
 		bphy_err(drvr, "Event %s (%d) data too small. Ignore\n",
+			 brcmf_fweh_event_name(e->event_code), e->event_code);
+		return -EINVAL;
+	}
+
+	if (mgmt_frame_len < offsetof(struct ieee80211_mgmt, u)) {
+		bphy_err(drvr, "Event %s (%d) frame too small. Ignore\n",
 			 brcmf_fweh_event_name(e->event_code), e->event_code);
 		return -EINVAL;
 	}

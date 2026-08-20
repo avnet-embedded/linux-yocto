@@ -178,6 +178,14 @@ struct NodeInner {
     refs: List<NodeRefInfo, { NodeRefInfo::LIST_NODE }>,
 }
 
+use kernel::bindings::rb_node_layout;
+use mem::offset_of;
+pub(crate) const NODE_LAYOUT: rb_node_layout = rb_node_layout {
+    arc_offset: Arc::<Node>::DATA_OFFSET + offset_of!(DTRWrap<Node>, wrapped),
+    debug_id: offset_of!(Node, debug_id),
+    ptr: offset_of!(Node, ptr),
+};
+
 #[pin_data]
 pub(crate) struct Node {
     pub(crate) debug_id: usize,
@@ -541,10 +549,10 @@ impl Node {
             guard = self.owner.inner.lock();
         }
 
-        let death_list = core::mem::take(&mut self.inner.access_mut(&mut guard).death_list);
-        drop(guard);
-        for death in death_list {
+        while let Some(death) = self.inner.access_mut(&mut guard).death_list.pop_front() {
+            drop(guard);
             death.into_arc().set_dead();
+            guard = self.owner.inner.lock();
         }
     }
 
@@ -674,12 +682,13 @@ impl Node {
         }
     }
 
-    pub(crate) fn remove_freeze_listener(&self, p: &Arc<Process>) {
-        let _unused_capacity;
+    pub(crate) fn remove_freeze_listener(&self, p: &Process) -> KVVec<Arc<Process>> {
         let mut guard = self.owner.inner.lock();
         let inner = self.inner.access_mut(&mut guard);
         let len = inner.freeze_list.len();
-        inner.freeze_list.retain(|proc| !Arc::ptr_eq(proc, p));
+        inner
+            .freeze_list
+            .retain(|proc| !core::ptr::eq::<Process>(&**proc, p));
         if len == inner.freeze_list.len() {
             pr_warn!(
                 "Could not remove freeze listener for {}\n",
@@ -687,8 +696,9 @@ impl Node {
             );
         }
         if inner.freeze_list.is_empty() {
-            _unused_capacity = mem::take(&mut inner.freeze_list);
+            return mem::take(&mut inner.freeze_list);
         }
+        KVVec::new()
     }
 
     pub(crate) fn freeze_list<'a>(&'a self, guard: &'a ProcessInner) -> &'a [Arc<Process>] {

@@ -8,7 +8,7 @@
 SEC("tp_btf/sys_enter")
 __success
 __log_level(2)
-__msg("r8 = *(u64 *)(r7 +0)          ; R7=ptr_nameidata(off={{[0-9]+}}) R8=rdonly_untrusted_mem(sz=0)")
+__msg("r8 = *(u64 *)(r7 +0)          ; R7=ptr_nameidata(imm={{[0-9]+}}) R8=rdonly_untrusted_mem(sz=0)")
 __msg("r9 = *(u8 *)(r8 +0)           ; R8=rdonly_untrusted_mem(sz=0) R9=scalar")
 int btf_id_to_ptr_mem(void *ctx)
 {
@@ -224,6 +224,23 @@ int null_check(void *ctx)
 		 */
 		return return_one();
 	return 0;
+}
+
+SEC("socket")
+__success
+__retval(1)
+int ldx_is_ok_commuted_addr(void *ctx)
+{
+	int v, *p, *derived;
+
+	v = 1;
+	p = bpf_rdonly_cast(&v, 0);
+	asm volatile ("%[dst] = 0;"
+		"%[dst] += %[src];"
+		: [dst]"=&r"(derived)
+		: [src]"r"(p)
+		: "memory");
+	return *derived;
 }
 
 char _license[] SEC("license") = "GPL";

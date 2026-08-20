@@ -300,7 +300,7 @@ irqreturn_t cs42l43_bias_detect_clamp(int irq, void *data)
 {
 	struct cs42l43_codec *priv = data;
 
-	queue_delayed_work(system_wq, &priv->bias_sense_timeout,
+	queue_delayed_work(system_dfl_wq, &priv->bias_sense_timeout,
 			   msecs_to_jiffies(1000));
 
 	return IRQ_HANDLED;
@@ -310,6 +310,7 @@ irqreturn_t cs42l43_bias_detect_clamp(int irq, void *data)
 #define CS42L43_JACK_ABSENT 0x0
 
 #define CS42L43_JACK_OPTICAL (SND_JACK_MECHANICAL | SND_JACK_AVOUT)
+#define CS42L43_JACK_MICROPHONE (SND_JACK_MECHANICAL | SND_JACK_MICROPHONE)
 #define CS42L43_JACK_HEADPHONE (SND_JACK_MECHANICAL | SND_JACK_HEADPHONE)
 #define CS42L43_JACK_HEADSET (SND_JACK_MECHANICAL | SND_JACK_HEADSET)
 #define CS42L43_JACK_LINEOUT (SND_JACK_MECHANICAL | SND_JACK_LINEOUT)
@@ -496,13 +497,29 @@ void cs42l43_bias_sense_timeout(struct work_struct *work)
 	pm_runtime_put_autosuspend(priv->dev);
 }
 
-static void cs42l43_start_load_detect(struct cs42l43_codec *priv)
+static const struct reg_sequence cs42l43_3pole_patch[] = {
+	{ 0x4000,	0x00000055 },
+	{ 0x4000,	0x000000AA },
+	{ 0x17420,	0x8500F300 },
+	{ 0x17424,	0x36003E00 },
+	{ 0x4000,	0x00000000 },
+};
+
+static const struct reg_sequence cs42l43_4pole_patch[] = {
+	{ 0x4000,	0x00000055 },
+	{ 0x4000,	0x000000AA },
+	{ 0x17420,	0x7800E600 },
+	{ 0x17424,	0x36003800 },
+	{ 0x4000,	0x00000000 },
+};
+
+static void cs42l43_start_load_detect(struct cs42l43_codec *priv, bool mic)
 {
 	struct cs42l43 *cs42l43 = priv->core;
 
 	dev_dbg(priv->dev, "Start load detect\n");
 
-	snd_soc_dapm_mutex_lock(snd_soc_component_get_dapm(priv->component));
+	snd_soc_dapm_mutex_lock(snd_soc_component_to_dapm(priv->component));
 
 	priv->load_detect_running = true;
 
@@ -519,6 +536,15 @@ static void cs42l43_start_load_detect(struct cs42l43_codec *priv)
 		if (!time_left)
 			dev_err(priv->dev, "Load detect HP power down timed out\n");
 	}
+
+	if (mic)
+		regmap_multi_reg_write_bypassed(cs42l43->regmap,
+						cs42l43_4pole_patch,
+						ARRAY_SIZE(cs42l43_4pole_patch));
+	else
+		regmap_multi_reg_write_bypassed(cs42l43->regmap,
+						cs42l43_3pole_patch,
+						ARRAY_SIZE(cs42l43_3pole_patch));
 
 	regmap_update_bits(cs42l43->regmap, CS42L43_BLOCK_EN3,
 			   CS42L43_ADC1_EN_MASK | CS42L43_ADC2_EN_MASK, 0);
@@ -539,7 +565,7 @@ static void cs42l43_start_load_detect(struct cs42l43_codec *priv)
 			   CS42L43_HPLOAD_DET_EN_MASK,
 			   CS42L43_HPLOAD_DET_EN_MASK);
 
-	snd_soc_dapm_mutex_unlock(snd_soc_component_get_dapm(priv->component));
+	snd_soc_dapm_mutex_unlock(snd_soc_component_to_dapm(priv->component));
 }
 
 static void cs42l43_stop_load_detect(struct cs42l43_codec *priv)
@@ -548,7 +574,7 @@ static void cs42l43_stop_load_detect(struct cs42l43_codec *priv)
 
 	dev_dbg(priv->dev, "Stop load detect\n");
 
-	snd_soc_dapm_mutex_lock(snd_soc_component_get_dapm(priv->component));
+	snd_soc_dapm_mutex_lock(snd_soc_component_to_dapm(priv->component));
 
 	regmap_update_bits(cs42l43->regmap, CS42L43_LOADDETENA,
 			   CS42L43_HPLOAD_DET_EN_MASK, 0);
@@ -587,7 +613,7 @@ static void cs42l43_stop_load_detect(struct cs42l43_codec *priv)
 
 	priv->load_detect_running = false;
 
-	snd_soc_dapm_mutex_unlock(snd_soc_component_get_dapm(priv->component));
+	snd_soc_dapm_mutex_unlock(snd_soc_component_to_dapm(priv->component));
 }
 
 static int cs42l43_run_load_detect(struct cs42l43_codec *priv, bool mic)
@@ -598,7 +624,7 @@ static int cs42l43_run_load_detect(struct cs42l43_codec *priv, bool mic)
 
 	reinit_completion(&priv->load_detect);
 
-	cs42l43_start_load_detect(priv);
+	cs42l43_start_load_detect(priv, mic);
 	time_left = wait_for_completion_timeout(&priv->load_detect,
 						msecs_to_jiffies(CS42L43_LOAD_TIMEOUT_MS));
 	cs42l43_stop_load_detect(priv);
@@ -622,11 +648,11 @@ static int cs42l43_run_load_detect(struct cs42l43_codec *priv, bool mic)
 	}
 
 	switch (val & CS42L43_AMP3_RES_DET_MASK) {
-	case 0x0: // low impedance
-	case 0x1: // high impedance
+	case 0x0: // < 22 Ohm impedance
+	case 0x1: // < 150 Ohm impedance
+	case 0x2: // < 1000 Ohm impedance
 		return CS42L43_JACK_HEADPHONE;
-	case 0x2: // lineout
-	case 0x3: // Open circuit
+	case 0x3: // > 1000 Ohm impedance
 		return CS42L43_JACK_LINEOUT;
 	default:
 		return -EINVAL;
@@ -674,6 +700,7 @@ static int cs42l43_run_type_detect(struct cs42l43_codec *priv)
 	switch (type & CS42L43_HSDET_TYPE_STS_MASK) {
 	case 0x0: // CTIA
 	case 0x1: // OMTP
+	case 0x4:
 		return cs42l43_run_load_detect(priv, true);
 	case 0x2: // 3-pole
 		return cs42l43_run_load_detect(priv, false);
@@ -779,7 +806,7 @@ irqreturn_t cs42l43_tip_sense(int irq, void *data)
 	if (priv->suspend_jack_debounce)
 		db_delay += priv->tip_fall_db_ms + priv->tip_rise_db_ms;
 
-	queue_delayed_work(system_long_wq, &priv->tip_sense_work,
+	queue_delayed_work(system_dfl_long_wq, &priv->tip_sense_work,
 			   msecs_to_jiffies(db_delay));
 
 	return IRQ_HANDLED;
@@ -845,7 +872,7 @@ static const struct cs42l43_jack_override_mode {
 		.hsdet_mode = CS42L43_JACK_3_POLE_SWITCHES,
 		.mic_ctrl = (0x3 << CS42L43_JACK_STEREO_CONFIG_SHIFT) |
 			    CS42L43_HS1_BIAS_EN_MASK | CS42L43_HS2_BIAS_EN_MASK,
-		.report = CS42L43_JACK_LINEIN,
+		.report = CS42L43_JACK_MICROPHONE,
 	},
 	[CS42L43_JACK_RAW_OPTICAL] = {
 		.hsdet_mode = CS42L43_JACK_3_POLE_SWITCHES,
@@ -866,7 +893,7 @@ SOC_ENUM_SINGLE_VIRT_DECL(cs42l43_jack_enum, cs42l43_jack_text);
 
 int cs42l43_jack_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct cs42l43_codec *priv = snd_soc_component_get_drvdata(component);
 
 	mutex_lock(&priv->jack_lock);
@@ -878,7 +905,7 @@ int cs42l43_jack_get(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *u
 
 int cs42l43_jack_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
 {
-	struct snd_soc_component *component = snd_soc_kcontrol_component(kcontrol);
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
 	struct cs42l43_codec *priv = snd_soc_component_get_drvdata(component);
 	struct cs42l43 *cs42l43 = priv->core;
 	struct soc_enum *e = (struct soc_enum *)kcontrol->private_value;
@@ -906,7 +933,8 @@ int cs42l43_jack_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *u
 	snd_soc_jack_report(priv->jack_hp, 0, 0xFFFF);
 
 	if (!override) {
-		queue_delayed_work(system_long_wq, &priv->tip_sense_work, 0);
+		queue_delayed_work(system_dfl_long_wq, &priv->tip_sense_work,
+				   0);
 	} else {
 		override--;
 
