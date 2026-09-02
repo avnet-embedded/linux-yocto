@@ -9,7 +9,7 @@ libs=$2
 PKG="ncursesw"
 PKG2="ncurses"
 
-if [ "$CROSS_CURSES_LIB" != "" ]; then
+if [ "${CROSS_CURSES_LIB:-}" != "" ]; then
     echo $CROSS_CURSES_LIB > ${libs}
     if [ x"$CROSS_CURSES_INC" != x ]; then
 	echo $CROSS_CURSES_INC > ${cflags}
