@@ -2660,7 +2660,13 @@ static void rmdir_all_sub(void)
 		cpumask_or(&rdtgroup_default.cpu_mask,
 			   &rdtgroup_default.cpu_mask, &rdtgrp->cpu_mask);
 
-		free_rmid(rdtgrp->closid, rdtgrp->mon.rmid);
+		/*
+		 * Pseudo-locked group's RMID is freed during locksetup,
+		 * do not free it here to avoid a double-free.
+		 */
+		if (rdtgrp->mode != RDT_MODE_PSEUDO_LOCKSETUP &&
+		    rdtgrp->mode != RDT_MODE_PSEUDO_LOCKED)
+			free_rmid(rdtgrp->closid, rdtgrp->mon.rmid);
 
 		kernfs_remove(rdtgrp->kn);
 		list_del(&rdtgrp->rdtgroup_list);
