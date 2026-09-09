@@ -20,6 +20,7 @@
 struct pinctrl;
 struct pinctrl_state;
 struct device;
+struct gpio_chip;
 
 #ifdef CONFIG_PINCTRL
 
@@ -27,8 +28,10 @@ struct device;
 extern bool pinctrl_gpio_can_use_line(unsigned gpio);
 extern int pinctrl_gpio_request(unsigned gpio);
 extern void pinctrl_gpio_free(unsigned gpio);
-extern int pinctrl_gpio_direction_input(unsigned gpio);
-extern int pinctrl_gpio_direction_output(unsigned gpio);
+extern int pinctrl_gpio_direction_input(struct gpio_chip *gc,
+					unsigned int offset);
+extern int pinctrl_gpio_direction_output(struct gpio_chip *gc,
+					 unsigned int offset);
 extern int pinctrl_gpio_set_config(unsigned gpio, unsigned long config);
 extern int pinctrl_gpio_get_mux_owner(unsigned int gpio, char *b,
 				      unsigned long size);
@@ -79,12 +82,14 @@ static inline void pinctrl_gpio_free(unsigned gpio)
 {
 }
 
-static inline int pinctrl_gpio_direction_input(unsigned gpio)
+static inline int pinctrl_gpio_direction_input(struct gpio_chip *gc,
+					       unsigned int offset)
 {
 	return 0;
 }
 
-static inline int pinctrl_gpio_direction_output(unsigned gpio)
+static inline int pinctrl_gpio_direction_output(struct gpio_chip *gc,
+						unsigned int offset)
 {
 	return 0;
 }
