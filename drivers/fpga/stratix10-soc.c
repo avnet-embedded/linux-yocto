@@ -242,15 +242,13 @@ static int s10_ops_write_init(struct fpga_manager *mgr,
 	if (ret < 0)
 		goto init_error;
 
-	ret = wait_for_completion_timeout(
-		&priv->status_return_completion, S10_RECONFIG_TIMEOUT);
-	if (!ret) {
+	if (!wait_for_completion_timeout(&priv->status_return_completion,
+					 S10_RECONFIG_TIMEOUT)) {
 		dev_err(dev, "timeout waiting for RECONFIG_REQUEST\n");
 		ret = -ETIMEDOUT;
 		goto init_error;
 	}
 
-	ret = 0;
 	if (!test_and_clear_bit(SVC_STATUS_OK, &priv->status)) {
 		ret = -ETIMEDOUT;
 		goto init_error;
@@ -375,6 +373,9 @@ static int s10_ops_write(struct fpga_manager *mgr, const char *buf,
 			break;
 		}
 	}
+
+	if (ret < 0)
+		stratix10_svc_done(priv->chan);
 
 	if (ret < 0)
 		stratix10_svc_done(priv->chan);
