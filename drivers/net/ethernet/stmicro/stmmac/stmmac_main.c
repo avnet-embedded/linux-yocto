@@ -1218,6 +1218,11 @@ static int stmmac_init_phy(struct net_device *dev)
 	 */
 	if (!phy_fwnode || IS_ERR(phy_fwnode)) {
 		struct phy_device *phydev;
+
+		/* If a custom PCS is in use, no PHY is needed */
+		if (priv->plat->phy_addr < 0 && priv->hw->phylink_pcs)
+			return 0;
+
 		ret = stmmac_get_phydev(priv, &phydev);
 		if (ret)
 			return ret;
