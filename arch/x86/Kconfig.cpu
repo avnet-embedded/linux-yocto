@@ -195,8 +195,14 @@ config MATOM
 endchoice
 
 config CC_HAS_MARCH_NATIVE
-	# This flag might not be available in cross-compilers:
-	def_bool $(cc-option, -march=native)
+	# yocto: pinned off for reproducible builds. The upstream
+	# 'def_bool $(cc-option, -march=native)' is probed from the build-host
+	# compiler and varies across cross build hosts, so it (and the
+	# X86_NATIVE_CPU line it gates) is captured differently in the kernel
+	# config -- and via CONFIG_IKCONFIG into the image -- breaking
+	# reproducibility. It only gates X86_NATIVE_CPU, which is never enabled
+	# here, so pinning it off has no functional effect.
+	def_bool n
 	# LLVM 18 has an easily triggered internal compiler error in core
 	# networking code with '-march=native' on certain systems:
 	# https://github.com/llvm/llvm-project/issues/72026
