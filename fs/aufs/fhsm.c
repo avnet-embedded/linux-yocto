@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2011-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2011-2026 Junjiro R. Okajima
  */
 
 /*
@@ -378,7 +365,7 @@ int au_fhsm_br_alloc(struct au_branch *br)
 	int err;
 
 	err = 0;
-	br->br_fhsm = kmalloc(sizeof(*br->br_fhsm), GFP_NOFS);
+	br->br_fhsm = kmalloc_obj(*br->br_fhsm, GFP_NOFS);
 	if (br->br_fhsm)
 		au_br_fhsm_init(br->br_fhsm);
 	else

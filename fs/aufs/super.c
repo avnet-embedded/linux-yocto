@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -117,8 +104,7 @@ static int au_show_brs(struct seq_file *seq, struct super_block *sb)
 	return err;
 }
 
-static void au_gen_fmt(char *fmt, int len, const char *pat,
-		       const char *append)
+static void au_gen_fmt(char *fmt, int len, const char *pat, const char *append)
 {
 	char *p;
 
@@ -684,7 +670,7 @@ static int au_refresh_i(struct super_block *sb, unsigned int do_idop)
 			e = au_refresh_hinode_self(inode);
 			if (unlikely(e)) {
 				au_refresh_iop(inode, /*force_getattr*/1);
-				pr_err("error %d, i%lu\n", e, inode->i_ino);
+				pr_err("error %d, i%llu\n", e, inode->i_ino);
 				if (!err)
 					err = e;
 				/* go on even if err */
