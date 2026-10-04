@@ -1,19 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -25,6 +12,7 @@
 
 #ifdef __KERNEL__
 
+#include <linux/fs.h>
 #include <linux/fsnotify.h>
 #include "fstype.h"
 #include "rwsem.h"
@@ -346,8 +334,8 @@ AuStubVoid(au_xattr_init, struct super_block *sb);
 
 #ifdef CONFIG_FS_POSIX_ACL
 struct posix_acl *aufs_get_inode_acl(struct inode *inode, int type, bool rcu);
-struct posix_acl *aufs_get_acl(struct mnt_idmap *idmap,
-			       struct dentry *dentry, int type);
+struct posix_acl *aufs_get_acl(struct mnt_idmap *idmap, struct dentry *dentry,
+			       int type);
 int aufs_set_acl(struct mnt_idmap *idmap, struct dentry *dentry,
 		 struct posix_acl *acl, int type);
 #endif

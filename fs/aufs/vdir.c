@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -377,7 +364,7 @@ static struct au_vdir *alloc_vdir(struct file *file)
 	if (unlikely(!vdir))
 		goto out;
 
-	vdir->vd_deblk = kzalloc(sizeof(*vdir->vd_deblk), GFP_NOFS);
+	vdir->vd_deblk = kzalloc_obj(*vdir->vd_deblk, GFP_NOFS);
 	if (unlikely(!vdir->vd_deblk))
 		goto out_free;
 
@@ -453,8 +440,8 @@ struct fillvdir_arg {
 };
 
 static bool fillvdir(struct dir_context *ctx, const char *__name, int nlen,
-		    loff_t offset __maybe_unused, u64 h_ino,
-		    unsigned int d_type)
+		     loff_t offset __maybe_unused, u64 h_ino,
+		     unsigned int d_type)
 {
 	struct fillvdir_arg *arg = container_of(ctx, struct fillvdir_arg, ctx);
 	char *name = (void *)__name;
@@ -866,9 +853,9 @@ int au_vdir_fill_de(struct file *file, struct dir_context *ctx)
 		deblk_end.deblk += deblk_sz;
 		while (!is_deblk_end(&vdir_cache->vd_last.p, &deblk_end)) {
 			de = vdir_cache->vd_last.p.de;
-			AuDbg("%.*s, off%lld, i%lu, dt%d\n",
+			AuDbg("%.*s, off%lld, i%llu, dt%d\n",
 			      de->de_str.len, de->de_str.name, ctx->pos,
-			      (unsigned long)de->de_ino, de->de_type);
+			      (unsigned long long)de->de_ino, de->de_type);
 			if (unlikely(!dir_emit(ctx, de->de_str.name,
 					       de->de_str.len, de->de_ino,
 					       de->de_type))) {

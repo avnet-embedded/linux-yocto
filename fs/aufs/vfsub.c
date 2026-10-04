@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -21,9 +8,7 @@
  */
 
 #include <linux/filelock.h>
-#include <linux/mnt_namespace.h>
-#include <linux/nsproxy.h>
-#include <linux/security.h>
+#include <linux/namei.h>
 #include <linux/splice.h>
 #include "aufs.h"
 
@@ -33,7 +18,7 @@ int vfsub_test_mntns(struct vfsmount *mnt, struct super_block *h_sb)
 	if (!au_test_fuse(h_sb) || !au_userns)
 		return 0;
 
-	return is_current_mnt_ns(mnt) ? 0 : -EACCES;
+	return our_mnt(mnt) ? 0 : -EACCES;
 }
 #endif
 
@@ -263,65 +248,13 @@ void vfsub_call_lkup_one(void *args)
 
 /* ---------------------------------------------------------------------- */
 
-/*
- * v7.1: lock_rename(), lock_rename_child(), unlock_rename() were unexported
- * (upstream 4d94ce88c77e).  Open-code an equivalent here so aufs can keep
- * the existing low-level rename-locking semantics without rewriting callers
- * to the higher-level start_renaming() API.
- */
-static struct dentry *au_lock_two_directories(struct dentry *p1,
-					      struct dentry *p2)
-{
-	struct dentry *p = p1, *q = p2, *r;
-
-	while ((r = p->d_parent) != p2 && r != p)
-		p = r;
-	if (r == p2) {
-		inode_lock_nested(p2->d_inode, I_MUTEX_PARENT);
-		inode_lock_nested(p1->d_inode, I_MUTEX_PARENT2);
-		return p;
-	}
-	while ((r = q->d_parent) != p1 && r != p && r != q)
-		q = r;
-	if (r == p1) {
-		inode_lock_nested(p1->d_inode, I_MUTEX_PARENT);
-		inode_lock_nested(p2->d_inode, I_MUTEX_PARENT2);
-		return q;
-	} else if (likely(r == p)) {
-		inode_lock_nested(p1->d_inode, I_MUTEX_PARENT);
-		inode_lock_nested(p2->d_inode, I_MUTEX_PARENT2);
-		return NULL;
-	}
-	mutex_unlock(&p1->d_sb->s_vfs_rename_mutex);
-	return ERR_PTR(-EXDEV);
-}
-
-static struct dentry *au_lock_rename(struct dentry *p1, struct dentry *p2)
-{
-	if (p1 == p2) {
-		inode_lock_nested(p1->d_inode, I_MUTEX_PARENT);
-		return NULL;
-	}
-	mutex_lock(&p1->d_sb->s_vfs_rename_mutex);
-	return au_lock_two_directories(p1, p2);
-}
-
-static void au_unlock_rename(struct dentry *p1, struct dentry *p2)
-{
-	inode_unlock(p1->d_inode);
-	if (p1 != p2) {
-		inode_unlock(p2->d_inode);
-		mutex_unlock(&p1->d_sb->s_vfs_rename_mutex);
-	}
-}
-
 struct dentry *vfsub_lock_rename(struct dentry *d1, struct au_hinode *hdir1,
 				 struct dentry *d2, struct au_hinode *hdir2)
 {
 	struct dentry *d;
 
 	lockdep_off();
-	d = au_lock_rename(d1, d2);
+	d = lock_rename(d1, d2);
 	lockdep_on();
 	if (IS_ERR(d))
 		goto out;
@@ -340,7 +273,7 @@ void vfsub_unlock_rename(struct dentry *d1, struct au_hinode *hdir1,
 	if (hdir1 != hdir2)
 		au_hn_resume(hdir2);
 	lockdep_off();
-	au_unlock_rename(d1, d2);
+	unlock_rename(d1, d2);
 	lockdep_on();
 }
 
@@ -648,12 +581,11 @@ struct dentry *vfsub_mkdir(struct inode *dir, struct path *path, int mode)
 	tmp = *path;
 	if (ret)
 		tmp.dentry = ret;
-	vfsub_update_h_iattr(&tmp, &did);
+	vfsub_update_h_iattr(&tmp, &did); /*ignore*/
 	if (did) {
 		tmp.dentry = tmp.dentry->d_parent;
-		vfsub_update_h_iattr(&tmp, /*did*/NULL);
+		vfsub_update_h_iattr(&tmp, /*did*/NULL); /*ignore*/
 	}
-	/*ignore*/
 
 out:
 	return ret;
