@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -133,7 +133,8 @@ int au_dir_roflags;
  * iterate_supers_type() doesn't protect us from
  * remounting (branch management)
  */
-struct hlist_bl_head au_sbilist;
+struct au_rwsem au_sbilist_lock;
+struct hlist_head au_sbilist;
 #endif
 
 /*
@@ -267,6 +268,7 @@ static void __exit aufs_exit(void)
 	dbgaufs_fin();
 	sysaufs_fin();
 	au_dy_fin();
+	au_sbilist_fin();
 }
 
 module_init(aufs_init);

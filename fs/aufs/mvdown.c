@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2011-2022 Junjiro R. Okajima
+ * Copyright (C) 2011-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -255,7 +255,6 @@ static int au_do_unlink_wh(const unsigned char dmsg, struct au_mvd_args *a)
 	int err;
 	struct path h_path;
 	struct au_branch *br;
-	struct inode *delegated;
 
 	br = au_sbr(a->sb, a->mvd_bdst);
 	h_path.dentry = au_wh_lkup(a->mvd_h_dst_parent, &a->dentry->d_name, br);
@@ -268,14 +267,8 @@ static int au_do_unlink_wh(const unsigned char dmsg, struct au_mvd_args *a)
 	err = 0;
 	if (d_is_positive(h_path.dentry)) {
 		h_path.mnt = au_br_mnt(br);
-		delegated = NULL;
 		err = vfsub_unlink(d_inode(a->mvd_h_dst_parent), &h_path,
-				   &delegated, /*force*/0);
-		if (unlikely(err == -EWOULDBLOCK)) {
-			pr_warn("cannot retry for NFSv4 delegation"
-				" for an internal unlink\n");
-			iput(delegated);
-		}
+				   /*force*/0);
 		if (unlikely(err))
 			AU_MVD_PR(dmsg, "wh_unlink failed\n");
 	}
@@ -293,17 +286,10 @@ static int au_do_unlink(const unsigned char dmsg, struct au_mvd_args *a)
 {
 	int err;
 	struct path h_path;
-	struct inode *delegated;
 
 	h_path.mnt = au_sbr_mnt(a->sb, a->mvd_bsrc);
 	h_path.dentry = au_h_dptr(a->dentry, a->mvd_bsrc);
-	delegated = NULL;
-	err = vfsub_unlink(a->mvd_h_src_dir, &h_path, &delegated, /*force*/0);
-	if (unlikely(err == -EWOULDBLOCK)) {
-		pr_warn("cannot retry for NFSv4 delegation"
-			" for an internal unlink\n");
-		iput(delegated);
-	}
+	err = vfsub_unlink(a->mvd_h_src_dir, &h_path, /*force*/0);
 	if (unlikely(err))
 		AU_MVD_PR(dmsg, "unlink failed\n");
 
@@ -407,15 +393,16 @@ static int au_mvd_args_busy(const unsigned char dmsg, struct au_mvd_args *a)
 	    && atomic_read(&a->inode->i_count) == 1
 	    /* && a->mvd_h_src_inode->i_nlink == 1 */
 	    && (!plinked || !au_plink_test(a->inode))
-	    && a->inode->i_nlink == 1)
+	    && vfsub_inode_nlink(a->inode, AU_I_AUFS) == 1)
 		goto out;
 
 	err = -EBUSY;
 	AU_MVD_PR(dmsg,
 		  "b%d, d{b%d, c%d?}, i{c%d?, l%u}, hi{l%u}, p{%d, %d}\n",
 		  a->mvd_bsrc, au_dbtop(a->dentry), au_dcount(a->dentry),
-		  atomic_read(&a->inode->i_count), a->inode->i_nlink,
-		  a->mvd_h_src_inode->i_nlink,
+		  atomic_read(&a->inode->i_count),
+		  vfsub_inode_nlink(a->inode, AU_I_AUFS),
+		  vfsub_inode_nlink(a->mvd_h_src_inode, AU_I_BRANCH),
 		  plinked, plinked ? au_plink_test(a->inode) : 0);
 
 out:
