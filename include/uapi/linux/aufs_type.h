@@ -1,19 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 WITH Linux-syscall-note */
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 #ifndef __AUFS_TYPE_H__
@@ -40,7 +27,7 @@
 #include <limits.h>
 #endif /* __KERNEL__ */
 
-#define AUFS_VERSION	"6.x-rcN-20260112"
+#define AUFS_VERSION	"7.2-20260914"
 
 /* todo? move this to linux-2.6.19/include/magic.h */
 #define AUFS_SUPER_MAGIC	('a' << 24 | 'u' << 16 | 'f' << 8 | 's')
@@ -254,12 +241,7 @@ enum {
 
 /* borrowed from linux/include/linux/kernel.h */
 #ifndef ALIGN
-#ifdef _GNU_SOURCE
-#define ALIGN(x, a)		__ALIGN_MASK(x, (typeof(x))(a)-1)
-#else
 #define ALIGN(x, a)		(((x) + (a) - 1) & ~((a) - 1))
-#endif
-#define __ALIGN_MASK(x, mask)	(((x)+(mask))&~(mask))
 #endif
 
 /* borrowed from linux/include/linux/compiler-gcc3.h */

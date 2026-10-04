@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -128,7 +115,7 @@ static int do_pri_inode(aufs_bindex_t bindex, struct inode *inode, int hn,
 	}
 
 	ctime = inode_get_ctime(inode);
-	dpri("i%d: %p, i%lu, %s, cnt %d, nl %u?, 0%o, sz %llu, blk %llu,"
+	dpri("i%d: %p, i%llu, %s, cnt %d, nl %u?, 0%o, sz %llu, blk %llu,"
 	     " acl %p, def_acl %p,"
 	     " hn %d, ct %lld, np %lu, st 0x%x, f 0x%x, v %llu, g %x%s%.*s\n",
 	     bindex, inode,
@@ -173,7 +160,7 @@ void au_dpri_dalias(struct inode *inode)
 	struct dentry *d;
 
 	spin_lock(&inode->i_lock);
-	hlist_for_each_entry(d, &inode->i_dentry, d_alias)
+	for_each_alias(d, inode)
 		au_dpri_dentry(d);
 	spin_unlock(&inode->i_lock);
 }
@@ -332,7 +319,7 @@ void au_dpri_sb(struct super_block *sb)
 	} *a;
 
 	/* this function can be called from magic sysrq */
-	a = kzalloc(sizeof(*a), GFP_ATOMIC);
+	a = kzalloc_obj(*a, GFP_ATOMIC);
 	if (unlikely(!a)) {
 		dpri("no memory\n");
 		return;

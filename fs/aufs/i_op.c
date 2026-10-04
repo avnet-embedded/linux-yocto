@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -21,7 +8,6 @@
  */
 
 #include <linux/device_cgroup.h>
-#include <linux/filelock.h>
 #include <linux/fs_stack.h>
 #include <linux/iversion.h>
 #include <linux/security.h>
@@ -58,8 +44,7 @@ static int h_permission(struct inode *h_inode, int mask,
 		&& write_mask && !(mask & MAY_READ))
 	    || !h_inode->i_op->permission) {
 		/* AuLabel(generic_permission); */
-		/* AuDbg("get_inode_acl %ps\n",
-		   h_inode->i_op->get_inode_acl); */
+		/* AuDbg("get_acl %ps\n", h_inode->i_op->get_acl); */
 		err = generic_permission(h_idmap, h_inode, mask);
 		if (err == -EOPNOTSUPP && au_test_nfs_noacl(h_inode))
 			err = h_inode->i_op->permission(h_idmap, h_inode,
@@ -953,7 +938,7 @@ static int aufs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		goto out;
 
 	err = -ENOMEM;
-	a = kzalloc(sizeof(*a), GFP_NOFS);
+	a = kzalloc_obj(*a, GFP_NOFS);
 	if (unlikely(!a))
 		goto out;
 
@@ -1107,7 +1092,7 @@ ssize_t au_sxattr(struct dentry *dentry, struct inode *inode,
 	IMustLock(inode);
 
 	err = -ENOMEM;
-	a = kzalloc(sizeof(*a), GFP_NOFS);
+	a = kzalloc_obj(*a, GFP_NOFS);
 	if (unlikely(!a))
 		goto out;
 
@@ -1400,7 +1385,7 @@ static int aufs_update_time(struct inode *inode, enum fs_update_time type,
 	struct vfsmount *h_mnt;
 
 	sb = inode->i_sb;
-	WARN_ONCE((type == FS_UPD_ATIME) && !IS_NOATIME(inode),
+	WARN_ONCE(type == FS_UPD_ATIME && !IS_NOATIME(inode),
 		  "unexpected s_flags 0x%lx", sb->s_flags);
 
 	/* mmap_sem might be acquired already, cf. aufs_mmap() */
@@ -1425,12 +1410,12 @@ static int aufs_update_time(struct inode *inode, enum fs_update_time type,
 		 * communicating. If we copied it up, then the communication
 		 * would be corrupted.
 		 */
-		AuWarn1("timestamps for i%lu are ignored "
-			"since it is on readonly branch (hi%lu).\n",
+		AuWarn1("timestamps for i%llu are ignored "
+			"since it is on readonly branch (hi%llu).\n",
 			inode->i_ino, h_inode->i_ino);
 	} else if (type != FS_UPD_ATIME) {
 		err = -EIO;
-		AuIOErr1("unexpected type %d\n", type);
+		AuIOErr1("unexpected flags 0x%x\n", flags);
 		AuDebugOn(1);
 	}
 
@@ -1439,6 +1424,9 @@ static int aufs_update_time(struct inode *inode, enum fs_update_time type,
 	ii_write_unlock(inode);
 	si_read_unlock(sb);
 	lockdep_on();
+
+	if (!err && IS_I_VERSION(inode))
+		inode_inc_iversion(inode);
 
 	return err;
 }

@@ -1,19 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -76,10 +63,10 @@ long au_brinfo_compat_ioctl(struct file *file, unsigned long arg);
 #endif
 
 void sysaufs_br_init(struct au_branch *br);
+
+AuStubVoid(sysaufs_brs_init, void)
 void sysaufs_brs_add(struct super_block *sb, aufs_bindex_t bindex);
 void sysaufs_brs_del(struct super_block *sb, aufs_bindex_t bindex);
-
-#define sysaufs_brs_init()	do {} while (0)
 
 #else
 #define sysaufs_attr_group	NULL
@@ -87,14 +74,16 @@ void sysaufs_brs_del(struct super_block *sb, aufs_bindex_t bindex);
 AuStubInt0(sysaufs_si_xi_path, struct seq_file *seq, struct super_block *sb)
 AuStub(ssize_t, sysaufs_si_show, return 0, struct kobject *kobj,
        struct attribute *attr, char *buf)
+
 AuStubVoid(sysaufs_br_init, struct au_branch *br)
-AuStubVoid(sysaufs_brs_add, struct super_block *sb, aufs_bindex_t bindex)
-AuStubVoid(sysaufs_brs_del, struct super_block *sb, aufs_bindex_t bindex)
 
 static inline void sysaufs_brs_init(void)
 {
 	sysaufs_brs = 0;
 }
+
+AuStubVoid(sysaufs_brs_add, struct super_block *sb, aufs_bindex_t bindex)
+AuStubVoid(sysaufs_brs_del, struct super_block *sb, aufs_bindex_t bindex)
 
 #endif /* CONFIG_SYSFS */
 

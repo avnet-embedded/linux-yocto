@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -582,12 +569,10 @@ static int au_reset_acl(struct path *h_path, umode_t mode)
 {
 	int err;
 	struct dentry *h_dentry;
-	/* struct inode *h_inode; */
 	struct mnt_idmap *h_idmap;
 
 	h_idmap = mnt_idmap(h_path->mnt);
 	h_dentry = h_path->dentry;
-	/* h_inode = d_inode(h_dentry); */
 	/* forget_all_cached_acls(h_inode)); */
 	err = vfsub_remove_acl(h_idmap, h_dentry, XATTR_NAME_POSIX_ACL_ACCESS);
 	AuTraceErr(err);
@@ -806,7 +791,7 @@ static int au_cpup_single(struct au_cp_generic *cpg, struct dentry *dst_parent)
 	} *a;
 
 	err = -ENOMEM;
-	a = kmalloc(sizeof(*a), GFP_NOFS);
+	a = kmalloc_obj(*a, GFP_NOFS);
 	if (unlikely(!a))
 		goto out;
 	a->h_src_attr.valid = 0;
@@ -836,7 +821,7 @@ static int au_cpup_single(struct au_cp_generic *cpg, struct dentry *dst_parent)
 	if (dst_inode) {
 		if (unlikely(!plink)) {
 			err = -EIO;
-			AuIOErr("hi%lu(i%lu) exists on b%d "
+			AuIOErr("hi%llu(i%llu) exists on b%d "
 				"but plink is disabled\n",
 				dst_inode->i_ino, inode->i_ino, cpg->bdst);
 			goto out_mnt_write;
@@ -851,7 +836,7 @@ static int au_cpup_single(struct au_cp_generic *cpg, struct dentry *dst_parent)
 				goto out_mnt_write;
 			if (unlikely(d_is_negative(h_src))) {
 				err = -EIO;
-				AuIOErr("i%lu exists on b%d "
+				AuIOErr("i%llu exists on b%d "
 					"but not pseudo-linked\n",
 					inode->i_ino, cpg->bdst);
 				dput(h_src);
@@ -940,9 +925,9 @@ out_rev:
 	a->h_path.dentry = h_dst;
 	rerr = 0;
 	if (d_is_positive(h_dst)) {
-		if (!isdir) {
+		if (!isdir)
 			rerr = vfsub_unlink(h_dir, &a->h_path, /*force*/0);
-		} else
+		else
 			rerr = vfsub_rmdir(h_dir, &a->h_path);
 	}
 	au_dtime_revert(&a->dt);
@@ -1236,9 +1221,9 @@ static int au_cpup_wh(struct au_cp_generic *cpg, struct file *file)
 
 	dget(wh_dentry);
 	h_path.dentry = wh_dentry;
-	if (!d_is_dir(wh_dentry)) {
+	if (!d_is_dir(wh_dentry))
 		err = vfsub_unlink(d_inode(h_parent), &h_path, /*force*/0);
-	} else
+	else
 		err = vfsub_rmdir(d_inode(h_parent), &h_path);
 	if (unlikely(err)) {
 		AuIOErr("failed remove copied-up tmp file %pd(%d)\n",
