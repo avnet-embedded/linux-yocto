@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -105,7 +105,7 @@ int au_may_del(struct dentry *dentry, aufs_bindex_t bindex,
 		if (unlikely(d_is_negative(h_dentry)))
 			goto out;
 		h_inode = d_inode(h_dentry);
-		if (unlikely(!h_inode->i_nlink))
+		if (unlikely(!vfsub_inode_nlink(h_inode, AU_I_BRANCH)))
 			goto out;
 
 		h_mode = h_inode->i_mode;
@@ -313,7 +313,7 @@ int aufs_unlink(struct inode *dir, struct dentry *dentry)
 {
 	int err;
 	aufs_bindex_t bwh, bindex, btop;
-	struct inode *inode, *h_dir, *delegated, *h_inode;
+	struct inode *inode, *h_dir, *h_inode;
 	struct dentry *parent, *wh_dentry;
 	/* to reduce stack size */
 	struct {
@@ -357,13 +357,7 @@ int aufs_unlink(struct inode *dir, struct dentry *dentry)
 	dget(a->h_path.dentry);
 	if (bindex == btop) {
 		h_dir = au_pinned_h_dir(&a->pin);
-		delegated = NULL;
-		err = vfsub_unlink(h_dir, &a->h_path, &delegated, /*force*/0);
-		if (unlikely(err == -EWOULDBLOCK)) {
-			pr_warn("cannot retry for NFSv4 delegation"
-				" for an internal unlink\n");
-			iput(delegated);
-		}
+		err = vfsub_unlink(h_dir, &a->h_path, /*force*/0);
 	} else {
 		/* dir inode is locked */
 		h_dir = d_inode(wh_dentry->d_parent);
