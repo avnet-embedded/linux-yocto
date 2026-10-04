@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -411,7 +398,7 @@ new_ino:
 		}
 	}
 
-	AuDbg("i%lu\n", (unsigned long)ino);
+	AuDbg("i%llu\n", (unsigned long long)ino);
 	inode = au_iget_locked(sb, ino);
 	err = PTR_ERR(inode);
 	if (IS_ERR(inode))
@@ -465,9 +452,9 @@ new_ino:
 
 	if (unlikely(au_test_fs_unique_ino(h_inode)))
 		AuWarn1("Warning: Un-notified UDBA or repeatedly renamed dir,"
-			" b%d, %s, %pd, hi%lu, i%lu.\n",
+			" b%d, %s, %pd, hi%llu, i%llu.\n",
 			btop, au_sbtype(h_dentry->d_sb), dentry,
-			(unsigned long)h_ino, (unsigned long)ino);
+			(unsigned long long)h_ino, (unsigned long long)ino);
 	ino = 0;
 	err = au_xino_write(sb, btop, h_ino, /*ino*/0);
 	if (!err) {

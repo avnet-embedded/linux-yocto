@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -171,7 +158,8 @@ static int au_hfsn_handle_event(struct fsnotify_group *group,
 	struct fsnotify_mark *inode_mark;
 
 	AuDebugOn(!(data_type == FSNOTIFY_EVENT_INODE
-		    || data_type == FSNOTIFY_EVENT_DENTRY));
+		    || data_type == FSNOTIFY_EVENT_DENTRY
+		    || data_type == FSNOTIFY_EVENT_RENAME));
 
 	err = 0;
 	/* if FS_UNMOUNT happens, there must be another bug */
@@ -234,7 +222,7 @@ static int au_hfsn_init_br(struct au_branch *br, int perm)
 		goto out;
 
 	err = -ENOMEM;
-	hfsn = kmalloc(sizeof(*hfsn), GFP_NOFS);
+	hfsn = kmalloc_obj(*hfsn, GFP_NOFS);
 	if (unlikely(!hfsn))
 		goto out;
 

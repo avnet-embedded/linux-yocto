@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -233,7 +220,7 @@ static void wkq_func(struct work_struct *wk)
  */
 static int au_wkq_comp_alloc(struct au_wkinfo *wkinfo, struct completion **comp)
 {
-	*comp = kmalloc(sizeof(**comp), GFP_NOFS);
+	*comp = kmalloc_obj(**comp, GFP_NOFS);
 	if (*comp) {
 		init_completion(*comp);
 		wkinfo->comp = *comp;
@@ -321,7 +308,7 @@ int au_wkq_nowait(au_wkq_func_t func, void *args, struct super_block *sb,
 	 * it highly depends upon the implementation of workqueue.
 	 */
 	err = 0;
-	wkinfo = kmalloc(sizeof(*wkinfo), GFP_NOFS);
+	wkinfo = kmalloc_obj(*wkinfo, GFP_NOFS);
 	if (wkinfo) {
 		wkinfo->kobj = &au_sbi(sb)->si_kobj;
 		wkinfo->flags = flags & ~AuWkq_WAIT;
@@ -360,7 +347,7 @@ int __init au_wkq_init(void)
 	int err;
 
 	err = 0;
-	au_wkq = alloc_workqueue(AUFS_WKQ_NAME, 0, WQ_DFL_ACTIVE);
+	au_wkq = alloc_workqueue(AUFS_WKQ_NAME, WQ_PERCPU, WQ_DFL_ACTIVE);
 	if (IS_ERR(au_wkq))
 		err = PTR_ERR(au_wkq);
 	else if (!au_wkq)

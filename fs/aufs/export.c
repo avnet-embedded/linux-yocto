@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -242,7 +229,7 @@ static struct dentry *decode_by_ino(struct super_block *sb, ino_t ino,
 		dentry = d_find_alias(inode);
 	else {
 		spin_lock(&inode->i_lock);
-		hlist_for_each_entry(d, &inode->i_dentry, d_alias) {
+		for_each_alias(d, inode) {
 			spin_lock(&d->d_lock);
 			if (!au_test_anon(d)
 			    && d_inode(d->d_parent)->i_ino == dir_ino) {
@@ -304,6 +291,7 @@ out:
 	si_noflush_read_lock(sb);
 	AuDebugOn(!mnt);
 	path_put(&root);
+	AuTraceErrPtr(mnt);
 	return mnt;
 }
 
@@ -446,6 +434,11 @@ static struct dentry *decode_by_dir_ino(struct super_block *sb, ino_t ino,
 		path.dentry = dget(sb->s_root);
 
 	path.mnt = au_mnt_get(sb);
+	if (IS_ERR(path.mnt)) {
+		dentry = ERR_CAST(path.mnt);
+		dput(path.dentry);
+		goto out;
+	}
 	dentry = au_lkup_by_ino(&path, ino, nsi_lock);
 	path_put(&path);
 
@@ -482,6 +475,10 @@ static char *au_build_path(struct dentry *h_parent, struct path *h_rootpath,
 		p += n;
 
 	path.mnt = au_mnt_get(sb);
+	if (IS_ERR(path.mnt)) {
+		p = ERR_CAST(path.mnt);
+		goto out;
+	}
 	path.dentry = sb->s_root;
 	p = d_path(&path, buf, len - strlen(p));
 	mntput(path.mnt);
