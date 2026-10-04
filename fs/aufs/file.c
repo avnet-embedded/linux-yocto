@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -118,7 +118,6 @@ static int au_cmoo(struct dentry *dentry)
 		.pin	= &pin,
 		.flags	= AuCpup_DTIME | AuCpup_HOPEN
 	};
-	struct inode *delegated;
 	struct super_block *sb;
 	struct au_sbinfo *sbinfo;
 	struct au_fhsm *fhsm;
@@ -195,15 +194,9 @@ static int au_cmoo(struct dentry *dentry)
 	h_path.mnt = au_br_mnt(br);
 	h_path.dentry = au_h_dptr(dentry, cpg.bsrc);
 	hdir = au_hi(d_inode(parent), cpg.bsrc);
-	delegated = NULL;
-	err = vfsub_unlink(hdir->hi_inode, &h_path, &delegated, /*force*/1);
+	err = vfsub_unlink(hdir->hi_inode, &h_path, /*force*/1);
 	au_unpin(&pin);
 	/* todo: keep h_dentry or not? */
-	if (unlikely(err == -EWOULDBLOCK)) {
-		pr_warn("cannot retry for NFSv4 delegation"
-			" for an internal unlink\n");
-		iput(delegated);
-	}
 	if (unlikely(err)) {
 		pr_err("unlink %pd after coo failed (%d), ignored\n",
 		       dentry, err);
@@ -398,8 +391,8 @@ static int au_ready_to_write_wh(struct file *file, loff_t len,
 		err = au_reopen_wh(file, bcpup, hi_wh);
 
 	if (!err
-	    && (inode->i_nlink > 1
-		|| (inode->i_state & I_LINKABLE))
+	    && (vfsub_inode_nlink(inode, AU_I_AUFS) > 1
+		|| au_ii(inode)->ii_tmpfile)
 	    && au_opt_test(au_mntflags(cpg.dentry->d_sb), PLINK))
 		au_plink_append(inode, bcpup, au_h_dptr(cpg.dentry, bcpup));
 
