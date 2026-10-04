@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -30,6 +30,7 @@
 #include <linux/posix_acl.h>
 #include <linux/xattr.h>
 #include "debug.h"
+#include "fstype.h"
 
 /* copied from linux/fs/internal.h */
 /* todo: BAD approach!! */
@@ -56,33 +57,55 @@ enum {
 
 /* ---------------------------------------------------------------------- */
 
-static inline void au_set_nlink(struct inode *inode, unsigned int nlink)
+unsigned int vfsub_inode_nlink_aufs(struct inode *inode);
+
+enum au_inode_type {
+	AU_I_AUFS,
+	AU_I_BRANCH,
+	AU_I_UNKNOWN
+};
+
+static inline unsigned int vfsub_inode_nlink(struct inode *inode,
+					     enum au_inode_type type)
 {
-	/*
-	 * stop setting the value equal to the current one, in order to stop
-	 * a useless warning from vfs:destroy_inode() about sb->s_remove_count.
-	 */
-	if (nlink != inode->i_nlink)
-		set_nlink(inode, nlink);
+	unsigned int nlink;
+
+	switch (type) {
+	case AU_I_AUFS:
+		nlink = vfsub_inode_nlink_aufs(inode);
+		break;
+	case AU_I_BRANCH: /* aufs cannot be a branch of another aufs mount */
+		AuDebugOn(au_test_aufs(inode->i_sb));
+		nlink = inode->i_nlink;
+		break;
+	case AU_I_UNKNOWN:
+		if (au_test_aufs(inode->i_sb))
+			nlink = vfsub_inode_nlink_aufs(inode);
+		else
+			nlink = inode->i_nlink;
+		break;
+	};
+
+	return nlink;
 }
 
-static inline void au_init_nlink(struct inode *inode, unsigned int nlink)
+void vfsub_inc_nlink(struct inode *inode);
+void vfsub_drop_nlink(struct inode *inode);
+void vfsub_clear_nlink(struct inode *inode);
+void vfsub_set_nlink(struct inode *inode, unsigned int nlink);
+
+static inline void vfsub_inode_nlink_init(struct inode *inode,
+					  unsigned int nlink)
 {
 	/* to ignore sb->s_remove_count, do not use set_nlink() */
 	inode->__i_nlink = nlink;
-}
-
-static inline void vfsub_drop_nlink(struct inode *inode)
-{
-	AuDebugOn(!inode->i_nlink);
-	drop_nlink(inode);
 }
 
 static inline void vfsub_dead_dir(struct inode *inode)
 {
 	AuDebugOn(!S_ISDIR(inode->i_mode));
 	inode->i_flags |= S_DEAD;
-	clear_nlink(inode);
+	vfsub_clear_nlink(inode);
 }
 
 static inline int vfsub_native_ro(struct inode *inode)
@@ -191,11 +214,9 @@ int vfsub_create(struct inode *dir, struct path *path, int mode,
 int vfsub_symlink(struct inode *dir, struct path *path,
 		  const char *symname);
 int vfsub_mknod(struct inode *dir, struct path *path, int mode, dev_t dev);
-int vfsub_link(struct dentry *src_dentry, struct inode *dir,
-	       struct path *path, struct inode **delegated_inode);
+int vfsub_link(struct dentry *src_dentry, struct inode *dir, struct path *path);
 int vfsub_rename(struct inode *src_hdir, struct dentry *src_dentry,
-		 struct inode *hdir, struct path *path,
-		 struct inode **delegated_inode, unsigned int flags);
+		 struct inode *hdir, struct path *path, unsigned int flags);
 int vfsub_mkdir(struct inode *dir, struct path *path, int mode);
 int vfsub_rmdir(struct inode *dir, struct path *path);
 
@@ -343,12 +364,9 @@ static inline loff_t vfsub_llseek(struct file *file, loff_t offset, int origin)
 
 int vfsub_sio_mkdir(struct inode *dir, struct path *path, int mode);
 int vfsub_sio_rmdir(struct inode *dir, struct path *path);
-int vfsub_sio_notify_change(struct path *path, struct iattr *ia,
-			    struct inode **delegated_inode);
-int vfsub_notify_change(struct path *path, struct iattr *ia,
-			struct inode **delegated_inode);
-int vfsub_unlink(struct inode *dir, struct path *path,
-		 struct inode **delegated_inode, int force);
+int vfsub_sio_notify_change(struct path *path, struct iattr *ia);
+int vfsub_notify_change(struct path *path, struct iattr *ia);
+int vfsub_unlink(struct inode *dir, struct path *path, int force);
 
 static inline int vfsub_getattr(const struct path *path, struct kstat *st)
 {
