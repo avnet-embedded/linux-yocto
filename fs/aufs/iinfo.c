@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -147,8 +147,8 @@ void au_update_ibrange(struct inode *inode, int do_put_zero)
 
 			h_i = au_hinode(iinfo, bindex)->hi_inode;
 			if (h_i
-			    && !h_i->i_nlink
-			    && !(h_i->i_state & I_LINKABLE))
+			    && !vfsub_inode_nlink(h_i, AU_I_BRANCH)
+			    && !iinfo->ii_tmpfile)
 				au_set_h_iptr(inode, bindex, NULL, 0);
 		}
 	}
@@ -180,6 +180,7 @@ void au_icntnr_init_once(void *_c)
 	spin_lock_init(&iinfo->ii_generation.ig_spin);
 	au_rw_init(&iinfo->ii_rwsem);
 	inode_init_once(&c->vfs_inode);
+	spin_lock_init(&c->nlink_spin);
 }
 
 void au_hinode_init(struct au_hinode *hinode)
@@ -213,6 +214,7 @@ int au_iinfo_init(struct inode *inode)
 		iinfo->ii_generation.ig_generation = au_sigen(sb);
 		iinfo->ii_btop = -1;
 		iinfo->ii_bbot = -1;
+		iinfo->ii_tmpfile = 0;
 		iinfo->ii_vdir = NULL;
 		return 0;
 	}
@@ -247,7 +249,7 @@ void au_iinfo_fin(struct inode *inode)
 	struct au_hinode *hi;
 	struct super_block *sb;
 	aufs_bindex_t bindex, bbot;
-	const unsigned char unlinked = !inode->i_nlink;
+	const unsigned char unlinked = !vfsub_inode_nlink(inode, AU_I_AUFS);
 
 	AuDebugOn(au_is_bad_inode(inode));
 

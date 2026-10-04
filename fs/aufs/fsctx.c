@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2022 Junjiro R. Okajima
+ * Copyright (C) 2022-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -95,7 +95,8 @@ static int au_fsctx_reconfigure(struct fs_context *fc)
 out:
 	inode_unlock(inode);
 	err = cvt_err(err);
-	AuTraceErr(err);
+	if (unlikely(err))
+		pr_err("remount err %d\n", err);
 
 	return err;
 }
@@ -1079,9 +1080,10 @@ out:
  */
 static inline unsigned int is_colonopt(char *str)
 {
-#define do_test(name)					\
-	if (!strncmp(str, name ":", sizeof(name)))	\
-		return sizeof(name) - 1
+#define do_test(name) do {					\
+		if (!strncmp(str, name ":", sizeof(name)))	\
+			return sizeof(name) - 1;		\
+	} while (0)
 	do_test("br");
 	do_test("add");
 	do_test("ins");

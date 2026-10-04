@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -791,7 +791,7 @@ int au_alloc_root(struct super_block *sb)
 	inode->i_op = aufs_iop + AuIop_DIR; /* with getattr by default */
 	inode->i_fop = &aufs_dir_fop;
 	inode->i_mode = S_IFDIR;
-	au_init_nlink(inode, 2);
+	vfsub_inode_nlink_init(inode, 2);
 	unlock_new_inode(inode);
 
 	root = d_make_root(inode);
