@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -628,7 +628,7 @@ int au_pin_hdir_relock(struct au_pin *p)
 			continue;
 		if (d_is_positive(h_d[i])) {
 			h_i = d_inode(h_d[i]);
-			err = !h_i->i_nlink;
+			err = !vfsub_inode_nlink(h_i, AU_I_BRANCH);
 		}
 	}
 
@@ -638,7 +638,13 @@ out:
 
 static void au_pin_hdir_set_owner(struct au_pin *p, struct task_struct *task)
 {
+	AuRwMustWriteLock(&p->hdir->hi_inode->i_rwsem);
+#ifndef CONFIG_PREEMPT_RT
 	atomic_long_set(&p->hdir->hi_inode->i_rwsem.owner, (long)task);
+#else
+	p->hdir->hi_inode->i_rwsem.rwbase.rtmutex.owner = task;
+	smp_mb(); /* advertise the owner */
+#endif
 }
 
 void au_pin_hdir_acquire_nest(struct au_pin *p)
@@ -933,7 +939,7 @@ static int aufs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 			struct iattr *ia)
 {
 	int err;
-	struct inode *inode, *delegated;
+	struct inode *inode;
 	struct super_block *sb;
 	struct file *file;
 	struct au_icpup_args *a;
@@ -994,16 +1000,20 @@ static int aufs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 	}
 
 	a->h_path.mnt = au_sbr_mnt(sb, a->btgt);
+	err = vfsub_mnt_want_write(a->h_path.mnt);
+	if (unlikely(err))
+		goto out_unlock;
+
 	if ((ia->ia_valid & (ATTR_MODE | ATTR_CTIME))
 	    == (ATTR_MODE | ATTR_CTIME)) {
 		err = security_path_chmod(&a->h_path, ia->ia_mode);
 		if (unlikely(err))
-			goto out_unlock;
+			goto out_mnt_write;
 	} else if ((ia->ia_valid & (ATTR_UID | ATTR_GID))
 		   && (ia->ia_valid & ATTR_CTIME)) {
 		err = security_path_chown(&a->h_path, ia->ia_uid, ia->ia_gid);
 		if (unlikely(err))
-			goto out_unlock;
+			goto out_mnt_write;
 	}
 
 	if (ia->ia_valid & ATTR_SIZE) {
@@ -1019,18 +1029,8 @@ static int aufs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		inode_unlock(a->h_inode);
 		err = vfsub_trunc(&a->h_path, ia->ia_size, ia->ia_valid, f);
 		inode_lock_nested(a->h_inode, AuLsc_I_CHILD);
-	} else {
-		delegated = NULL;
-		while (1) {
-			err = vfsub_notify_change(&a->h_path, ia, &delegated);
-			if (delegated) {
-				err = break_deleg_wait(&delegated);
-				if (!err)
-					continue;
-			}
-			break;
-		}
-	}
+	} else
+		err = vfsub_notify_change(&a->h_path, ia);
 	/*
 	 * regardless aufs 'acl' option setting.
 	 * why don't all acl-aware fs call this func from their ->setattr()?
@@ -1042,6 +1042,8 @@ static int aufs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 	if (!err)
 		au_cpup_attr_changeable(inode);
 
+out_mnt_write:
+	vfsub_mnt_drop_write(a->h_path.mnt);
 out_unlock:
 	inode_unlock(a->h_inode);
 	au_unpin(&a->pin);
@@ -1173,12 +1175,11 @@ static void au_refresh_iattr(struct inode *inode, struct kstat *st,
 
 	au_cpup_attr_nlink(inode, /*force*/0);
 	if (S_ISDIR(inode->i_mode)) {
-		n = inode->i_nlink;
+		n = vfsub_inode_nlink(inode, AU_I_AUFS);
 		n -= nlink;
 		n += st->nlink;
-		smp_mb(); /* for i_nlink */
 		/* 0 can happen */
-		au_set_nlink(inode, n);
+		vfsub_set_nlink(inode, n);
 	}
 
 	spin_lock(&inode->i_lock);
@@ -1303,7 +1304,8 @@ static int aufs_getattr(struct mnt_idmap *idmap, const struct path *path,
 	if (!err) {
 		if (positive)
 			au_refresh_iattr(inode, st,
-					 d_inode(h_path.dentry)->i_nlink);
+					 vfsub_inode_nlink(d_inode(h_path.dentry),
+							   AU_I_BRANCH));
 		goto out_fill; /* success */
 	}
 	AuTraceErr(err);
