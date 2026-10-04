@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -31,7 +31,11 @@
 #define au_rwsem	rw_semaphore
 
 /* to debug easier, do not make them inlined functions */
+#ifndef CONFIG_PREEMPT_RT
 #define AuRwMustNoWaiters(rw)	AuDebugOn(rwsem_is_contended(rw))
+#else
+AuStubVoid(AuRwMustNoWaiters, struct rw_semaphore *rw)
+#endif
 
 #ifdef CONFIG_LOCKDEP
 /* rwsem_is_locked() is unusable */
