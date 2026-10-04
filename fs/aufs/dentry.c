@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -86,7 +73,7 @@ real_lookup:
 		 /* && h_inode */
 		 && !au_dr_lkup_h_ino(args, bindex, h_inode->i_ino)) {
 		AuDbg("b%d %pd ignored hi%llu\n", bindex, h_dentry,
-		      (unsigned long long)h_inode->i_ino);
+		      h_inode->i_ino);
 		goto out_neg;
 	}
 
@@ -317,7 +304,7 @@ out:
 
 /* subset of struct inode */
 struct au_iattr {
-	unsigned long		i_ino;
+	u64			i_ino;
 	/* unsigned int		i_nlink; */
 	kuid_t			i_uid;
 	kgid_t			i_gid;

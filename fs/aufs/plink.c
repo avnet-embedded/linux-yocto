@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -150,7 +137,7 @@ void au_plink_list(struct super_block *sb)
 		hbl = sbinfo->si_plink + i;
 		hlist_bl_lock(hbl);
 		hlist_bl_for_each_entry(icntnr, pos, hbl, plink)
-			AuDbg("%lu\n", icntnr->vfs_inode.i_ino);
+			AuDbg("%llu\n", icntnr->vfs_inode.i_ino);
 		hlist_bl_unlock(hbl);
 	}
 }
@@ -199,7 +186,7 @@ static int plink_name(char *name, int len, struct inode *inode,
 	struct inode *h_inode;
 
 	h_inode = au_h_iptr(inode, bindex);
-	rlen = snprintf(name, len, "%lu.%lu", inode->i_ino, h_inode->i_ino);
+	rlen = snprintf(name, len, "%llu.%llu", inode->i_ino, h_inode->i_ino);
 	return rlen;
 }
 
