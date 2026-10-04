@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -30,21 +17,23 @@ static struct file *(*backing_file_func)(struct super_block *sb);
  */
 int au_test_loopback_overlap(struct super_block *sb, struct dentry *h_adding)
 {
+	int ret;
 	struct super_block *h_sb;
 	struct file *backing_file;
 
+	ret = 0;
 	if (unlikely(!backing_file_func)) {
 		/* don't load "loop" module here */
 		backing_file_func = symbol_get(loop_backing_file);
 		if (unlikely(!backing_file_func))
 			/* "loop" module is not loaded */
-			return 0;
+			goto out;
 	}
 
 	h_sb = h_adding->d_sb;
 	backing_file = backing_file_func(h_sb);
 	if (!backing_file)
-		return 0;
+		goto out;
 
 	h_adding = backing_file->f_path.dentry;
 	/*
@@ -52,8 +41,15 @@ int au_test_loopback_overlap(struct super_block *sb, struct dentry *h_adding)
 	 * in this case aufs cannot detect the loop.
 	 */
 	if (unlikely(h_adding->d_sb == sb))
-		return 1;
-	return !!au_test_subdir(h_adding, sb->s_root);
+		ret = 1;
+	else
+		ret = !!au_test_subdir(h_adding, sb->s_root);
+
+	/* correspond to get_file() in loop_backing_file() */
+	fput(backing_file);
+
+out:
+	return ret;
 }
 
 /* true if a kernel thread named 'loop[0-9].*' accesses a file */

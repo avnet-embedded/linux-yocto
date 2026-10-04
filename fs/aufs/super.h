@@ -1,19 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -27,7 +14,6 @@
 
 #include <linux/fs.h>
 #include <linux/kobject.h>
-#include "hbl.h"
 #include "lcnt.h"
 #include "rwsem.h"
 #include "wkq.h"
@@ -390,20 +376,6 @@ static inline void au_sbilist_fin(void)
 	AuRwDestroy(&au_sbilist_lock);
 }
 
-static inline void au_sbilist_add(struct super_block *sb)
-{
-	au_rw_write_lock(&au_sbilist_lock);
-	hlist_add_head(&au_sbi(sb)->si_list, &au_sbilist);
-	au_rw_write_unlock(&au_sbilist_lock);
-}
-
-static inline void au_sbilist_del(struct super_block *sb)
-{
-	au_rw_write_lock(&au_sbilist_lock);
-	hlist_del(&au_sbi(sb)->si_list);
-	au_rw_write_unlock(&au_sbilist_lock);
-}
-
 #ifdef CONFIG_AUFS_MAGIC_SYSRQ
 static inline void au_sbilist_write_lock(void)
 {
@@ -424,7 +396,9 @@ static inline void au_sbilist_read_unlock(void)
 {
 	au_rw_read_unlock(&au_sbilist_lock);
 }
+
 #define AuGFP_SBILIST	GFP_ATOMIC
+
 #else
 AuStubVoid(au_sbilist_write_lock, void)
 AuStubVoid(au_sbilist_write_unlock, void)
@@ -432,15 +406,29 @@ AuStubVoid(au_sbilist_read_lock, void)
 AuStubVoid(au_sbilist_read_unlock, void)
 #define AuGFP_SBILIST	GFP_NOFS
 #endif /* CONFIG_AUFS_MAGIC_SYSRQ */
+
+static inline void au_sbilist_add(struct super_block *sb)
+{
+	au_rw_write_lock(&au_sbilist_lock);
+	hlist_add_head(&au_sbi(sb)->si_list, &au_sbilist);
+	au_rw_write_unlock(&au_sbilist_lock);
+}
+
+static inline void au_sbilist_del(struct super_block *sb)
+{
+	au_rw_write_lock(&au_sbilist_lock);
+	hlist_del(&au_sbi(sb)->si_list);
+	au_rw_write_unlock(&au_sbilist_lock);
+}
 #else
 AuStubVoid(au_sbilist_init, void)
 AuStubVoid(au_sbilist_fin, void)
-AuStubVoid(au_sbilist_add, struct super_block *sb)
-AuStubVoid(au_sbilist_del, struct super_block *sb)
 AuStubVoid(au_sbilist_write_lock, void)
 AuStubVoid(au_sbilist_write_unlock, void)
 AuStubVoid(au_sbilist_read_lock, void)
 AuStubVoid(au_sbilist_read_unlock, void)
+AuStubVoid(au_sbilist_add, struct super_block *sb)
+AuStubVoid(au_sbilist_del, struct super_block *sb)
 #define AuGFP_SBILIST	GFP_NOFS
 #endif
 
