@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -149,7 +149,6 @@ static void au_ren_rev_diropq(int err, struct au_ren_args *a)
 static void au_ren_rev_rename(int err, struct au_ren_args *a)
 {
 	int rerr;
-	struct inode *delegated;
 	struct path h_ppath = {
 		.dentry	= a->src_h_parent,
 		.mnt	= a->h_path.mnt
@@ -162,15 +161,9 @@ static void au_ren_rev_rename(int err, struct au_ren_args *a)
 		return;
 	}
 
-	delegated = NULL;
 	rerr = vfsub_rename(a->dst_h_dir,
 			    au_h_dptr(a->src_dentry, a->btgt),
-			    a->src_h_dir, &a->h_path, &delegated, a->flags);
-	if (unlikely(rerr == -EWOULDBLOCK)) {
-		pr_warn("cannot retry for NFSv4 delegation"
-			" for an internal rename\n");
-		iput(delegated);
-	}
+			    a->src_h_dir, &a->h_path, a->flags);
 	d_drop(a->h_path.dentry);
 	dput(a->h_path.dentry);
 	/* au_set_h_dptr(a->src_dentry, a->btgt, NULL); */
@@ -181,7 +174,6 @@ static void au_ren_rev_rename(int err, struct au_ren_args *a)
 static void au_ren_rev_whtmp(int err, struct au_ren_args *a)
 {
 	int rerr;
-	struct inode *delegated;
 	struct path h_ppath = {
 		.dentry	= a->dst_h_parent,
 		.mnt	= a->h_path.mnt
@@ -199,14 +191,8 @@ static void au_ren_rev_whtmp(int err, struct au_ren_args *a)
 		return;
 	}
 
-	delegated = NULL;
 	rerr = vfsub_rename(a->dst_h_dir, a->h_dst, a->dst_h_dir, &a->h_path,
-			    &delegated, a->flags);
-	if (unlikely(rerr == -EWOULDBLOCK)) {
-		pr_warn("cannot retry for NFSv4 delegation"
-			" for an internal rename\n");
-		iput(delegated);
-	}
+			    a->flags);
 	d_drop(a->h_path.dentry);
 	dput(a->h_path.dentry);
 	if (!rerr)
@@ -238,21 +224,13 @@ static int au_ren_or_cpup(struct au_ren_args *a)
 {
 	int err;
 	struct dentry *d;
-	struct inode *delegated;
 
 	d = a->src_dentry;
 	if (au_dbtop(d) == a->btgt) {
 		a->h_path.dentry = a->dst_h_dentry;
 		AuDebugOn(au_dbtop(d) != a->btgt);
-		delegated = NULL;
 		err = vfsub_rename(a->src_h_dir, au_h_dptr(d, a->btgt),
-				   a->dst_h_dir, &a->h_path, &delegated,
-				   a->flags);
-		if (unlikely(err == -EWOULDBLOCK)) {
-			pr_warn("cannot retry for NFSv4 delegation"
-				" for an internal rename\n");
-			iput(delegated);
-		}
+				   a->dst_h_dir, &a->h_path, a->flags);
 	} else
 		BUG();
 
@@ -651,7 +629,7 @@ static int au_may_ren(struct au_ren_args *a)
 		if (unlikely(d_is_negative(a->dst_h_dentry)))
 			goto out;
 		h_inode = d_inode(a->dst_h_dentry);
-		if (h_inode->i_nlink)
+		if (vfsub_inode_nlink(h_inode, AU_I_BRANCH))
 			err = au_may_del(a->dst_dentry, a->btgt,
 					 a->dst_h_parent, isdir);
 	}
@@ -1048,7 +1026,7 @@ int aufs_rename(struct mnt_idmap *idmap,
 		 * If it is a dir, VFS unhash it before this
 		 * function. It means we cannot rely upon d_unhashed().
 		 */
-		if (unlikely(!a->dst_inode->i_nlink))
+		if (unlikely(!vfsub_inode_nlink(a->dst_inode, AU_I_AUFS)))
 			goto out_unlock;
 		if (!au_ftest_ren(a->auren_flags, ISDIR_DST)) {
 			err = au_d_hashed_positive(a->dst_dentry);
