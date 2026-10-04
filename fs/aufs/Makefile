@@ -6,6 +6,8 @@ include ${src}/conf.mk
 endif
 -include ${src}/priv_def.mk
 
+# For aufs as an outsider, it is still useful to specify CFLAGS from
+# the command-line especially in its module building.
 ccflags-y += ${EXTRA_CFLAGS}
 # cf. include/linux/kernel.h
 # enable pr_debug

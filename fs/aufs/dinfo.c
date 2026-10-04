@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -41,7 +28,7 @@ struct au_dinfo *au_di_alloc(struct super_block *sb, unsigned int lsc)
 	nbr = au_sbbot(sb) + 1;
 	if (nbr <= 0)
 		nbr = 1;
-	dinfo->di_hdentry = kcalloc(nbr, sizeof(*dinfo->di_hdentry), GFP_NOFS);
+	dinfo->di_hdentry = kzalloc_objs(*dinfo->di_hdentry, nbr, GFP_NOFS);
 	if (dinfo->di_hdentry) {
 		au_rw_write_lock_nested(&dinfo->di_rwsem, lsc);
 		dinfo->di_btop = -1;
@@ -66,6 +53,8 @@ void au_di_free(struct au_dinfo *dinfo)
 {
 	struct au_hdentry *p;
 	aufs_bindex_t bbot, bindex;
+
+	AuDebugOn(dinfo->di_htmpfile);
 
 	/* dentry may not be revalidated */
 	bindex = dinfo->di_btop;

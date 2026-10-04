@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -30,7 +17,6 @@ void au_si_free(struct kobject *kobj)
 {
 	int i;
 	struct au_sbinfo *sbinfo;
-	char *locked __maybe_unused; /* debug only */
 
 	sbinfo = container_of(kobj, struct au_sbinfo, si_kobj);
 	for (i = 0; i < AuPlink_NHASH; i++)
@@ -62,12 +48,12 @@ struct au_sbinfo *au_si_alloc(struct super_block *sb)
 	int err, i;
 
 	err = -ENOMEM;
-	sbinfo = kzalloc(sizeof(*sbinfo), GFP_NOFS);
+	sbinfo = kzalloc_obj(*sbinfo, GFP_NOFS);
 	if (unlikely(!sbinfo))
 		goto out;
 
 	/* will be reallocated separately */
-	sbinfo->si_branch = kzalloc(sizeof(*sbinfo->si_branch), GFP_NOFS);
+	sbinfo->si_branch = kzalloc_obj(*sbinfo->si_branch, GFP_NOFS);
 	if (unlikely(!sbinfo->si_branch))
 		goto out_sbinfo;
 
