@@ -1,19 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -322,6 +309,16 @@ static inline void au_vm_file_reset(struct vm_area_struct *vma,
 	fput(file);
 }
 #endif /* CONFIG_MMU */
+
+#ifndef CONFIG_MMU
+static inline unsigned long
+mm_get_unmapped_area_vmflags(struct file *filp, unsigned long addr,
+			     unsigned long len, unsigned long pgoff,
+			     unsigned long flags, vm_flags_t vm_flags)
+{
+	return addr;
+}
+#endif
 
 #endif /* __KERNEL__ */
 #endif /* __AUFS_FILE_H__ */

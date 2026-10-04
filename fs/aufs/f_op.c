@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -566,6 +553,50 @@ out:
 
 /* ---------------------------------------------------------------------- */
 
+/* called befrore aufs_mmap() */
+static unsigned long
+aufs_get_unmapped_area(struct file *file, unsigned long addr,
+		       unsigned long len, unsigned long pgoff,
+		       unsigned long flags)
+{
+	unsigned long ul;
+	const unsigned char wlock = !!(file->f_mode & FMODE_WRITE);
+	struct inode *inode;
+	struct super_block *sb;
+	struct file *h_file;
+	unsigned long (*guma)(struct file *file, unsigned long addr,
+			      unsigned long len, unsigned long pgoff,
+			      unsigned long flags);
+
+	inode = file_inode(file);
+	sb = inode->i_sb;
+	lockdep_off();
+	si_read_lock(sb, AuLock_NOPLMW);
+
+	h_file = au_write_pre(file, /*do_ready*/wlock, /*wpre*/NULL);
+	lockdep_on();
+	ul = PTR_ERR(h_file);
+	if (IS_ERR(h_file))
+		goto out;
+
+	guma = h_file->f_op->get_unmapped_area;
+	if (!guma)
+		guma = mm_get_unmapped_area;
+	ul = guma(h_file, addr, len, pgoff, flags);
+
+	lockdep_off();
+	ii_write_unlock(inode);
+	lockdep_on();
+	fput(h_file);
+
+out:
+	lockdep_off();
+	si_read_unlock(sb);
+	lockdep_on();
+	AuTraceErr(ul);
+	return ul;
+}
+
 /*
  * The locking order around current->mmap_sem.
  * - in most and regular cases
@@ -779,6 +810,7 @@ const struct file_operations aufs_file_fop = {
 	.release	= aufs_release_nondir,
 	.fsync		= aufs_fsync_nondir,
 	.fasync		= aufs_fasync,
+	.get_unmapped_area = aufs_get_unmapped_area,
 	.setfl		= aufs_setfl,
 	.splice_write	= aufs_splice_write,
 	.splice_read	= aufs_splice_read,

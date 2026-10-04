@@ -1,5 +1,5 @@
 
-Aufs6 -- advanced multi layered unification filesystem version 6.x
+Aufs7 -- advanced multi layered unification filesystem version 7.x
 http://aufs.sf.net
 Junjiro R. Okajima
 
@@ -15,29 +15,21 @@ approaches to aufs1's.
 Unionfs was being developed by Professor Erez Zadok at Stony Brook
 University and his team.
 
-Aufs6 supports linux-v6.0 and later, try aufs6.0 branch in
-aufs-linux.git or aufs-standalone.git.
-If you want older kernel version support,
-- for linux-v5.x series, try aufs-linux.git or aufs-standalone.git
+Aufs7 supports linux-v7.0 and later, If you want older kernel version
+support,
+- for linux-v6.x series, try aufs6.* branches in aufs-linux.git or
+  aufs-standalone.git
+- for linux-v5.x series, try aufs5.* branches in aufs-linux.git or
+  aufs-standalone.git
 - for linux-v4.x series, try aufs4-linux.git or aufs4-standalone.git
 - for linux-v3.x series, try aufs3-linux.git or aufs3-standalone.git
 - for linux-v2.6.16 and later, try aufs2-2.6.git, aufs2-standalone.git
   or aufs1 from CVS on SourceForge.
 
-Note: the name of aufs5-linux.git and aufs5-standalone.git on github
-      were changed. Now they are aufs-linux.git and
-      aufs-standalone.git and they contain aufs5 and later branches.
-
 Note: it becomes clear that "Aufs was rejected. Let's give it up."
       According to Christoph Hellwig, linux rejects all union-type
       filesystems but UnionMount.
 <http://marc.info/?l=linux-kernel&m=123938533724484&w=2>
-
-PS. Al Viro seems have a plan to merge aufs as well as overlayfs and
-    UnionMount, and he pointed out an issue around a directory mutex
-    lock and aufs addressed it. But it is still unsure whether aufs will
-    be merged (or any other union solution).
-<http://marc.info/?l=linux-kernel&m=136312705029295&w=1>
 
 
 1. Features
@@ -86,7 +78,7 @@ Also there are many enhancements in aufs, such as:
 - userspace wrapper for pathconf(3)/fpathconf(3) with _PC_LINK_MAX.
 - and more...
 
-Currently these features are dropped temporary from aufs6.
+Currently these features are dropped temporary from aufs7.
 See design/08plan.txt in detail.
 - nested mount, i.e. aufs as readonly no-whiteout branch of another aufs
   (robr)
@@ -104,7 +96,7 @@ Features or just an idea in the future (see also design/*.txt),
 
 2. Download
 ----------------------------------------
-There are three GIT trees for aufs6, aufs-linux.git,
+There are three GIT trees for aufs7, aufs-linux.git,
 aufs-standalone.git, and aufs-util.git.
 While the aufs-util is always necessary, you need either of aufs-linux
 or aufs-standalone.
@@ -112,7 +104,7 @@ or aufs-standalone.
 The aufs-linux tree includes the whole linux mainline GIT tree,
 git://git.kernel.org/.../torvalds/linux.git.
 And you cannot select CONFIG_AUFS_FS=m for this version, eg. you cannot
-build aufs6 as an external kernel module.
+build aufs7 as an external kernel module.
 Several extra patches are not included in this tree. Only
 aufs-standalone tree contains them. They are described in the later
 section "Configuration and Compilation."
@@ -121,46 +113,46 @@ On the other hand, the aufs-standalone tree has only aufs source files
 and necessary patches, and you can select CONFIG_AUFS_FS=m.
 But you need to apply all aufs patches manually.
 
-You will find GIT branches whose name is in form of "aufs6.x" where "x"
-represents the linux kernel version, "linux-6.x". For instance,
-"aufs6.0" is for linux-6.0. For latest "linux-6.x-rcN", use
-"aufs6.x-rcN" branch.
+You will find GIT branches whose name is in form of "aufs7.x" where "x"
+represents the linux kernel version, "linux-v7.x". For instance,
+"aufs7.0" is for linux-v7.0. For latest "linux-v7.x-rcN", use
+"aufs7.x-rcN" branch.
 
 o aufs-linux tree
 $ git clone --reference /your/linux/git/tree \
 	git://github.com/sfjro/aufs-linux.git aufs-linux.git
 - if you don't have linux GIT tree, then remove "--reference ..."
 $ cd aufs-linux.git
-$ git checkout origin/aufs6.0
+$ git checkout origin/aufs7.0
 
 Or You may want to directly git-pull aufs into your linux GIT tree, and
 leave the patch-work to GIT.
 $ cd /your/linux/git/tree
 $ git remote add aufs git://github.com/sfjro/aufs-linux.git
 $ git fetch aufs
-$ git checkout -b my6.0 v6.0
+$ git checkout -b your7.0 v7.0
 $ (add your local change...)
-$ git pull aufs aufs6.0
-- now you have v6.0 + your_changes + aufs6.0 in you my6.0 branch.
+$ git pull aufs aufs7.0
+- now you have v7.0 + your_changes + aufs7.0 in your7.0 branch.
 - you may need to solve some conflicts between your_changes and
-  aufs6.0. in this case, git-rerere is recommended so that you can
-  solve the similar conflicts automatically when you upgrade to 6.1 or
+  aufs7.0. in this case, git-rerere is recommended so that you can
+  solve the similar conflicts automatically when you upgrade to 7.1 or
   later in the future.
 
 o aufs-standalone tree
 $ git clone git://github.com/sfjro/aufs-standalone.git aufs-standalone.git
 $ cd aufs-standalone.git
-$ git checkout origin/aufs6.0
+$ git checkout origin/aufs7.0
 
 o aufs-util tree
 $ git clone git://git.code.sf.net/p/aufs/aufs-util aufs-util.git
 - note that the public aufs-util.git is on SourceForge instead of
   GitHUB.
 $ cd aufs-util.git
-$ git checkout origin/aufs6.0
+$ git checkout origin/aufs7.0
 
-Note: The 6.x-rcN branch is to be used with `rc' kernel versions ONLY.
-The minor version number, 'x' in '6.x', of aufs may not always
+Note: The 7.x-rcN branch is to be used with `rc' kernel versions ONLY.
+The minor version number, 'x' in '7.x', of aufs may not always
 follow the minor version number of the kernel.
 Because changes in the kernel that cause the use of a new
 minor version number do not always require changes to aufs-util.
@@ -172,8 +164,8 @@ In this case, you should git-checkout the branch for the
 nearest lower number.
 
 For (an unreleased) example:
-If you are using "linux-6.10" and the "aufs6.10" branch
-does not exist in aufs-util repository, then "aufs6.9", "aufs6.8"
+If you are using "linux-v7.10" and the "aufs7.10" branch
+does not exist in aufs-util repository, then "aufs7.9", "aufs7.8"
 or something numerically smaller is the branch for your kernel.
 
 Also you can view all branches by
@@ -197,22 +189,19 @@ For aufs-linux tree,
 	CONFIG_LOCKDEP_BITS=21
 	CONFIG_LOCKDEP_CHAINS_BITS=21
 	CONFIG_LOCKDEP_STACK_TRACE_BITS=24
-  Also you will need to expand some constant values in LOCKDEP. Refer
-  to lockdep-debug.patch in aufs-standalone.git.
 
 For aufs-standalone tree,
 There are several ways to build.
 
 1.
-- apply ./aufs6-kbuild.patch to your kernel source files.
-- apply ./aufs6-base.patch too.
-- apply ./aufs6-mmap.patch too.
-- apply ./aufs6-standalone.patch too, if you have a plan to set
-  CONFIG_AUFS_FS=m. otherwise you don't need ./aufs-standalone.patch.
+- apply ./aufs7-kbuild.patch to your kernel source files.
+- apply ./aufs7-base.patch too.
+- apply ./aufs7-mmap.patch too.
+- apply ./aufs7-standalone.patch too, if you have a plan to set
+  CONFIG_AUFS_FS=m. otherwise you don't need ./aufs7-standalone.patch.
 - copy ./{Documentation,fs,include/uapi/linux/aufs_type.h} files to your
   kernel source tree. Never copy $PWD/include/uapi/linux/Kbuild.
-- enable CONFIG_AUFS_FS, you can select either
-  =m or =y.
+- enable CONFIG_AUFS_FS, you can select either =m or =y.
 - and build your kernel as usual.
 - install the built kernel.
 - install the header files too by "make headers_install" to the
@@ -222,9 +211,9 @@ There are several ways to build.
 
 2.
 - module only (CONFIG_AUFS_FS=m).
-- apply ./aufs6-base.patch to your kernel source files.
-- apply ./aufs6-mmap.patch too.
-- apply ./aufs6-standalone.patch too.
+- apply ./aufs7-base.patch to your kernel source files.
+- apply ./aufs7-mmap.patch too.
+- apply ./aufs7-standalone.patch too.
 - build your kernel, don't forget "make headers_install", and reboot.
 - edit ./config.mk and set other aufs configurations if necessary.
   Note: You should read $PWD/fs/aufs/Kconfig carefully which describes
@@ -240,7 +229,7 @@ There are several ways to build.
     available in aufs standalone version's Makefile only), or copy
     $PWD/usr/include/linux/aufs_type.h to /usr/include/linux or wherever
     you like manually. By default, the target directory is $PWD/usr.
-- no need to apply aufs6-kbuild.patch, nor copying source files to your
+- no need to apply aufs7-kbuild.patch, nor copying source files to your
   kernel source tree.
 
 Note: The header file aufs_type.h is necessary to build aufs-util
@@ -262,7 +251,7 @@ And then,
 
 There several other patches in aufs-standalone.git. They are all
 optional. When you meet some problems, they will help you.
-- aufs6-loopback.patch
+- aufs7-loopback.patch
   Supports a nested loopback mount in a branch-fs. This patch is
   unnecessary until aufs produces a message like "you may want to try
   another patch for loopback file".
