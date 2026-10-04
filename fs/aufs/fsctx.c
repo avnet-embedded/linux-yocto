@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2022-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2022-2026 Junjiro R. Okajima
  */
 
 /*
@@ -344,6 +331,8 @@ static void au_fsctx_dump(struct au_opts *opts)
 
 /* ---------------------------------------------------------------------- */
 
+#define fsparam_path(NAME, OPT)	__fsparam(fs_param_is_string, NAME, OPT, 0, NULL)
+
 /*
  * For conditionally compiled mount options.
  * Instead of fsparam_flag_no(), use this macro to distinguish ignore_silent.
@@ -358,24 +347,24 @@ const struct fs_parameter_spec aufs_fsctx_paramspec[] = {
 	/* "add=%d:%s" or "ins=%d:%s" */
 	fsparam_string("add", Opt_add),
 	fsparam_string("ins", Opt_add),
-	fsparam_string("append", Opt_append),
-	fsparam_string("prepend", Opt_prepend),
+	fsparam_path("append", Opt_append),
+	fsparam_path("prepend", Opt_prepend),
 
-	fsparam_string("del", Opt_del),
+	fsparam_path("del", Opt_del),
 	/* fsparam_s32("idel", Opt_idel), */
-	fsparam_string("mod", Opt_mod),
+	fsparam_path("mod", Opt_mod),
 	/* fsparam_string("imod", Opt_imod), */
 
 	fsparam_s32("dirwh", Opt_dirwh),
 
-	fsparam_string("xino", Opt_xino),
+	fsparam_path("xino", Opt_xino),
 	fsparam_flag("noxino", Opt_noxino),
 	fsparam_flag_no("trunc_xino", Opt_trunc_xino),
 	/* "trunc_xino_v=%d:%d" */
 	/* fsparam_string("trunc_xino_v", Opt_trunc_xino_v), */
-	fsparam_string("trunc_xino", Opt_trunc_xino_path),
+	fsparam_path("trunc_xino", Opt_trunc_xino_path),
 	fsparam_s32("itrunc_xino", Opt_itrunc_xino),
-	/* fsparam_string("zxino", Opt_zxino), */
+	/* fsparam_path("zxino", Opt_zxino), */
 	fsparam_flag_no("trunc_xib", Opt_trunc_xib),
 
 #ifdef CONFIG_PROC_FS
@@ -1080,9 +1069,10 @@ out:
  */
 static inline unsigned int is_colonopt(char *str)
 {
-#define do_test(name)					\
-	if (!strncmp(str, name ":", sizeof(name)))	\
-		return sizeof(name) - 1
+#define do_test(name) do {					\
+		if (!strncmp(str, name ":", sizeof(name)))	\
+			return sizeof(name) - 1;		\
+	} while (0)
 	do_test("br");
 	do_test("add");
 	do_test("ins");
@@ -1200,7 +1190,7 @@ int aufs_fsctx_init(struct fs_context *fc)
 
 	/* they will be freed by au_fsctx_free() */
 	err = -ENOMEM;
-	a = kzalloc(sizeof(*a), GFP_NOFS);
+	a = kzalloc_obj(*a, GFP_NOFS);
 	if (unlikely(!a))
 		goto out;
 	a->bindex = 0;

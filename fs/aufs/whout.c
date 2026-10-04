@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -274,7 +261,6 @@ static void au_wh_clean(struct inode *h_dir, struct path *whpath,
 		err = vfsub_rmdir(h_dir, whpath);
 	else
 		err = vfsub_unlink(h_dir, whpath, /*force*/0);
-
 	if (unlikely(err))
 		pr_warn("failed removing %pd (%d), ignored.\n",
 			whpath->dentry, err);
@@ -630,7 +616,7 @@ static void kick_reinit_br_wh(struct super_block *sb, struct au_branch *br)
 		goto out;
 
 	/* ignore ENOMEM */
-	arg = kmalloc(sizeof(*arg), GFP_NOFS);
+	arg = kmalloc_obj(*arg, GFP_NOFS);
 	if (arg) {
 		/*
 		 * dec(wh_running), kfree(arg) and dec(br_count)
@@ -680,6 +666,7 @@ static int link_or_create_wh(struct super_block *sb, aufs_bindex_t bindex,
 	wbr_wh_read_lock(wbr);
 	if (wbr->wbr_whbase) {
 		err = vfsub_link(wbr->wbr_whbase, h_dir, &h_path);
+		AuTraceErr(err);
 		if (!err || err != -EMLINK)
 			goto out;
 
@@ -906,7 +893,7 @@ struct au_whtmp_rmdir *au_whtmp_rmdir_alloc(struct super_block *sb, gfp_t gfp)
 
 	SiMustAnyLock(sb);
 
-	whtmp = kzalloc(sizeof(*whtmp), gfp);
+	whtmp = kzalloc_obj(*whtmp, gfp);
 	if (unlikely(!whtmp)) {
 		whtmp = ERR_PTR(-ENOMEM);
 		goto out;

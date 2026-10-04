@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -207,7 +194,7 @@ static int hn_gen_by_inode(char *name, unsigned int nlen, struct inode *inode,
 		AuDebugOn(!name);
 		au_iigen_dec(inode);
 		spin_lock(&inode->i_lock);
-		hlist_for_each_entry(d, &inode->i_dentry, d_alias) {
+		for_each_alias(d, inode) {
 			spin_lock(&d->d_lock);
 			dname = &d->d_name;
 			if (dname->len != nlen
@@ -442,7 +429,7 @@ static void au_hn_bh(void *_args)
 	AuDebugOn(!a->h_dir);
 	AuDebugOn(!a->dir);
 	AuDebugOn(!a->mask);
-	AuDbg("mask 0x%x, i%lu, hi%lu, hci%lu\n",
+	AuDbg("mask 0x%x, i%llu, hi%llu, hci%llu\n",
 	      a->mask, a->dir->i_ino, a->h_dir->i_ino,
 	      a->h_child_inode ? a->h_child_inode->i_ino : 0);
 

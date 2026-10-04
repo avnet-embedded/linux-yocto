@@ -1,19 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2025 Junjiro R. Okajima
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * Copyright (C) 2005-2026 Junjiro R. Okajima
  */
 
 /*
@@ -137,7 +124,7 @@ static struct au_branch *au_br_alloc(struct super_block *sb, int new_nbranch,
 	int err;
 
 	err = -ENOMEM;
-	add_branch = kzalloc(sizeof(*add_branch), GFP_NOFS);
+	add_branch = kzalloc_obj(*add_branch, GFP_NOFS);
 	if (unlikely(!add_branch))
 		goto out;
 	add_branch->br_xino = au_xino_alloc(/*nfile*/1);
@@ -149,8 +136,7 @@ static struct au_branch *au_br_alloc(struct super_block *sb, int new_nbranch,
 
 	if (au_br_writable(perm)) {
 		/* may be freed separately at changing the branch permission */
-		add_branch->br_wbr = kzalloc(sizeof(*add_branch->br_wbr),
-					     GFP_NOFS);
+		add_branch->br_wbr = kzalloc_obj(*add_branch->br_wbr, GFP_NOFS);
 		if (unlikely(!add_branch->br_wbr))
 			goto out_hnotify;
 	}
@@ -738,7 +724,7 @@ static int test_inode_busy(struct super_block *sb, aufs_bindex_t bindex,
 		    && au_h_iptr(i, bindex)
 		    && au_test_ibusy(i, btop, bbot)) {
 			err = -EBUSY;
-			AuVerbose(verbose, "busy i%lu\n", i->i_ino);
+			AuVerbose(verbose, "busy i%llu\n", i->i_ino);
 			AuDbgInode(i);
 		}
 		ii_read_unlock(i);
@@ -1360,8 +1346,7 @@ int au_br_mod(struct super_block *sb, struct au_opt_mod *mod, int remount,
 
 			if (unlikely(err)) {
 				rerr = -ENOMEM;
-				br->br_wbr = kzalloc(sizeof(*br->br_wbr),
-						     GFP_NOFS);
+				br->br_wbr = kzalloc_obj(*br->br_wbr, GFP_NOFS);
 				if (br->br_wbr)
 					rerr = au_wbr_init(br, sb, br->br_perm);
 				if (unlikely(rerr)) {
@@ -1374,7 +1359,7 @@ int au_br_mod(struct super_block *sb, struct au_opt_mod *mod, int remount,
 	} else if (au_br_writable(mod->perm)) {
 		/* ro --> rw */
 		err = -ENOMEM;
-		br->br_wbr = kzalloc(sizeof(*br->br_wbr), GFP_NOFS);
+		br->br_wbr = kzalloc_obj(*br->br_wbr, GFP_NOFS);
 		if (br->br_wbr) {
 			err = au_wbr_init(br, sb, mod->perm);
 			if (unlikely(err)) {
