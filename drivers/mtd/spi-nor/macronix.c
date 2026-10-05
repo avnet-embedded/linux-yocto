@@ -273,7 +273,7 @@ static int
 macronix_qpp4b_post_sfdp_fixups(struct spi_nor *nor)
 {
 	/* PP_1_1_4_4B is supported but missing in 4BAIT. */
-	struct spi_nor_flash_parameter *params = nor->params;
+	struct spi_nor_flash_parameter *params = spi_nor_get_params(nor, 0);
 
 	params->hwcaps.mask |= SNOR_HWCAPS_PP_1_1_4;
 	spi_nor_set_pp_settings(&params->page_programs[SNOR_CMD_PP_1_1_4],
