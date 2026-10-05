@@ -272,7 +272,7 @@ static int altera_mutex_probe(struct platform_device *pdev)
 	return 0;
 }
 
-static int altera_mutex_remove(struct platform_device *pdev)
+static void altera_mutex_remove(struct platform_device *pdev)
 {
 	struct altera_mutex *mutex = platform_get_drvdata(pdev);
 
@@ -282,7 +282,6 @@ static int altera_mutex_remove(struct platform_device *pdev)
 	spin_unlock(&list_lock);
 
 	platform_set_drvdata(pdev, NULL);
-	return 0;
 }
 
 static const struct of_device_id altera_mutex_match[] = {
