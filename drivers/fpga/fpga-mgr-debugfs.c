@@ -22,6 +22,8 @@
 
 #if IS_ENABLED(CONFIG_FPGA_MGR_DEBUG_FS)
 
+#include "fpga-mgr-debugfs.h"
+
 static struct dentry *fpga_mgr_debugfs_root;
 
 struct fpga_mgr_debugfs {
