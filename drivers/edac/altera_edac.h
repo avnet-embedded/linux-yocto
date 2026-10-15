@@ -412,6 +412,7 @@ struct altr_arria10_edac {
 	struct notifier_block	panic_notifier;
 	int sdm_qspi_sb_irq;
 	int sdm_qspi_db_irq;
+	bool is_s10;
 };
 
 #endif	/* #ifndef _ALTERA_EDAC_H */
