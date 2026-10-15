@@ -3135,9 +3135,7 @@ static int rvu_mbox_init(struct rvu *rvu, struct mbox_wq_info *mw,
 
 	err = cn20k_rvu_mbox_init(rvu, type, num);
 	if (err)
-		goto free_mem;
-
-	mutex_init(&rvu->mbox_lock);
+		goto free_bitmap;
 
 	mbox_regions = kcalloc(num, sizeof(void __iomem *), GFP_KERNEL);
 	if (!mbox_regions) {
@@ -3227,12 +3225,16 @@ unmap_regions:
 free_regions:
 	kfree(mbox_regions);
 free_qmem:
-	cn20k_free_mbox_memory(rvu);
-free_mem:
-	kfree(rvu->ng_rvu);
+	cn20k_free_mbox_memory_type(rvu, type);
 free_bitmap:
 	bitmap_free(pf_bmap);
 	return err;
+}
+
+static void rvu_free_cn20k_mbox_memory(struct rvu *rvu)
+{
+	if (is_cn20k(rvu->pdev))
+		cn20k_free_mbox_memory(rvu);
 }
 
 static void rvu_mbox_destroy(struct mbox_wq_info *mw)
@@ -4342,6 +4344,7 @@ static int rvu_enable_sriov(struct rvu *rvu)
 	if (err) {
 		rvu_disable_afvf_intr(rvu);
 		rvu_mbox_destroy(&rvu->afvf_wq_info);
+		cn20k_free_mbox_memory_type(rvu, TYPE_AFVF);
 		return err;
 	}
 
@@ -4497,6 +4500,7 @@ err_flr:
 err_mbox:
 	rvu_mbox_destroy(&rvu->afpf_wq_info);
 err_hwsetup:
+	rvu_free_cn20k_mbox_memory(rvu);
 	rvu_cgx_exit(rvu);
 	rvu_fwdata_exit(rvu);
 	rvu_mcs_exit(rvu);
@@ -4539,9 +4543,7 @@ static void rvu_remove(struct pci_dev *pdev)
 	pci_set_drvdata(pdev, NULL);
 
 	devm_kfree(&pdev->dev, rvu->hw);
-	if (is_cn20k(rvu->pdev))
-		cn20k_free_mbox_memory(rvu);
-	kfree(rvu->ng_rvu);
+	rvu_free_cn20k_mbox_memory(rvu);
 	devm_kfree(&pdev->dev, rvu);
 }
 
