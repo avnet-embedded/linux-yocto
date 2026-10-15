@@ -426,8 +426,6 @@ static int sdhci_am654_execute_tuning(struct mmc_host *mmc, u32 opcode)
 	}
 
 	err = sdhci_execute_tuning(mmc, opcode);
-	if (err)
-		return err;
 	/*
 	 * Tuning data remains in the buffer after tuning.
 	 * Do a command and data reset to get rid of it
@@ -441,7 +439,7 @@ static int sdhci_am654_execute_tuning(struct mmc_host *mmc, u32 opcode)
 		sdhci_writel(host, host->ier, SDHCI_SIGNAL_ENABLE);
 	}
 
-	return 0;
+	return err;
 }
 
 static u32 sdhci_am654_cqhci_irq(struct sdhci_host *host, u32 intmask)
