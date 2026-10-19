@@ -174,7 +174,7 @@ static int siul2_gpio_dir_in(struct gpio_chip *chip, unsigned int gpio)
 	struct siul2_gpio_dev *gpio_dev;
 	int ret = 0;
 
-	ret = pinctrl_gpio_direction_input(gpio);
+	ret = pinctrl_gpio_direction_input(chip, gpio);
 	if (ret)
 		return ret;
 
@@ -269,7 +269,7 @@ static int siul2_gpio_dir_out(struct gpio_chip *chip, unsigned int gpio,
 	gpio_dev = to_siul2_gpio_dev(chip);
 	siul2_gpio_set_val(chip, gpio, val);
 
-	ret = pinctrl_gpio_direction_output(gpio);
+	ret = pinctrl_gpio_direction_output(chip, gpio);
 	if (ret)
 		return ret;
 
