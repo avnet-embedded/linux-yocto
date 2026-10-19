@@ -48,12 +48,12 @@ enum fcs_certificate_test {
  * @rsp_data_sz: maximun size to store response data in bytes
  */
 struct fcs_mbox_send_cmd {
-	uint32_t mbox_cmd;
-	uint8_t urgent;
+	__u32 mbox_cmd;
+	__u8 urgent;
 	void *cmd_data;
-	uint16_t cmd_data_sz;
+	__u16 cmd_data_sz;
 	void *rsp_data;
-	uint16_t rsp_data_sz;
+	__u16 rsp_data_sz;
 };
 
 /**
@@ -61,7 +61,7 @@ struct fcs_mbox_send_cmd {
  * @data: placeholder of iotcl struct
  */
 struct fcs_placeholder {
-	uint32_t data[INTEL_FCS_IOCTL_PLACEHOLDER_SZ];
+	__u32 data[INTEL_FCS_IOCTL_PLACEHOLDER_SZ];
 };
 
 /**
@@ -69,7 +69,7 @@ struct fcs_placeholder {
  * @test_word: if set, do not write fuses, write to cache only.
  */
 struct intel_fcs_cert_test_word {
-	uint32_t test_word;
+	__u32 test_word;
 };
 
 /**
@@ -84,7 +84,7 @@ struct intel_fcs_cert_test_word {
 struct fcs_validation_request {
 	enum fcs_vab_img_type so_type;
 	void *src;
-	uint32_t size;
+	__u32 size;
 };
 
 /**
@@ -94,7 +94,7 @@ struct fcs_validation_request {
  */
 struct fcs_key_manage_request {
 	void *addr;
-	uint32_t size;
+	__u32 size;
 };
 
 /**
@@ -107,8 +107,8 @@ struct fcs_key_manage_request {
 struct fcs_certificate_request {
 	struct intel_fcs_cert_test_word test;
 	void *addr;
-	uint32_t size;
-	uint32_t c_status;
+	__u32 size;
+	__u32 c_status;
 };
 
 /**
@@ -119,8 +119,8 @@ struct fcs_certificate_request {
  */
 struct fcs_single_certificate_request {
 	struct intel_fcs_cert_test_word test;
-	uint8_t counter_type;
-	uint32_t counter_value;
+	__u8 counter_type;
+	__u32 counter_value;
 };
 
 /**
@@ -132,9 +132,9 @@ struct fcs_single_certificate_request {
  */
 struct fcs_data_encryption {
 	void *src;
-	uint32_t src_size;
+	__u32 src_size;
 	void *dst;
-	uint32_t dst_size;
+	__u32 dst_size;
 };
 
 /**
@@ -146,9 +146,9 @@ struct fcs_data_encryption {
  */
 struct fcs_data_decryption {
 	void *src;
-	uint32_t src_size;
+	__u32 src_size;
 	void *dst;
-	uint32_t dst_size;
+	__u32 dst_size;
 };
 
 /**
@@ -156,7 +156,7 @@ struct fcs_data_decryption {
  * @rndm: 8 words of random data.
  */
 struct fcs_random_number_gen {
-	uint32_t rndm[8];
+	__u32 rndm[8];
 };
 
 /**
@@ -165,8 +165,8 @@ struct fcs_random_number_gen {
  * @sid: the session ID
  */
 struct fcs_psgsigma_teardown {
-	bool teardown;
-	uint32_t sid;
+	__u8 teardown;
+	__u32 sid;
 };
 
 /**
@@ -175,8 +175,8 @@ struct fcs_psgsigma_teardown {
  * @chip_id_high: device chip ID high 32
  */
 struct fcs_attestation_chipid {
-	uint32_t chip_id_low;
-	uint32_t chip_id_high;
+	__u32 chip_id_low;
+	__u32 chip_id_high;
 };
 
 /**
@@ -184,7 +184,7 @@ struct fcs_attestation_chipid {
  * @resv_word: a reserve word required by firmware
  */
 struct intel_fcs_attestation_resv_word {
-	uint32_t resv_word;
+	__u32 resv_word;
 };
 
 /**
@@ -198,9 +198,9 @@ struct intel_fcs_attestation_resv_word {
 struct fcs_attestation_subkey {
 	struct intel_fcs_attestation_resv_word resv;
 	char *cmd_data;
-	uint32_t cmd_data_sz;
+	__u32 cmd_data_sz;
 	char *rsp_data;
-	uint32_t rsp_data_sz;
+	__u32 rsp_data_sz;
 };
 
 /**
@@ -214,9 +214,9 @@ struct fcs_attestation_subkey {
 struct fcs_attestation_measuerments {
 	struct intel_fcs_attestation_resv_word resv;
 	char *cmd_data;
-	uint32_t cmd_data_sz;
+	__u32 cmd_data_sz;
 	char *rsp_data;
-	uint32_t rsp_data_sz;
+	__u32 rsp_data_sz;
 };
 
 /**
@@ -228,7 +228,7 @@ struct fcs_attestation_measuerments {
 struct fcs_attestation_certificate {
 	int c_request;
 	char *rsp_data;
-	uint32_t rsp_data_sz;
+	__u32 rsp_data_sz;
 };
 
 /**
@@ -244,7 +244,7 @@ struct fcs_attestation_certificate_reload {
  * @checksum: 12 words of checksum calculated from rom patch area
  */
 struct fcs_rom_patch_sha384 {
-	uint32_t checksum[12];
+	__u32 checksum[12];
 };
 
 /**
@@ -252,26 +252,26 @@ struct fcs_rom_patch_sha384 {
  * @sid: the crypto service session ID
  */
 struct fcs_crypto_service_session {
-	uint32_t sid;
+	__u32 sid;
 };
 
 struct fcs_crypto_key_header {
-	uint32_t sid;
-	uint32_t res1;
-	uint32_t res2;
+	__u32 sid;
+	__u32 res1;
+	__u32 res2;
 };
 
 struct fcs_crypto_key_import {
 	struct fcs_crypto_key_header hd;
 	char *obj_data;
-	uint32_t obj_data_sz;
+	__u32 obj_data_sz;
 };
 
 struct fcs_crypto_key_object {
-	uint32_t sid;
-	uint32_t kid;
+	__u32 sid;
+	__u32 kid;
 	char *obj_data;
-	uint32_t obj_data_sz;
+	__u32 obj_data_sz;
 };
 
 /**
@@ -302,17 +302,17 @@ struct fcs_acs_crypt_parameter {
  * @cpara: crypto parameter
  */
 struct fcs_aes_crypt {
-	uint32_t sid;
-	uint32_t cid;
-	uint32_t kuid;
+	__u32 sid;
+	__u32 cid;
+	__u32 kuid;
 	void *src;
-	uint32_t src_size;
+	__u32 src_size;
 	void *dst;
-	uint32_t dst_size;
+	__u32 dst_size;
 	int cpara_size;
 	struct fcs_acs_crypt_parameter cpara;
-	bool init;
-	uint32_t buffer_offset;
+	__u8 init;
+	__u32 buffer_offset;
 };
 
 /**
@@ -328,17 +328,17 @@ struct fcs_aes_crypt {
  * @sha_digest_sz: SHA digest size
  */
 struct fcs_sha2_mac_data {
-	uint32_t sid;
-	uint32_t cid;
-	uint32_t kuid;
+	__u32 sid;
+	__u32 cid;
+	__u32 kuid;
 	void *src;
-	uint32_t src_size;
+	__u32 src_size;
 	void *dst;
-	uint32_t dst_size;
+	__u32 dst_size;
 	int sha_op_mode;
 	int sha_digest_sz;
-	uint32_t userdata_sz;
-	bool init;
+	__u32 userdata_sz;
+	__u8 init;
 };
 
 /**
@@ -353,15 +353,15 @@ struct fcs_sha2_mac_data {
  * @ecc_algorithm: ECC algorithm
  */
 struct fcs_ecdsa_data {
-	uint32_t sid;
-	uint32_t cid;
-	uint32_t kuid;
+	__u32 sid;
+	__u32 cid;
+	__u32 kuid;
 	void *src;
-	uint32_t src_size;
+	__u32 src_size;
 	void *dst;
-	uint32_t dst_size;
+	__u32 dst_size;
 	int ecc_algorithm;
-	bool init;
+	__u8 init;
 };
 
 /**
@@ -377,16 +377,16 @@ struct fcs_ecdsa_data {
  * @userdata_sz: size of user data
  */
 struct fcs_ecdsa_sha2_data {
-	uint32_t sid;
-	uint32_t cid;
-	uint32_t kuid;
+	__u32 sid;
+	__u32 cid;
+	__u32 kuid;
 	void *src;
-	uint32_t src_size;
+	__u32 src_size;
 	void *dst;
-	uint32_t dst_size;
+	__u32 dst_size;
 	int ecc_algorithm;
-	uint32_t userdata_sz;
-	bool init;
+	__u32 userdata_sz;
+	__u8 init;
 };
 
 /**
@@ -397,10 +397,10 @@ struct fcs_ecdsa_sha2_data {
  * @rng_sz: size of random data
  */
 struct fcs_random_number_gen_ext {
-       uint32_t sid;
-       uint32_t cid;
+       __u32 sid;
+       __u32 cid;
        void *rng_data;
-       uint32_t rng_sz;
+       __u32 rng_sz;
 };
 
 /**
@@ -418,13 +418,13 @@ struct fcs_random_number_gen_ext {
  * dst_size: the size of the output data
  */
 struct fcs_sdos_data_ext {
-	uint32_t sid;
-	uint32_t cid;
+	__u32 sid;
+	__u32 cid;
 	int op_mode;
 	void *src;
-	uint32_t src_size;
+	__u32 src_size;
 	void *dst;
-	uint32_t dst_size;
+	__u32 dst_size;
 };
 
 /**
