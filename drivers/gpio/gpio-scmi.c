@@ -244,7 +244,7 @@ static int scmi_gpio_dir_out(struct gpio_chip *chip, unsigned int gpio,
 {
 	scmi_gpio_set(chip, gpio, val);
 
-	return pinctrl_gpio_direction_output(gpio);
+	return pinctrl_gpio_direction_output(chip, gpio);
 }
 
 static bool is_gpio_requested(struct scmi_gpio_dev *gpio_dev, unsigned int gpio)
@@ -277,7 +277,7 @@ static int scmi_gpio_get_dir(struct gpio_chip *chip, unsigned int gpio)
 
 static int scmi_gpio_dir_in(struct gpio_chip *chip, unsigned int gpio)
 {
-	return pinctrl_gpio_direction_input(gpio);
+	return pinctrl_gpio_direction_input(chip, gpio);
 }
 
 static int update_irq_mapping(struct scmi_gpio_dev *gpio_dev,
@@ -537,7 +537,7 @@ static int scmi_gpio_irq_reqres(struct irq_data *data)
 		if (ret)
 			goto release_mapping;
 
-		ret = pinctrl_gpio_direction_input(gpio);
+		ret = pinctrl_gpio_direction_input(chip, gpio);
 		if (ret)
 			goto free_pinctrl_gpio;
 
