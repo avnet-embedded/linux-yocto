@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2022 Junjiro R. Okajima
+ * Copyright (C) 2022-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -60,6 +60,8 @@ static int au_fsctx_reconfigure(struct fs_context *fc)
 
 	root = fc->root;
 	sb = root->d_sb;
+	root = sb->s_root; /* "bind"-mount may give us non-root */
+	AuDebugOn(!IS_ROOT(root));
 	err = si_write_lock(sb, AuLock_FLUSH | AuLock_NOPLM);
 	if (!err) {
 		di_write_lock_child(root);
@@ -93,7 +95,8 @@ static int au_fsctx_reconfigure(struct fs_context *fc)
 out:
 	inode_unlock(inode);
 	err = cvt_err(err);
-	AuTraceErr(err);
+	if (unlikely(err))
+		pr_err("remount err %d\n", err);
 
 	return err;
 }
