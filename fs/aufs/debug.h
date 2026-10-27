@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -49,7 +49,7 @@ static inline int au_debug_test(void)
 	return atomic_read(&aufs_debug) > 0;
 }
 #else
-#define AuDebugOn(a)		do {} while (0)
+AuStubVoid(AuDebugOn, bool expr __maybe_unused)
 AuStubVoid(au_debug_on, void)
 AuStubVoid(au_debug_off, void)
 AuStubInt0(au_debug_test, void)
@@ -108,14 +108,14 @@ AuStubInt0(au_debug_test, void)
 /* ---------------------------------------------------------------------- */
 
 struct dentry;
+struct inode;
+struct au_nhash;
+struct au_vdir;
 #ifdef CONFIG_AUFS_DEBUG
 extern struct mutex au_dbg_mtx;
 extern char *au_plevel;
-struct au_nhash;
 void au_dpri_whlist(struct au_nhash *whlist);
-struct au_vdir;
 void au_dpri_vdir(struct au_vdir *vdir);
-struct inode;
 void au_dpri_inode(struct inode *inode);
 void au_dpri_dalias(struct inode *inode);
 void au_dpri_dentry(struct dentry *dentry);
@@ -191,14 +191,14 @@ AuStubVoid(au_dbg_verify_gen, struct dentry *parent, unsigned int sigen)
 AuStubVoid(au_dbg_verify_kthread, void)
 AuStubInt0(__init au_debug_init, void)
 
-#define AuDbgWhlist(w)		do {} while (0)
-#define AuDbgVdir(v)		do {} while (0)
-#define AuDbgInode(i)		do {} while (0)
-#define AuDbgDAlias(i)		do {} while (0)
-#define AuDbgDentry(d)		do {} while (0)
-#define AuDbgFile(f)		do {} while (0)
-#define AuDbgSb(sb)		do {} while (0)
-#define AuDbgSym(addr)		do {} while (0)
+AuStubVoid(AuDbgWhlist, struct au_nhash *whlist)
+AuStubVoid(AuDbgVdir, struct au_vdir *vdir)
+AuStubVoid(AuDbgInode, struct inode *inode)
+AuStubVoid(AuDbgDAlias, struct inode *inode)
+AuStubVoid(AuDbgDentry, struct dentry *dentry)
+AuStubVoid(AuDbgFile, struct file *filp)
+AuStubVoid(AuDbgSb, struct super_block *sb)
+AuStubVoid(AuDbgSym, void *addr)
 #endif /* CONFIG_AUFS_DEBUG */
 
 /* ---------------------------------------------------------------------- */
