@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2018-2022 Junjiro R. Okajima
+ * Copyright (C) 2018-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -179,7 +179,7 @@ static inline long au_lcnt_read(au_lcnt_t *cnt, int do_rev)
 		AuDbg("%s = %ld\n", #val, l);	\
 } while (0)
 #else
-#define AuLCntZero(val)		do {} while (0)
+AuStubVoid(AuLCntZero, long val __maybe_unused);
 #endif
 
 #endif /* __KERNEL__ */
