@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -302,7 +302,7 @@ static inline void au_do_vm_file_reset(struct vm_area_struct *vma,
 }
 
 #ifdef CONFIG_MMU
-#define AuDbgVmRegion(file, vma) do {} while (0)
+AuStubVoid(AuDbgVmRegion, struct file *file, struct vm_area_struct *vma)
 
 static inline void au_vm_file_reset(struct vm_area_struct *vma,
 				    struct file *file)
