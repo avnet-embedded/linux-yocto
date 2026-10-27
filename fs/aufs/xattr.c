@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2014-2022 Junjiro R. Okajima
+ * Copyright (C) 2014-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -80,7 +80,7 @@ static int au_do_cpup_xattr(struct path *h_dst, struct path *h_src,
 	if (is_acl) {
 		acl = vfs_get_acl(h_src_idmap, h_src_dentry, name);
 		AuDebugOn(!acl);
-		if (unlikely(IS_ERR(acl))) {
+		if (IS_ERR(acl)) {
 			err = PTR_ERR(acl);
 			if (err == -ENODATA)
 				err = 0;
@@ -100,7 +100,7 @@ static int au_do_cpup_xattr(struct path *h_dst, struct path *h_src,
 				err = 0;
 			else if (err == -EOPNOTSUPP
 				 && (ignore_flags & au_xattr_out_of_list))
-				 err = 0;
+				err = 0;
 			else if (err && (verbose || au_debug_test()))
 				pr_err("%s, err %d\n", name, err);
 			goto out;
