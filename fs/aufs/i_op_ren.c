@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -366,6 +366,7 @@ static int do_rename(struct au_ren_args *a)
 {
 	int err;
 	struct dentry *d, *h_d;
+	struct inode *h_inode;
 
 	if (!a->exchange) {
 		/* prepare workqueue args for asynchronous rmdir */
@@ -443,14 +444,14 @@ static int do_rename(struct au_ren_args *a)
 		AuDebugOn(au_dbtop(a->dst_dentry) != a->btgt);
 		a->h_path.dentry = au_h_dptr(a->dst_dentry, a->btgt);
 		vfsub_update_h_iattr(&a->h_path, /*did*/NULL); /*ignore*/
-		//a->dst_inode->i_ctime = d_inode(a->h_path.dentry)->i_ctime;
-		inode_set_ctime_to_ts( a->dst_inode, inode_get_ctime(d_inode(a->h_path.dentry)) );
+		h_inode = d_inode(a->h_path.dentry);
+		inode_set_ctime_to_ts(a->dst_inode, inode_get_ctime(h_inode));
 	}
 	AuDebugOn(au_dbtop(a->src_dentry) != a->btgt);
 	a->h_path.dentry = au_h_dptr(a->src_dentry, a->btgt);
 	vfsub_update_h_iattr(&a->h_path, /*did*/NULL); /*ignore*/
-	//a->src_inode->i_ctime = d_inode(a->h_path.dentry)->i_ctime;
-	inode_set_ctime_to_ts( a->src_inode, inode_get_ctime(d_inode(a->h_path.dentry)) );
+	h_inode = d_inode(a->h_path.dentry);
+	inode_set_ctime_to_ts(a->src_inode, inode_get_ctime(h_inode));
 
 	if (!a->exchange) {
 		/* remove whiteout for dentry */
@@ -650,7 +651,7 @@ static int au_may_ren(struct au_ren_args *a)
 		if (unlikely(d_is_negative(a->dst_h_dentry)))
 			goto out;
 		h_inode = d_inode(a->dst_h_dentry);
-		if (h_inode->i_nlink)
+		if (vfsub_inode_nlink(h_inode, AU_I_BRANCH))
 			err = au_may_del(a->dst_dentry, a->btgt,
 					 a->dst_h_parent, isdir);
 	}
@@ -1043,7 +1044,7 @@ int aufs_rename(struct mnt_idmap *idmap,
 		 * If it is a dir, VFS unhash it before this
 		 * function. It means we cannot rely upon d_unhashed().
 		 */
-		if (unlikely(!a->dst_inode->i_nlink))
+		if (unlikely(!vfsub_inode_nlink(a->dst_inode, AU_I_AUFS)))
 			goto out_unlock;
 		if (!au_ftest_ren(a->auren_flags, ISDIR_DST)) {
 			err = au_d_hashed_positive(a->dst_dentry);
