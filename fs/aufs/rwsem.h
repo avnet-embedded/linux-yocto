@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -52,10 +52,10 @@
 					  && debug_locks		\
 					  && lockdep_is_held(rw))
 #else
-#define AuRwMustReadLock(rw)	do {} while (0)
-#define AuRwMustWriteLock(rw)	do {} while (0)
-#define AuRwMustAnyLock(rw)	do {} while (0)
-#define AuRwDestroy(rw)		do {} while (0)
+AuStubVoid(AuRwMustReadLock, struct rw_semaphore *rw)
+AuStubVoid(AuRwMustWriteLock, struct rw_semaphore *rw)
+AuStubVoid(AuRwMustAnyLock, struct rw_semaphore *rw)
+AuStubVoid(AuRwDestroy, struct rw_semaphore *rw)
 #endif
 
 #define au_rw_init(rw)	init_rwsem(rw)
