@@ -3070,6 +3070,10 @@ SYSCALL_DEFINE5(remap_file_pages, unsigned long, start, unsigned long, size,
 	/* OK security check passed, take write lock + let it rip. */
 	if (mmap_write_lock_killable(mm)) {
 		fput(file);
+#if 1 /* IS_ENABLED(CONFIG_AUFS_FS) */
+		if (prfile)
+			fput(prfile);
+#endif /* CONFIG_AUFS_FS */
 		return -EINTR;
 	}
 
