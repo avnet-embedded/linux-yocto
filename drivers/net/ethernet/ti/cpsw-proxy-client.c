@@ -1706,8 +1706,7 @@ static void vport_stop(struct virtual_port *vport)
 		k3_udma_glue_rx_flow_disable(rx_chn->rx_chan, 0);
 		/* Need some delay to process RX ring before reset */
 		msleep(100);
-		k3_udma_glue_reset_rx_chn(rx_chn->rx_chan, 0, rx_chn, vport_rx_cleanup,
-					  false);
+		k3_udma_glue_reset_rx_chn(rx_chn->rx_chan, 0, rx_chn, vport_rx_cleanup);
 		napi_disable(&rx_chn->napi_rx);
 		hrtimer_cancel(&rx_chn->rx_hrtimer);
 	}
