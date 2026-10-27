@@ -3245,8 +3245,10 @@ static void yaffs_check_obj_details_loaded(struct yaffs_obj *in)
 
 	result = yaffs_rd_chunk_tags_nand(dev, in->hdr_chunk, buf, &tags);
 
-	if (result == YAFFS_FAIL)
+	if (result == YAFFS_FAIL) {
+		yaffs_release_temp_buffer(dev, buf);
 		return;
+	}
 
 	oh = (struct yaffs_obj_hdr *)buf;
 
