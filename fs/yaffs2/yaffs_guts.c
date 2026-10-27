@@ -4802,6 +4802,19 @@ int yaffs_guts_format_dev(struct yaffs_dev *dev)
 }
 
 
+/*
+ * If the dev is mounted r/w then the cleanup will happen during
+ * yaffs_guts_initialise. However if the dev is mounted ro then
+ * the cleanup will be deferred until yaffs is remounted r/w.
+ */
+void yaffs_guts_cleanup(struct yaffs_dev *dev)
+{
+	yaffs_strip_deleted_objs(dev);
+	yaffs_fix_hanging_objs(dev);
+	if (dev->param.empty_lost_n_found)
+		yaffs_empty_l_n_f(dev);
+}
+
 int yaffs_guts_initialise(struct yaffs_dev *dev)
 {
 	int init_failed = 0;
@@ -5014,10 +5027,7 @@ int yaffs_guts_initialise(struct yaffs_dev *dev)
 			init_failed = 1;
 		}
 
-		yaffs_strip_deleted_objs(dev);
-		yaffs_fix_hanging_objs(dev);
-		if (dev->param.empty_lost_n_found)
-			yaffs_empty_l_n_f(dev);
+		yaffs_guts_cleanup(dev);
 	}
 
 	if (init_failed) {

@@ -3205,6 +3205,7 @@ static int yaffs_reconfigure(struct fs_context *fc)
 	struct yaffs_dev *dev = sb->s_fs_info;
 	struct mtd_info *mtd = yaffs_dev_to_mtd(dev);
 	int read_only = (fc->sb_flags & SB_RDONLY) != 0;
+	int was_read_only;
 
 	if (!read_only && !(mtd->flags & MTD_WRITEABLE)) {
 		read_only = 1;
@@ -3213,7 +3214,17 @@ static int yaffs_reconfigure(struct fs_context *fc)
 		fc->sb_flags |= SB_RDONLY;
 	}
 
+	was_read_only = dev->read_only;
 	dev->read_only = read_only;
+
+	if (was_read_only && !read_only) {
+		yaffs_gross_lock(dev);
+		yaffs_guts_cleanup(dev);
+		yaffs_gross_unlock(dev);
+		yaffs_bg_start(dev);
+	} else if (!was_read_only && read_only) {
+		yaffs_bg_stop(dev);
+	}
 
 	return 0;
 }
