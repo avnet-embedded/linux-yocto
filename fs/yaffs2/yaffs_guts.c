@@ -160,7 +160,7 @@ u8 *yaffs_get_temp_buffer(struct yaffs_dev * dev)
 	 */
 
 	dev->unmanaged_buffer_allocs++;
-	return kmalloc(dev->data_bytes_per_chunk, GFP_NOFS);
+	return kmalloc(dev->param.total_bytes_per_chunk, GFP_NOFS);
 
 }
 
@@ -3245,8 +3245,10 @@ static void yaffs_check_obj_details_loaded(struct yaffs_obj *in)
 
 	result = yaffs_rd_chunk_tags_nand(dev, in->hdr_chunk, buf, &tags);
 
-	if (result == YAFFS_FAIL)
+	if (result == YAFFS_FAIL) {
+		yaffs_release_temp_buffer(dev, buf);
 		return;
+	}
 
 	oh = (struct yaffs_obj_hdr *)buf;
 
@@ -4800,6 +4802,19 @@ int yaffs_guts_format_dev(struct yaffs_dev *dev)
 }
 
 
+/*
+ * If the dev is mounted r/w then the cleanup will happen during
+ * yaffs_guts_initialise. However if the dev is mounted ro then
+ * the cleanup will be deferred until yaffs is remounted r/w.
+ */
+void yaffs_guts_cleanup(struct yaffs_dev *dev)
+{
+	yaffs_strip_deleted_objs(dev);
+	yaffs_fix_hanging_objs(dev);
+	if (dev->param.empty_lost_n_found)
+		yaffs_empty_l_n_f(dev);
+}
+
 int yaffs_guts_initialise(struct yaffs_dev *dev)
 {
 	int init_failed = 0;
@@ -5012,10 +5027,7 @@ int yaffs_guts_initialise(struct yaffs_dev *dev)
 			init_failed = 1;
 		}
 
-		yaffs_strip_deleted_objs(dev);
-		yaffs_fix_hanging_objs(dev);
-		if (dev->param.empty_lost_n_found)
-			yaffs_empty_l_n_f(dev);
+		yaffs_guts_cleanup(dev);
 	}
 
 	if (init_failed) {
@@ -5080,6 +5092,7 @@ void yaffs_deinitialise(struct yaffs_dev *dev)
 		kfree(dev->checkpt_block_list);
 		dev->checkpt_block_list = NULL;
 
+		dev->ll_init = 0;
 		dev->is_mounted = 0;
 
 		yaffs_deinit_nand(dev);
