@@ -186,15 +186,11 @@ static struct dma_fence *v3d_bin_job_run(struct drm_sched_job *sched_job)
 	struct v3d_bin_job *job = to_bin_job(sched_job);
 	struct v3d_dev *v3d = job->base.v3d;
 	struct drm_device *dev = &v3d->drm;
-	struct dma_fence *fence;
+	struct dma_fence *fence = NULL;
 	unsigned long irqflags;
 
-	if (unlikely(job->base.base.s_fence->finished.error)) {
-		spin_lock_irqsave(&v3d->job_lock, irqflags);
-		v3d->queue[V3D_BIN].active_job = NULL;
-		spin_unlock_irqrestore(&v3d->job_lock, irqflags);
-		return NULL;
-	}
+	if (unlikely(job->base.base.s_fence->finished.error))
+		goto out_clean_job;
 
 	/* Lock required around bin_job update vs
 	 * v3d_overflow_mem_work().
@@ -211,7 +207,7 @@ static struct dma_fence *v3d_bin_job_run(struct drm_sched_job *sched_job)
 
 	fence = v3d_fence_create(v3d, V3D_BIN);
 	if (IS_ERR(fence))
-		return NULL;
+		goto out_clean_job;
 
 	if (job->base.irq_fence)
 		dma_fence_put(job->base.irq_fence);
@@ -239,6 +235,12 @@ static struct dma_fence *v3d_bin_job_run(struct drm_sched_job *sched_job)
 	V3D_CORE_WRITE(0, V3D_CLE_CT0QEA, job->end);
 
 	return fence;
+
+out_clean_job:
+	spin_lock_irqsave(&v3d->job_lock, irqflags);
+	v3d->queue[V3D_BIN].active_job = NULL;
+	spin_unlock_irqrestore(&v3d->job_lock, irqflags);
+	return fence;
 }
 
 static struct dma_fence *v3d_render_job_run(struct drm_sched_job *sched_job)
@@ -246,12 +248,10 @@ static struct dma_fence *v3d_render_job_run(struct drm_sched_job *sched_job)
 	struct v3d_render_job *job = to_render_job(sched_job);
 	struct v3d_dev *v3d = job->base.v3d;
 	struct drm_device *dev = &v3d->drm;
-	struct dma_fence *fence;
+	struct dma_fence *fence = NULL;
 
-	if (unlikely(job->base.base.s_fence->finished.error)) {
-		v3d->queue[V3D_RENDER].active_job = NULL;
-		return NULL;
-	}
+	if (unlikely(job->base.base.s_fence->finished.error))
+		goto out_clean_job;
 
 	v3d->queue[V3D_RENDER].active_job = &job->base;
 
@@ -265,7 +265,7 @@ static struct dma_fence *v3d_render_job_run(struct drm_sched_job *sched_job)
 
 	fence = v3d_fence_create(v3d, V3D_RENDER);
 	if (IS_ERR(fence))
-		return NULL;
+		goto out_clean_job;
 
 	if (job->base.irq_fence)
 		dma_fence_put(job->base.irq_fence);
@@ -286,6 +286,10 @@ static struct dma_fence *v3d_render_job_run(struct drm_sched_job *sched_job)
 	V3D_CORE_WRITE(0, V3D_CLE_CT1QEA, job->end);
 
 	return fence;
+
+out_clean_job:
+	v3d->queue[V3D_RENDER].active_job = NULL;
+	return fence;
 }
 
 #define V3D_TFU_REG(name) ((v3d->ver < 71) ? V3D_TFU_ ## name : V3D_V7_TFU_ ## name)
@@ -296,18 +300,16 @@ v3d_tfu_job_run(struct drm_sched_job *sched_job)
 	struct v3d_tfu_job *job = to_tfu_job(sched_job);
 	struct v3d_dev *v3d = job->base.v3d;
 	struct drm_device *dev = &v3d->drm;
-	struct dma_fence *fence;
+	struct dma_fence *fence = NULL;
 
-	if (unlikely(job->base.base.s_fence->finished.error)) {
-		v3d->queue[V3D_TFU].active_job = NULL;
-		return NULL;
-	}
+	if (unlikely(job->base.base.s_fence->finished.error))
+		goto out_clean_job;
 
 	v3d->queue[V3D_TFU].active_job = &job->base;
 
 	fence = v3d_fence_create(v3d, V3D_TFU);
 	if (IS_ERR(fence))
-		return NULL;
+		goto out_clean_job;
 
 	if (job->base.irq_fence)
 		dma_fence_put(job->base.irq_fence);
@@ -334,6 +336,10 @@ v3d_tfu_job_run(struct drm_sched_job *sched_job)
 	V3D_WRITE(V3D_TFU_REG(ICFG), job->args.icfg | V3D_TFU_ICFG_IOC);
 
 	return fence;
+
+out_clean_job:
+	v3d->queue[V3D_TFU].active_job = NULL;
+	return fence;
 }
 
 static struct dma_fence *
@@ -342,13 +348,11 @@ v3d_csd_job_run(struct drm_sched_job *sched_job)
 	struct v3d_csd_job *job = to_csd_job(sched_job);
 	struct v3d_dev *v3d = job->base.v3d;
 	struct drm_device *dev = &v3d->drm;
-	struct dma_fence *fence;
+	struct dma_fence *fence = NULL;
 	int i, csd_cfg0_reg, csd_cfg_reg_count;
 
-	if (unlikely(job->base.base.s_fence->finished.error)) {
-		v3d->queue[V3D_CSD].active_job = NULL;
-		return NULL;
-	}
+	if (unlikely(job->base.base.s_fence->finished.error))
+		goto out_clean_job;
 
 	/* The HW interprets a workgroup size of 0 as 65536; however, the
 	 * user-space driver exposes a maximum of 65535. Therefore, a 0 in
@@ -366,7 +370,7 @@ v3d_csd_job_run(struct drm_sched_job *sched_job)
 
 	fence = v3d_fence_create(v3d, V3D_CSD);
 	if (IS_ERR(fence))
-		return NULL;
+		goto out_clean_job;
 
 	if (job->base.irq_fence)
 		dma_fence_put(job->base.irq_fence);
@@ -384,6 +388,10 @@ v3d_csd_job_run(struct drm_sched_job *sched_job)
 	/* CFG0 write kicks off the job. */
 	V3D_CORE_WRITE(0, csd_cfg0_reg, job->args.cfg[0]);
 
+	return fence;
+
+out_clean_job:
+	v3d->queue[V3D_CSD].active_job = NULL;
 	return fence;
 }
 
@@ -546,9 +554,11 @@ static const struct drm_sched_backend_ops v3d_cache_clean_sched_ops = {
 int
 v3d_sched_init(struct v3d_dev *v3d)
 {
-	int hw_jobs_limit = 1;
-	int job_hang_limit = 0;
-	int hang_limit_ms = 500;
+	struct drm_sched_init_args args = {
+		.hw_submission = 1,
+		.timeout = msecs_to_jiffies(500),
+		.dev = v3d->drm.dev,
+	};
 	enum v3d_queue q;
 	int ret;
 
@@ -561,44 +571,34 @@ v3d_sched_init(struct v3d_dev *v3d)
 		mutex_init(&v3d->gpu_queue_stats[q].lock);
 	}
 
-	ret = drm_sched_init(&v3d->queue[V3D_BIN].sched,
-			     &v3d_bin_sched_ops,
-			     hw_jobs_limit, job_hang_limit,
-			     msecs_to_jiffies(hang_limit_ms), NULL,
-			     NULL, "v3d_bin", v3d->drm.dev);
+	args.ops = &v3d_bin_sched_ops;
+	args.name = "v3d_bin";
+	ret = drm_sched_init(&v3d->queue[V3D_BIN].sched, &args);
 	if (ret)
 		return ret;
 
-	ret = drm_sched_init(&v3d->queue[V3D_RENDER].sched,
-			     &v3d_render_sched_ops,
-			     hw_jobs_limit, job_hang_limit,
-			     msecs_to_jiffies(hang_limit_ms), NULL,
-			     NULL, "v3d_render", v3d->drm.dev);
+	args.ops = &v3d_render_sched_ops;
+	args.name = "v3d_render";
+	ret = drm_sched_init(&v3d->queue[V3D_RENDER].sched, &args);
 	if (ret)
 		goto fail;
 
-	ret = drm_sched_init(&v3d->queue[V3D_TFU].sched,
-			     &v3d_tfu_sched_ops,
-			     hw_jobs_limit, job_hang_limit,
-			     msecs_to_jiffies(hang_limit_ms), NULL,
-			     NULL, "v3d_tfu", v3d->drm.dev);
+	args.ops = &v3d_tfu_sched_ops;
+	args.name = "v3d_tfu";
+	ret = drm_sched_init(&v3d->queue[V3D_TFU].sched, &args);
 	if (ret)
 		goto fail;
 
 	if (v3d_has_csd(v3d)) {
-		ret = drm_sched_init(&v3d->queue[V3D_CSD].sched,
-				     &v3d_csd_sched_ops,
-				     hw_jobs_limit, job_hang_limit,
-				     msecs_to_jiffies(hang_limit_ms), NULL,
-				     NULL, "v3d_csd", v3d->drm.dev);
+		args.ops = &v3d_csd_sched_ops;
+		args.name = "v3d_csd";
+		ret = drm_sched_init(&v3d->queue[V3D_CSD].sched, &args);
 		if (ret)
 			goto fail;
 
-		ret = drm_sched_init(&v3d->queue[V3D_CACHE_CLEAN].sched,
-				     &v3d_cache_clean_sched_ops,
-				     hw_jobs_limit, job_hang_limit,
-				     msecs_to_jiffies(hang_limit_ms), NULL,
-				     NULL, "v3d_cache_clean", v3d->drm.dev);
+		args.ops = &v3d_cache_clean_sched_ops;
+		args.name = "v3d_cache_clean";
+		ret = drm_sched_init(&v3d->queue[V3D_CACHE_CLEAN].sched, &args);
 		if (ret)
 			goto fail;
 	}

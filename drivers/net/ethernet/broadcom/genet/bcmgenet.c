@@ -4107,6 +4107,8 @@ static int bcmgenet_probe(struct platform_device *pdev)
 
 	/* Set default coalescing parameters */
 	for (i = 0; i <= priv->hw_params->rx_queues; i++) {
+		priv->rx_rings[i].priv = priv;
+		priv->rx_rings[i].index = i;
 		priv->rx_rings[i].rx_max_coalesced_frames = 1;
 		priv->rx_rings[i].rx_coalesce_usecs = 50;
 	}
