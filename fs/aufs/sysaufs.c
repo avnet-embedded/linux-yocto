@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -43,7 +43,7 @@ static const struct sysfs_ops au_sbi_ops = {
 	.show   = sysaufs_si_show
 };
 
-static struct kobj_type au_sbi_ktype = {
+static const struct kobj_type au_sbi_ktype = {
 	.release	= au_si_free,
 	.sysfs_ops	= &au_sbi_ops,
 	.default_groups	= sysaufs_si_groups
