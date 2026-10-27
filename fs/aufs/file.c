@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -337,6 +337,7 @@ int au_reopen_nondir(struct file *file)
 	au_set_fbtop(file, btop);
 	au_set_h_fptr(file, btop, h_file);
 	au_update_figen(file);
+	file->f_mode |= h_file->f_mode & FMODE_CAN_ODIRECT;
 	/* todo: necessary? */
 	/* file->f_ra = h_file->f_ra; */
 
@@ -405,7 +406,7 @@ static int au_ready_to_write_wh(struct file *file, loff_t len,
 		err = au_reopen_wh(file, bcpup, hi_wh);
 
 	if (!err
-	    && (inode->i_nlink > 1
+	    && (vfsub_inode_nlink(inode, AU_I_AUFS) > 1
 		|| (inode->i_state & I_LINKABLE))
 	    && au_opt_test(au_mntflags(cpg.dentry->d_sb), PLINK))
 		au_plink_append(inode, bcpup, au_h_dptr(cpg.dentry, bcpup));

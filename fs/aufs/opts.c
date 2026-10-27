@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -671,8 +671,8 @@ static int au_opt_br(struct super_block *sb, struct au_opt *opt,
 	case Opt_prepend:
 		opt->add.bindex = 0;
 		fallthrough;
-	add: /* indented label */
 	case Opt_add:
+	add: /* indented label */
 		err = au_br_add(sb, &opt->add,
 				au_ftest_opts(opts->flags, REMOUNT));
 		if (!err) {
