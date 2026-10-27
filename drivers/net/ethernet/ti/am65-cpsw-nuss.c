@@ -730,7 +730,7 @@ fail_tx:
 
 fail_rx:
 	k3_udma_glue_reset_rx_chn(rx_chn->rx_chn, 0, rx_chn,
-				  am65_cpsw_nuss_rx_cleanup, 0);
+				  am65_cpsw_nuss_rx_cleanup);
 	return ret;
 }
 
