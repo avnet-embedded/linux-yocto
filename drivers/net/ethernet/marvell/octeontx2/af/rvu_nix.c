@@ -1719,6 +1719,7 @@ int rvu_mbox_handler_nix_lf_alloc(struct rvu *rvu,
 	struct rvu_pfvf *pfvf, *parent_pf;
 	struct rvu_hwinfo *hw = rvu->hw;
 	u16 pcifunc = req->hdr.pcifunc;
+	u8 cgx_id = 0, lmac_id = 0;
 	struct rvu_block *block;
 	u64 cfg, ctx_cfg;
 	int blkaddr;
