@@ -395,8 +395,11 @@ static int vc4_drm_bind(struct device *dev)
 	}
 
 	ret = drm_aperture_remove_framebuffers(driver);
-	if (ret)
+	if (ret) {
+		if (firmware)
+			rpi_firmware_put(firmware);
 		return ret;
+	}
 
 	if (firmware && !firmware_kms()) {
 		ret = rpi_firmware_property(firmware,
