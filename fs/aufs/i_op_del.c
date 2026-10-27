@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -105,7 +105,7 @@ int au_may_del(struct dentry *dentry, aufs_bindex_t bindex,
 		if (unlikely(d_is_negative(h_dentry)))
 			goto out;
 		h_inode = d_inode(h_dentry);
-		if (unlikely(!h_inode->i_nlink))
+		if (unlikely(!vfsub_inode_nlink(h_inode, AU_I_BRANCH)))
 			goto out;
 
 		h_mode = h_inode->i_mode;
@@ -277,7 +277,6 @@ static void epilog(struct inode *dir, struct dentry *dentry,
 
 	inode = d_inode(dentry);
 	d_drop(dentry);
-	//inode->i_ctime = dir->i_ctime;
 	inode_set_ctime_to_ts(inode, inode_get_ctime(dir));
 
 	au_dir_ts(dir, bindex);
@@ -314,7 +313,7 @@ int aufs_unlink(struct inode *dir, struct dentry *dentry)
 {
 	int err;
 	aufs_bindex_t bwh, bindex, btop;
-	struct inode *inode, *h_dir, *delegated;
+	struct inode *inode, *h_dir, *delegated, *h_inode;
 	struct dentry *parent, *wh_dentry;
 	/* to reduce stack size */
 	struct {
@@ -380,12 +379,11 @@ int aufs_unlink(struct inode *dir, struct dentry *dentry)
 		if (bindex == btop) {
 			vfsub_update_h_iattr(&a->h_path, /*did*/NULL);
 			/*ignore*/
-			//inode->i_ctime = d_inode(a->h_path.dentry)->i_ctime;
-			inode_set_ctime_to_ts(inode, inode_get_ctime(d_inode(a->h_path.dentry)) );
+			h_inode = d_inode(a->h_path.dentry);
+			inode_set_ctime_to_ts(inode, inode_get_ctime(h_inode));
 		} else
 			/* todo: this timestamp may be reverted later */
-		        //inode->i_ctime = h_dir->i_ctime;
-			inode_set_ctime_to_ts(inode,inode_get_ctime(h_dir) );
+			inode_set_ctime_to_ts(inode, inode_get_ctime(h_dir));
 		goto out_unpin; /* success */
 	}
 
