@@ -377,6 +377,8 @@ static int wave5_vpu_probe(struct platform_device *pdev)
 	dev->ext_addr = ((dev->common_mem.daddr >> 32) & 0xFFFF);
 	INIT_LIST_HEAD(&dev->instances);
 
+	INIT_LIST_HEAD(&dev->instances);
+
 	dev->irq = platform_get_irq(pdev, 0);
 	if (dev->irq < 0) {
 		dev_err(&pdev->dev, "failed to get irq resource, falling back to polling\n");
