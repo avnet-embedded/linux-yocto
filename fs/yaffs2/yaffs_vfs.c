@@ -2771,46 +2771,6 @@ static int yaffs_sync_fs(struct super_block *sb)
 	return 0;
 }
 
-/* the function only is used to change dev->read_only when this file system
- * is remounted.
- */
-static int yaffs_remount_fs(struct super_block *sb, int *flags, char *data)
-{
-	int read_only = 0;
-	struct mtd_info *mtd;
-	struct yaffs_dev *dev = 0;
-
-	/* Get the device */
-	mtd = get_mtd_device(NULL, MINOR(sb->s_dev));
-	if (!mtd) {
-		yaffs_trace(YAFFS_TRACE_ALWAYS,
-			"MTD device #%u doesn't appear to exist",
-			MINOR(sb->s_dev));
-		return 1;
-	}
-
-	/* Check it's NAND */
-	if (mtd->type != MTD_NANDFLASH) {
-		yaffs_trace(YAFFS_TRACE_ALWAYS,
-			"MTD device is not NAND it's type %d",
-			mtd->type);
-		return 1;
-	}
-
-	read_only = ((*flags & MS_RDONLY) != 0);
-	if (!read_only && !(mtd->flags & MTD_WRITEABLE)) {
-		read_only = 1;
-		printk(KERN_INFO
-			"yaffs: mtd is read only, setting superblock read only");
-		*flags |= MS_RDONLY;
-	}
-
-	dev = sb->s_fs_info;
-	dev->read_only = read_only;
-
-	return 0;
-}
-
 static const struct super_operations yaffs_super_ops = {
 	.statfs = yaffs_statfs,
 
@@ -3235,8 +3195,32 @@ static int yaffs_get_tree(struct fs_context *fc)
 	return get_tree_bdev(fc, yaffs_fill_super_callback);
 }
 
+/*
+ * Remount: only dev->read_only needs updating. The superblock read-only
+ * flag itself is handled by the VFS from fc->sb_flags.
+ */
+static int yaffs_reconfigure(struct fs_context *fc)
+{
+	struct super_block *sb = fc->root->d_sb;
+	struct yaffs_dev *dev = sb->s_fs_info;
+	struct mtd_info *mtd = yaffs_dev_to_mtd(dev);
+	int read_only = (fc->sb_flags & SB_RDONLY) != 0;
+
+	if (!read_only && !(mtd->flags & MTD_WRITEABLE)) {
+		read_only = 1;
+		printk(KERN_INFO
+			"yaffs: mtd is read only, setting superblock read only\n");
+		fc->sb_flags |= SB_RDONLY;
+	}
+
+	dev->read_only = read_only;
+
+	return 0;
+}
+
 static const struct fs_context_operations yaffs_context_ops = {
 	.get_tree	= yaffs_get_tree,
+	.reconfigure	= yaffs_reconfigure,
 };
 
 static int yaffs_init_fs_context(struct fs_context *fc)
