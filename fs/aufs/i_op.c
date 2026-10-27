@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (C) 2005-2022 Junjiro R. Okajima
+ * Copyright (C) 2005-2025 Junjiro R. Okajima
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -628,7 +628,7 @@ int au_pin_hdir_relock(struct au_pin *p)
 			continue;
 		if (d_is_positive(h_d[i])) {
 			h_i = d_inode(h_d[i]);
-			err = !h_i->i_nlink;
+			err = !vfsub_inode_nlink(h_i, AU_I_BRANCH);
 		}
 	}
 
@@ -1173,16 +1173,15 @@ static void au_refresh_iattr(struct inode *inode, struct kstat *st,
 	inode->i_gid = st->gid;
 	inode->i_atime = st->atime;
 	inode->i_mtime = st->mtime;
-	inode_set_ctime_to_ts( inode, st->ctime );
+	inode_set_ctime_to_ts(inode, st->ctime);
 
 	au_cpup_attr_nlink(inode, /*force*/0);
 	if (S_ISDIR(inode->i_mode)) {
-		n = inode->i_nlink;
+		n = vfsub_inode_nlink(inode, AU_I_AUFS);
 		n -= nlink;
 		n += st->nlink;
-		smp_mb(); /* for i_nlink */
 		/* 0 can happen */
-		set_nlink(inode, n);
+		vfsub_set_nlink(inode, n);
 	}
 
 	spin_lock(&inode->i_lock);
@@ -1297,13 +1296,18 @@ static int aufs_getattr(struct mnt_idmap *idmap, const struct path *path,
 		goto out_fill; /* pretending success */
 
 	positive = d_is_positive(h_path.dentry);
-	if (positive)
+	if (positive) {
 		/* no vfsub version */
-		err = vfs_getattr(&h_path, st, request, query);
+		if (query & AT_GETATTR_NOSEC)
+			err = vfs_getattr_nosec(&h_path, st, request, query);
+		else
+			err = vfs_getattr(&h_path, st, request, query);
+	}
 	if (!err) {
 		if (positive)
 			au_refresh_iattr(inode, st,
-					 d_inode(h_path.dentry)->i_nlink);
+					 vfsub_inode_nlink(d_inode(h_path.dentry),
+							   AU_I_BRANCH));
 		goto out_fill; /* success */
 	}
 	AuTraceErr(err);
