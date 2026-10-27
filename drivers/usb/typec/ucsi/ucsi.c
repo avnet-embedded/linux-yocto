@@ -1189,14 +1189,22 @@ static const struct typec_operations ucsi_ops = {
 static struct fwnode_handle *ucsi_find_fwnode(struct ucsi_connector *con)
 {
 	struct fwnode_handle *fwnode;
-	u32 index;
+	int i = 1;
+	int ret;
+	u32 port;
 
 	device_for_each_child_node(con->ucsi->dev, fwnode) {
-		if (!fwnode_property_read_u32(fwnode, "reg", &index) && index+1 != con->num)
-			continue;
-		return fwnode;
-	}
+		ret = fwnode_property_read_u32(fwnode, "reg", &port);
+		if (ret < 0) {
+			if (i == con->num)
+				return fwnode;
+		} else {
+			if (port == con->num - 1)
+				return fwnode;
+		}
 
+		i++;
+	}
 	return NULL;
 }
 
