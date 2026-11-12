@@ -1580,3 +1580,32 @@ bool rvu_cgx_is_pkind_config_permitted(struct rvu *rvu, u16 pcifunc)
 
 	return rc;
 }
+
+/* Serialise PKIND checks and updates on the LMAC shared by a CGX mapped
+ * PF and its VFs, so a VF cannot pass the check while the PF is switching
+ * the LMAC to a special PKIND. Returns NULL if pcifunc is not CGX mapped.
+ */
+void *rvu_cgx_pkind_lock(struct rvu *rvu, u16 pcifunc)
+{
+	int pf = rvu_get_pf(pcifunc);
+	u8 cgx_id, lmac_id;
+	struct cgx *cgxd;
+
+	if (!is_pf_cgxmapped(rvu, pf))
+		return NULL;
+
+	rvu_get_cgx_lmac_id(rvu->pf2cgxlmac_map[pf], &cgx_id, &lmac_id);
+	cgxd = rvu_cgx_pdata(cgx_id, rvu);
+	if (cgxd)
+		mutex_lock(&cgxd->lock);
+
+	return cgxd;
+}
+
+void rvu_cgx_pkind_unlock(void *cgxd)
+{
+	struct cgx *cgx = cgxd;
+
+	if (cgx)
+		mutex_unlock(&cgx->lock);
+}

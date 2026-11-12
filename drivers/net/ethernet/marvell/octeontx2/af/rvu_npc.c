@@ -3725,6 +3725,7 @@ int rvu_npc_set_parse_mode(struct rvu *rvu, u16 pcifunc, u64 mode, u8 dir,
 	int blkaddr, nixlf, rc;
 	u64 rxpkind, txpkind;
 	u8 cgx_id, lmac_id;
+	void *cgxd;
 
 	/* use default pkind to disable edsa/higig */
 	rxpkind = rvu_npc_get_pkind(rvu, pf);
@@ -3763,8 +3764,10 @@ int rvu_npc_set_parse_mode(struct rvu *rvu, u16 pcifunc, u64 mode, u8 dir,
 			return 0;
 		rvu_get_cgx_lmac_id(rvu->pf2cgxlmac_map[pf], &cgx_id, &lmac_id);
 
+		cgxd = rvu_cgx_pkind_lock(rvu, pcifunc);
 		rc = cgx_set_pkind(rvu_cgx_pdata(cgx_id, rvu), lmac_id,
 				   rxpkind);
+		rvu_cgx_pkind_unlock(cgxd);
 		if (rc)
 			return rc;
 	}
@@ -3775,8 +3778,12 @@ int rvu_npc_set_parse_mode(struct rvu *rvu, u16 pcifunc, u64 mode, u8 dir,
 		if (rc)
 			return rc;
 
-		rvu_write64(rvu, blkaddr, NIX_AF_LFX_TX_PARSE_CFG(nixlf),
-			    txpkind);
+		/* VFs must not override a special PKIND set up by their PF */
+		cgxd = rvu_cgx_pkind_lock(rvu, pcifunc);
+		if (rvu_cgx_is_pkind_config_permitted(rvu, pcifunc))
+			rvu_write64(rvu, blkaddr, NIX_AF_LFX_TX_PARSE_CFG(nixlf),
+				    txpkind);
+		rvu_cgx_pkind_unlock(cgxd);
 	}
 
 	if (enable_higig2 ^ rvu_cgx_is_higig2_enabled(rvu, pf))
