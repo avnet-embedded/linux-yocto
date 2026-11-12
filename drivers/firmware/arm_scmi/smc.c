@@ -35,8 +35,6 @@
  * @spin_flags: Lock flags
  * @func_id: smc/hvc call function id
  * @node: Linked list pointers
- * @tx_no_completion_irq: Tx channel has no completion interrupt
- *                        mechanism for synchronous commands.
  */
 
 struct scmi_smc {
@@ -52,7 +50,6 @@ struct scmi_smc {
 	spinlock_t spinlock;
 	unsigned long spin_flags;
 	u32 func_id;
-	bool tx_no_completion_irq;
 };
 
 static LIST_HEAD(scmi_smc_devices);
@@ -122,12 +119,11 @@ static inline void smc_channel_lock_release(struct scmi_smc *scmi_info)
 		mutex_unlock(&scmi_info->shmem_lock);
 }
 
-static struct scmi_smc *create_scmi_smc_dev(struct device *cdev,
-					    struct device *dev, bool tx)
+static struct scmi_smc *create_scmi_smc_dev(struct device *dev)
 {
 	struct scmi_smc *scmi_info;
 	u32 func_id;
-	int ret, irq;
+	int ret;
 
 	scmi_info = devm_kzalloc(dev, sizeof(*scmi_info), GFP_KERNEL);
 	if (!scmi_info)
@@ -137,37 +133,6 @@ static struct scmi_smc *create_scmi_smc_dev(struct device *cdev,
 	if (ret < 0)
 		return ERR_PTR(ret);
 
-	/*
-	 * If there is an interrupt named "a2p", then the service and
-	 * completion of a message is signaled by an interrupt rather than by
-	 * the return of the SMC call.
-	 */
-	scmi_info->irq = of_irq_get_byname(cdev->of_node, "a2p");
-	if (scmi_info->irq > 0) {
-		ret = request_irq(scmi_info->irq, smc_msg_done_isr,
-				  IRQF_NO_SUSPEND, dev_name(dev), scmi_info);
-		if (ret) {
-			dev_err(dev, "failed to setup SCMI smc irq\n");
-			return ERR_PTR(ret);
-		}
-	} else {
-		scmi_info->tx_no_completion_irq = true;
-	}
-
-	if (!tx) {
-		/* p2a_notif is used only by RX channels */
-		irq = of_irq_get_byname(cdev->of_node, "p2a_notif");
-		if (irq > 0) {
-			ret = devm_request_irq(dev, irq, smc_platform_notif_isr,
-						IRQF_NO_SUSPEND,
-						dev_name(dev), scmi_info);
-			if (ret) {
-				dev_err(dev, "failed to setup SCMI smc notification irq\n");
-				return ERR_PTR(ret);
-			}
-		}
-	}
-
 	scmi_info->func_id = func_id;
 	smc_channel_lock_init(scmi_info);
 
@@ -175,14 +140,15 @@ static struct scmi_smc *create_scmi_smc_dev(struct device *cdev,
 }
 
 static struct scmi_smc *get_scmi_smc_dev(struct scmi_chan_info *cinfo,
-					 struct device *dev, bool tx)
+					 struct device *dev)
 {
 	struct scmi_smc *smc_dev = NULL;
 	bool found = false;
 
 	mutex_lock(&smc_devices_lock);
 	list_for_each_entry(smc_dev, &scmi_smc_devices, node) {
-		if (smc_dev->cinfo->dev == cinfo->dev) {
+		/* RX-only devices have no tx cinfo */
+		if (smc_dev->cinfo && smc_dev->cinfo->dev == cinfo->dev) {
 			found = true;
 			break;
 		}
@@ -191,7 +157,7 @@ static struct scmi_smc *get_scmi_smc_dev(struct scmi_chan_info *cinfo,
 	if (found)
 		goto release_lock;
 
-	smc_dev = create_scmi_smc_dev(cinfo->dev, dev, tx);
+	smc_dev = create_scmi_smc_dev(dev);
 	if (!IS_ERR(smc_dev))
 		list_add(&smc_dev->node, &scmi_smc_devices);
 
@@ -208,7 +174,7 @@ static int smc_chan_setup(struct scmi_chan_info *cinfo, struct device *dev,
 	resource_size_t size;
 	struct resource res;
 	struct device_node *np;
-	int ret, shmem_idx;
+	int ret, irq, shmem_idx;
 	const char *ch_name = tx ? "tx" : "rx";
 	struct scmi_shared_mem __iomem **shmem;
 
@@ -218,7 +184,7 @@ static int smc_chan_setup(struct scmi_chan_info *cinfo, struct device *dev,
 	if (shmem_idx < 0)
 		return -ENXIO;
 
-	scmi_info = get_scmi_smc_dev(cinfo, dev, tx);
+	scmi_info = get_scmi_smc_dev(cinfo, dev);
 	if (IS_ERR(scmi_info))
 		return PTR_ERR(scmi_info);
 
@@ -248,16 +214,55 @@ static int smc_chan_setup(struct scmi_chan_info *cinfo, struct device *dev,
 		return -EADDRNOTAVAIL;
 	}
 
-	if (tx) {
+	/* Publish channel state before an IRQ can deliver a callback */
+	if (tx)
 		scmi_info->cinfo = cinfo;
-		cinfo->no_completion_irq = scmi_info->tx_no_completion_irq;
-	} else {
+	else
 		scmi_info->notif_cinfo = cinfo;
-	}
-
 	cinfo->transport_info = scmi_info;
 
+	if (tx) {
+		/*
+		 * If there is an interrupt named "a2p", then the service and
+		 * completion of a message is signaled by an interrupt rather
+		 * than by the return of the SMC call.
+		 */
+		irq = of_irq_get_byname(cdev->of_node, "a2p");
+		if (irq > 0) {
+			ret = request_irq(irq, smc_msg_done_isr,
+					  IRQF_NO_SUSPEND, dev_name(dev),
+					  scmi_info);
+			if (ret) {
+				dev_err(dev, "failed to setup SCMI smc irq\n");
+				goto err_unpublish;
+			}
+			scmi_info->irq = irq;
+		} else {
+			cinfo->no_completion_irq = true;
+		}
+	} else {
+		/* p2a_notif is used only by RX channels */
+		irq = of_irq_get_byname(cdev->of_node, "p2a_notif");
+		if (irq > 0) {
+			ret = devm_request_irq(dev, irq, smc_platform_notif_isr,
+					       IRQF_NO_SUSPEND,
+					       dev_name(dev), scmi_info);
+			if (ret) {
+				dev_err(dev, "failed to setup SCMI smc notification irq\n");
+				goto err_unpublish;
+			}
+		}
+	}
+
 	return 0;
+
+err_unpublish:
+	cinfo->transport_info = NULL;
+	if (tx)
+		scmi_info->cinfo = NULL;
+	else
+		scmi_info->notif_cinfo = NULL;
+	return ret;
 }
 
 static int smc_chan_free(int id, void *p, void *data)
