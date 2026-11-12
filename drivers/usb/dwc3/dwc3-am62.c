@@ -251,6 +251,7 @@ static int dwc3_ti_probe(struct platform_device *pdev)
 
 err_pm_disable:
 	clk_disable_unprepare(data->usb2_refclk);
+	pm_runtime_put_noidle(dev);
 	pm_runtime_disable(dev);
 	pm_runtime_set_suspended(dev);
 	return ret;
