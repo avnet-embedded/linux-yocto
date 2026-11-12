@@ -251,7 +251,7 @@ static void virt_cpsw_nuss_common_stop(struct virt_cpsw_common *common)
 	msleep(100);
 	k3_udma_glue_reset_rx_chn(common->rx_chns.rx_chn, 0,
 				  &common->rx_chns,
-				  virt_cpsw_nuss_rx_cleanup, false);
+				  virt_cpsw_nuss_rx_cleanup);
 	napi_disable(&common->napi_rx);
 	hrtimer_cancel(&common->rx_hrtimer);
 	cancel_work_sync(&common->rx_mode_work);
