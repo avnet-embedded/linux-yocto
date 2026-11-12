@@ -1438,6 +1438,20 @@ static void dwc3_core_exit_mode(struct dwc3 *dwc)
 	dwc3_set_prtcap(dwc, DWC3_GCTL_PRTCAP_DEVICE);
 }
 
+static void dwc3_vbus_draw_work(struct work_struct *work)
+{
+	struct dwc3 *dwc = container_of(work, struct dwc3, vbus_draw_work);
+	union power_supply_propval val = {0};
+	int ret;
+
+	val.intval = 1000 * (dwc->current_limit);
+	ret = power_supply_set_property(dwc->usb_psy, POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT, &val);
+
+	if (ret < 0)
+		dev_dbg(dwc->dev, "Error (%d) setting vbus draw (%d mA)\n",
+			ret, dwc->current_limit);
+}
+
 static void dwc3_get_properties(struct dwc3 *dwc)
 {
 	struct device		*dev = dwc->dev;
@@ -1488,6 +1502,8 @@ static void dwc3_get_properties(struct dwc3 *dwc)
 		dwc->usb_psy = power_supply_get_by_name(usb_psy_name);
 		if (!dwc->usb_psy)
 			dev_err(dev, "couldn't get usb power supply\n");
+		else
+			INIT_WORK(&dwc->vbus_draw_work, dwc3_vbus_draw_work);
 	}
 
 	dwc->has_lpm_erratum = device_property_read_bool(dev,
