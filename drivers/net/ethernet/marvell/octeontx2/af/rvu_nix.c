@@ -362,6 +362,7 @@ static int nix_interface_init(struct rvu *rvu, u16 pcifunc, int type, int nixlf,
 	int pkind, pf, vf, lbkid, vfid;
 	u8 cgx_id, lmac_id;
 	bool from_vf;
+	void *cgxd;
 	int err;
 
 	pf = rvu_get_pf(pcifunc);
@@ -386,11 +387,13 @@ static int nix_interface_init(struct rvu *rvu, u16 pcifunc, int type, int nixlf,
 		pfvf->tx_chan_cnt = 1;
 		rsp->tx_link = cgx_id * hw->lmac_per_cgx + lmac_id;
 
+		cgxd = rvu_cgx_pkind_lock(rvu, pcifunc);
 		if (rvu_cgx_is_pkind_config_permitted(rvu, pcifunc)) {
 			cgx_set_pkind(rvu_cgx_pdata(cgx_id, rvu), lmac_id,
 				      pkind);
 			rvu_npc_set_pkind(rvu, pkind, pfvf);
 		}
+		rvu_cgx_pkind_unlock(cgxd);
 
 		/* Notify RVU REP PF about representee coming up */
 		if (rvu->rep_cnt)
@@ -1722,6 +1725,7 @@ int rvu_mbox_handler_nix_lf_alloc(struct rvu *rvu,
 	u16 pcifunc = req->hdr.pcifunc;
 	struct rvu_block *block;
 	u64 cfg, ctx_cfg;
+	void *cgxd;
 	int blkaddr;
 
 	if (!req->rq_cnt || !req->sq_cnt || !req->cq_cnt)
@@ -1889,10 +1893,12 @@ int rvu_mbox_handler_nix_lf_alloc(struct rvu *rvu,
 	rvu_write64(rvu, blkaddr, NIX_AF_LFX_RX_CFG(nixlf), req->rx_cfg);
 
 	/* Configure pkind for TX parse config */
+	cgxd = rvu_cgx_pkind_lock(rvu, pcifunc);
 	if (rvu_cgx_is_pkind_config_permitted(rvu, pcifunc)) {
 		cfg = NPC_TX_DEF_PKIND;
 		rvu_write64(rvu, blkaddr, NIX_AF_LFX_TX_PARSE_CFG(nixlf), cfg);
 	}
+	rvu_cgx_pkind_unlock(cgxd);
 
 	if (is_rep_dev(rvu, pcifunc)) {
 		pfvf->tx_chan_base = RVU_SWITCH_LBK_CHAN;

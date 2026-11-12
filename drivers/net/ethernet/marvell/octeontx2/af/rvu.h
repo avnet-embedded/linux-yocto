@@ -1223,6 +1223,8 @@ void npc_read_mcam_entry(struct rvu *rvu, struct npc_mcam *mcam,
 int npc_config_cntr_default_entries(struct rvu *rvu, bool enable);
 bool is_cgx_config_permitted(struct rvu *rvu, u16 pcifunc);
 bool rvu_cgx_is_pkind_config_permitted(struct rvu *rvu, u16 pcifunc);
+void *rvu_cgx_pkind_lock(struct rvu *rvu, u16 pcifunc);
+void rvu_cgx_pkind_unlock(void *cgxd);
 bool is_mac_feature_supported(struct rvu *rvu, int pf, int feature);
 u32  rvu_cgx_get_fifolen(struct rvu *rvu);
 void *rvu_first_cgx_pdata(struct rvu *rvu);
