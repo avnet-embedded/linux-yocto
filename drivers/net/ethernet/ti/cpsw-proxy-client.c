@@ -709,7 +709,7 @@ static void cpsw_virt_port_stop(struct cpsw_virt_port *virt_port)
 	msleep(100);
 	k3_udma_glue_reset_rx_chn(virt_port->virt_port_rx_chan.rx_chan, 0,
 				  &virt_port->virt_port_rx_chan,
-				  cpsw_virt_port_rx_cleanup, false);
+				  cpsw_virt_port_rx_cleanup);
 	napi_disable(&virt_port->napi_rx);
 	hrtimer_cancel(&virt_port->rx_hrtimer);
 	cancel_work_sync(&virt_port->rx_mode_work);
