@@ -78,9 +78,9 @@ static irqreturn_t smc_platform_notif_isr(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-static bool smc_chan_available(struct device *dev, int idx)
+static bool smc_chan_available(struct device_node *of_node, int idx)
 {
-	struct device_node *np = of_parse_phandle(dev->of_node, "shmem", 0);
+	struct device_node *np = of_parse_phandle(of_node, "shmem", 0);
 	if (!np)
 		return false;
 
@@ -275,8 +275,6 @@ static int smc_chan_free(int id, void *p, void *data)
 
 	cinfo->transport_info = NULL;
 	scmi_info->cinfo = NULL;
-
-	scmi_free_channel(cinfo, data, id);
 
 	return 0;
 }

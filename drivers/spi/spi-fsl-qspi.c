@@ -1467,6 +1467,22 @@ static const struct spi_controller_mem_caps fsl_qspi_mem_caps = {
 	.dtr = true,
 };
 
+static void fsl_qspi_cleanup(void *data)
+{
+	struct fsl_qspi *q = data;
+
+	/* disable the hardware */
+	qspi_writel(q, QUADSPI_MCR_MDIS_MASK, q->iobase + QUADSPI_MCR);
+	qspi_writel(q, 0x0, q->iobase + QUADSPI_RSER);
+
+	fsl_qspi_clk_disable_unprep(q);
+
+	mutex_destroy(&q->lock);
+
+	if (is_s32cc_qspi(q) && q->ahb_addr)
+		iounmap(q->ahb_addr);
+}
+
 static int fsl_qspi_probe(struct platform_device *pdev)
 {
 	struct spi_controller *ctlr;
@@ -1476,7 +1492,7 @@ static int fsl_qspi_probe(struct platform_device *pdev)
 	struct fsl_qspi *q;
 	int ret;
 
-	ctlr = spi_alloc_master(&pdev->dev, sizeof(*q));
+	ctlr = devm_spi_alloc_master(&pdev->dev, sizeof(*q));
 	if (!ctlr)
 		return -ENOMEM;
 
@@ -1564,49 +1580,30 @@ static int fsl_qspi_probe(struct platform_device *pdev)
 
 	ctlr->dev.of_node = np;
 
+	ret = devm_add_action_or_reset(dev, fsl_qspi_cleanup, q);
+	if (ret)
+		goto err_put_ctrl;
+
 	if (is_s32cc_qspi(q)) {
 		np = of_get_next_available_child(dev->of_node, NULL);
 
 		ret = of_property_read_u32(np, "spi-max-frequency", &q->clk_rate);
 		if (ret)
-			goto err_destroy_mutex;
+			goto err_put_ctrl;
 	}
 
 	ret = devm_spi_register_controller(dev, ctlr);
 	if (ret)
-		goto err_destroy_mutex;
+		goto err_put_ctrl;
 
 	return 0;
-
-err_destroy_mutex:
-	mutex_destroy(&q->lock);
 
 err_disable_clk:
 	fsl_qspi_clk_disable_unprep(q);
 
 err_put_ctrl:
-	spi_controller_put(ctlr);
-
 	dev_err(dev, "Freescale QuadSPI probe failed\n");
 	return ret;
-}
-
-static int fsl_qspi_remove(struct platform_device *pdev)
-{
-	struct fsl_qspi *q = platform_get_drvdata(pdev);
-
-	/* disable the hardware */
-	qspi_writel(q, QUADSPI_MCR_MDIS_MASK, q->iobase + QUADSPI_MCR);
-	qspi_writel(q, 0x0, q->iobase + QUADSPI_RSER);
-
-	fsl_qspi_clk_disable_unprep(q);
-
-	mutex_destroy(&q->lock);
-
-	if (is_s32cc_qspi(q) && q->ahb_addr)
-		iounmap(q->ahb_addr);
-
-	return 0;
 }
 
 static int fsl_qspi_suspend(struct device *dev)
@@ -1671,7 +1668,6 @@ static struct platform_driver fsl_qspi_driver = {
 		.pm =   &fsl_qspi_pm_ops,
 	},
 	.probe          = fsl_qspi_probe,
-	.remove		= fsl_qspi_remove,
 };
 module_platform_driver(fsl_qspi_driver);
 

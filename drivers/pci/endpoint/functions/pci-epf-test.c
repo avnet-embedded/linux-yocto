@@ -811,6 +811,7 @@ static void pci_epf_test_unbind(struct pci_epf *epf)
 					  epf_bar);
 			pci_epf_free_space(epf, epf_test->reg[bar], bar,
 					   PRIMARY_INTERFACE);
+			epf_test->reg[bar] = NULL;
 		}
 	}
 }
@@ -847,6 +848,7 @@ static int pci_epf_test_set_bar(struct pci_epf *epf)
 		if (ret) {
 			pci_epf_free_space(epf, epf_test->reg[bar], bar,
 					   PRIMARY_INTERFACE);
+			epf_test->reg[bar] = NULL;
 			dev_err(dev, "Failed to set BAR%d\n", bar);
 			if (bar == test_reg_bar)
 				return ret;
@@ -860,18 +862,10 @@ static int pci_epf_test_core_init(struct pci_epf *epf)
 {
 	struct pci_epf_test *epf_test = epf_get_drvdata(epf);
 	struct pci_epf_header *header = epf->header;
-	const struct pci_epc_features *epc_features;
+	const struct pci_epc_features *epc_features = epf_test->epc_features;
 	struct pci_epc *epc = epf->epc;
 	struct device *dev = &epf->dev;
-	bool msix_capable = false;
-	bool msi_capable = true;
 	int ret;
-
-	epc_features = pci_epc_get_features(epc, epf->func_no, epf->vfunc_no);
-	if (epc_features) {
-		msix_capable = epc_features->msix_capable;
-		msi_capable = epc_features->msi_capable;
-	}
 
 	if (epf->vfunc_no <= 1) {
 		ret = pci_epc_write_header(epc, epf->func_no, epf->vfunc_no, header);
@@ -888,7 +882,7 @@ static int pci_epf_test_core_init(struct pci_epf *epf)
 	/* MSIs and MSI-Xs are mutually exclusive; MSI-Xs will not work if the
 	 * configuration is done for both, simultaneously.
 	 */
-	if (msi_capable && !msix_capable) {
+	if (epc_features->msi_capable && !epc_features->msix_capable) {
 		dev_info(dev, "Configuring MSIs\n");
 		ret = pci_epc_set_msi(epc, epf->func_no, epf->vfunc_no,
 				      epf->msi_interrupts);
@@ -898,7 +892,7 @@ static int pci_epf_test_core_init(struct pci_epf *epf)
 		}
 	}
 
-	if (msix_capable) {
+	if (epc_features->msix_capable) {
 		dev_info(dev, "Configuring MSI-Xs\n");
 		ret = pci_epc_set_msix(epc, epf->func_no, epf->vfunc_no,
 				       epf->msix_interrupts,
