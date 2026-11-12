@@ -554,7 +554,7 @@ static int am65_cpsw_nuss_common_stop(struct am65_cpsw_common *common)
 	for (i = 0; i < AM65_CPSW_MAX_RX_FLOWS; i++)
 		k3_udma_glue_reset_rx_chn(common->rx_chns.rx_chn, i,
 					  &common->rx_chns,
-					  am65_cpsw_nuss_rx_cleanup, !!i);
+					  am65_cpsw_nuss_rx_cleanup);
 
 	k3_udma_glue_disable_rx_chn(common->rx_chns.rx_chn);
 
