@@ -1568,6 +1568,11 @@ static int fl_set_enc_opt(struct nlattr **tb, struct fl_flow_key *key,
 			return -EINVAL;
 		}
 		nla_opt_msk = nla_next(nla_opt_msk, &msk_depth);
+
+		if (msk_depth && !nla_ok(nla_opt_msk, msk_depth)) {
+			NL_SET_ERR_MSG(extack, "A mask attribute is invalid");
+			return -EINVAL;
+		}
 	}
 
 	return 0;
@@ -2031,7 +2036,7 @@ static struct fl_flow_mask *fl_create_new_mask(struct cls_fl_head *head,
 	struct fl_flow_mask *newmask;
 	int err;
 
-	newmask = kzalloc(sizeof(*newmask), GFP_KERNEL);
+	newmask = kzalloc(sizeof(*newmask), GFP_KERNEL_ACCOUNT);
 	if (!newmask)
 		return ERR_PTR(-ENOMEM);
 
@@ -2224,7 +2229,7 @@ static int fl_change(struct net *net, struct sk_buff *in_skb,
 		goto errout_tb;
 	}
 
-	fnew = kzalloc(sizeof(*fnew), GFP_KERNEL);
+	fnew = kzalloc(sizeof(*fnew), GFP_KERNEL_ACCOUNT);
 	if (!fnew) {
 		err = -ENOBUFS;
 		goto errout_tb;
@@ -2267,6 +2272,8 @@ static int fl_change(struct net *net, struct sk_buff *in_skb,
 
 	if (!tc_in_hw(fnew->flags))
 		fnew->flags |= TCA_CLS_FLAGS_NOT_IN_HW;
+
+	tcf_proto_update_usesw(tp, fnew->flags);
 
 	spin_lock(&tp->lock);
 
@@ -2622,6 +2629,28 @@ static void fl_tmplt_destroy(void *tmplt_priv)
 
 	fl_hw_destroy_tmplt(tmplt->chain, tmplt);
 	kfree(tmplt);
+}
+
+static void fl_tmplt_reoffload(struct tcf_chain *chain, bool add,
+			       flow_setup_cb_t *cb, void *cb_priv)
+{
+	struct fl_flow_tmplt *tmplt = chain->tmplt_priv;
+	struct flow_cls_offload cls_flower = {};
+
+	cls_flower.rule = flow_rule_alloc(0);
+	if (!cls_flower.rule)
+		return;
+
+	cls_flower.common.chain_index = chain->index;
+	cls_flower.command = add ? FLOW_CLS_TMPLT_CREATE :
+				   FLOW_CLS_TMPLT_DESTROY;
+	cls_flower.cookie = (unsigned long) tmplt;
+	cls_flower.rule->match.dissector = &tmplt->dissector;
+	cls_flower.rule->match.mask = &tmplt->mask;
+	cls_flower.rule->match.key = &tmplt->dummy_key;
+
+	cb(TC_SETUP_CLSFLOWER, &cls_flower, cb_priv);
+	kfree(cls_flower.rule);
 }
 
 static int fl_dump_key_val(struct sk_buff *skb,
@@ -3486,6 +3515,7 @@ static struct tcf_proto_ops cls_fl_ops __read_mostly = {
 	.bind_class	= fl_bind_class,
 	.tmplt_create	= fl_tmplt_create,
 	.tmplt_destroy	= fl_tmplt_destroy,
+	.tmplt_reoffload = fl_tmplt_reoffload,
 	.tmplt_dump	= fl_tmplt_dump,
 	.owner		= THIS_MODULE,
 	.flags		= TCF_PROTO_OPS_DOIT_UNLOCKED,
